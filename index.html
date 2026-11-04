@@ -371,9 +371,6 @@ async function run(){
     $('rows').innerHTML=`<tr><td colspan="29" class="bad">Could not complete scan: ${e.message}. Check Binance public API access and your network, then the click SCAN MARKETS NOW to retry.</td></tr>`;
   }finally{scanBusy=false}
 }
-initSettings();
-$('settingsPreset').addEventListener('change',e=>{if(e.target.value==='custom'){$('settingsStatus').textContent='Custom filters · edit any value';saveSettings()}else applyPreset(e.target.value)});
-['minVol','minScore','maxResults'].forEach(id=>{ $(id).addEventListener('input',customSettingChanged); $(id).addEventListener('change',customSettingChanged); });
 $('historyDate').value=new Date().toISOString().slice(0,10);renderTradeHistory();['historyPeriod','historyDate','historyFrom','historyTo'].forEach(id=>$(id).addEventListener('change',renderTradeHistory));$('downloadHistory').addEventListener('click',downloadHistory);
 if('Notification' in window&&Notification.permission==='granted'){$('notifyStatus').textContent='Notifications permitted';$('notify').textContent='Notifications enabled';}
 $('tf').addEventListener('change',()=>{$('status').textContent='Timeframe updated. Click SCAN MARKETS NOW to refresh results.'});
