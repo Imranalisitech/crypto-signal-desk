@@ -265,7 +265,8 @@ function tradeMatrix(side,trend,location,trigger,rv,mom,cvd,oi,funding){
 }
 function riskPlanPerp(side,entry,extreme,atr,regime,target,stopMode='atr'){
  let stopDist=stopMode==='cascade'?Math.max(Math.abs(entry-extreme)+atr*.35,atr*1.1):stopMode==='box'?Math.min(Math.abs(entry-extreme),atr*1.4):stopMode==='fade'?atr:atr*1.2;
- const bandFloor=regime.name==='NORMAL'?entry*.0025:regime.name==='ELEVATED'?entry*.00425:regime.name==='SHOCK'?entry*.0055:0;stopDist=Math.max(stopDist,bandFloor);\n const stop=side==='LONG'?entry-stopDist:entry+stopDist,dist=Math.abs(entry-stop),reward=Math.abs(target-entry),rr=dist?reward/dist:0;
+ const bandFloor=regime.name==='NORMAL'?entry*.0025:regime.name==='ELEVATED'?entry*.00425:regime.name==='SHOCK'?entry*.0055:0;stopDist=Math.max(stopDist,bandFloor);
+ const stop=side==='LONG'?entry-stopDist:entry+stopDist,dist=Math.abs(entry-stop),reward=Math.abs(target-entry),rr=dist?reward/dist:0;
  return{entry,stop,tp1:side==='LONG'?entry+dist:entry-dist,tp2:target,tp3:null,rr,atr,stopPct:dist/entry,stopDistance:dist,regime:regime.name,sizeFactor:regime.name==='NORMAL'?1:regime.name==='ELEVATED'?.5:regime.name==='SHOCK'?.5:0,stopMode};
 }
 function fundingIsExtreme(ctx,side){if(!Number.isFinite(ctx.funding))return false;const hist=ctx.fundingHistory||[],sorted=hist.map(x=>x.rate).filter(Number.isFinite).sort((a,b)=>a-b);if(sorted.length<10)return Math.abs(ctx.funding)>=.0005;const p=sorted.filter(x=>x<=ctx.funding).length/sorted.length;return side==='LONG'?p>=.9:p<=.1}
