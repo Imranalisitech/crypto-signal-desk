@@ -272,6 +272,11 @@ function findSweepSetup(bars,level,kind){
     if(!reclaimed)continue;
     const confirmed=kind==='HIGH' ? confirm.c>confirm.o&&confirm.c>level : confirm.c<confirm.o&&confirm.c<level;
     if(!confirmed)continue;
+    const confirmRange=Math.max(confirm.h-confirm.l,1e-12),bodyRatio=Math.abs(confirm.c-confirm.o)/confirmRange;
+    const structure=recent.slice(Math.max(0,j-3),j);
+    const marketStructureShift=structure.length>=2&&(kind==='HIGH'?confirm.c>Math.max(...structure.map(x=>x.h)):confirm.c<Math.min(...structure.map(x=>x.l)));
+    const displacementClose=kind==='HIGH'?(confirm.h-confirm.c)/confirmRange<=.30:(confirm.c-confirm.l)/confirmRange<=.30;
+    if(bodyRatio<.45||!marketStructureShift||!displacementClose)continue;
     const prior=bars.filter(x=>x.t<sweep.t).slice(-30);
     const breakout=prior.find(x=>kind==='HIGH'?x.c>level:x.c<level);
     if(!breakout)continue;
