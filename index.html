@@ -333,17 +333,8 @@ async function run(){
   try{
     /* Level-only strategy: no sentiment or indicator filters. */
     let universe=await pickUniverse();
-    let tf=$('tf').value,btcC=[],ethC=[],btcRegime={};
-    try{
-      const [b5,b15,b1,b4,bSignal,eSignal]=await Promise.all(['5m','15m','1h','4h',tf].map(f=>candles('BTCUSDT',f,100).catch(()=>[])).concat([candles('ETHUSDT',tf,100).catch(()=>[])]));
-      btcRegime={fiveMinute:b5.length?trend(b5):'MIXED',fifteenMinute:b15.length?trend(b15):'MIXED',oneHour:b1.length?trend(b1):'MIXED',fourHour:b4.length?trend(b4):'MIXED'};
-      btcC=bSignal.map(x=>x.c);ethC=eSignal.map(x=>x.c);
-      const tfBaseAtr={'1m':0.35,'3m':0.55,'5m':0.75,'15m':1.15,'1h':2.2,'4h':4.5}[$('tf').value]||0.75;
-      const btcAtrPct=bSignal.length?atr(bSignal)/bSignal.at(-1).c*100:tfBaseAtr;
-      cfg.adaptiveAtrMax=clamp(btcAtrPct*1.7,tfBaseAtr*0.8,tfBaseAtr*2.4);
-      $('adaptiveFilters').textContent=`AUTOMATIC FILTERS · max spread varies by coin liquidity · ATR ceiling ${cfg.adaptiveAtrMax.toFixed(2)}% (${ $('tf').value } BTC volatility)`;
-    }catch{cfg.adaptiveAtrMax=({'1m':0.35,'3m':0.55,'5m':0.75,'15m':1.15,'1h':2.2,'4h':4.5}[$('tf').value]||0.75)*1.4; $('adaptiveFilters').textContent=`AUTOMATIC FILTERS · spread by liquidity · ATR fallback ${cfg.adaptiveAtrMax.toFixed(2)}%`;}
-    let btcRet=returns(btcC),ethRet=returns(ethC),results=[];
+    let tf=$('tf').value,btcRet=[],ethRet=[],btcRegime={};
+    let results=[];
     const batchSize=8;
     for(let i=0;i<universe.length;i+=batchSize){
       let batch=universe.slice(i,i+batchSize);
