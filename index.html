@@ -129,20 +129,20 @@ footer{text-align:center;color:#8095b7}
 <header><div><h1>Crypto Signal Desk <span class="blue">ULTIMATE</span></h1><p>5M SCALPING · VOLATILITY REGIME → EXECUTION COST → CONFLUENCE</p></div><div class="small">BYBIT USDT PERPETUALS · FUNDING + OI + VOLUME + PUBLIC TRADE FLOW · NO API KEY</div></header>
 <main>
 <div class="toolbar">
-<span class="tag">5M SETUPS: SWEEP & RECLAIM · VWAP FADE · RANGE EXPANSION</span>
+<span class="tag">PERP SCALPING: CASCADE SWEEP · FUNDING SQUEEZE · OI BREAKOUT · VWAP FADE</span>
 <span class="tag">FULL BYBIT USDT PERPETUAL MARKET</span><span class="tag" id="intervalTag">MANUAL SCAN MODE</span><button id="scanNow">SCAN MARKETS NOW</button>
 <button id="notify" class="secondary">Enable desktop trade alerts</button><button id="downloadSource" class="secondary">Download Source</button><span id="notifyStatus" class="small">Notifications off</span><span id="status">Connecting…</span>
 </div>
 <div class="toolbar settings">
   <label>Minimum 24h volume (USDT M)<br><input id="minVol" type="number" min="0" max="10000" step="0.5" value="5" style="width:105px"></label>
   <label>Displayed coins<br><select id="maxResults"><option>10</option><option selected>25</option><option>35</option><option>50</option></select></label>
-  <span class="tag">ATR REGIME · 15M VWAP / EMA50 · 5M CVD / OI / RVOL · 8/10 TO TRADE</span>
+  <span class="tag">PERP ATR(14) · 12-POINT MATRIX · FUNDING / BASIS / OI · MARK-PRICE RISK</span>
 </div>
 <div class="stats" id="marketAnalysis">
 <div class="stat"><small>Markets analysed</small><strong id="marketCount">—</strong></div><div class="stat"><small>LONG setups</small><strong class="good" id="longs">—</strong></div><div class="stat"><small>SHORT setups</small><strong class="bad" id="shorts">—</strong></div><div class="stat"><small>Waiting level events</small><strong id="waits">—</strong></div>
 </div>
 <section class="panel" id="waitingPanel">
-<div class="section"><h2>Market Setups — Waiting &amp; Confirmed</h2><div class="filters"><span class="tag">Three setup types · 15m regime · 5m closed-candle trigger</span><span class="tag">5-minute closed-candle confirmation</span><span class="tag">No trade if dead ATR, spread ≥ 0.03%, cost drag is excessive, or score below 8/10</span></div></div>
+<div class="section"><h2>Market Setups — Waiting &amp; Confirmed</h2><div class="filters"><span class="tag">Four perp setups · 12-point scoring · mark-price ATR</span><span class="tag">5m close · funding/basis/OI checks</span><span class="tag">No trade if dead/shock regime, spread ≥ 0.03%, funding veto, or score below 9/12</span></div></div>
 <div class="tablewrap"><table><thead><tr><th>SYMBOL</th><th>PRICE</th><th>KEY LEVEL</th><th>LEVEL PRICE</th><th>5M CONFIRM TIME</th><th>STATUS</th><th>ENTRY</th><th>STOP</th><th>TARGET</th><th>R:R</th><th>CONFLUENCE</th></tr></thead><tbody id="rows"><tr><td colspan="7" class="muted">Loading market data…</td></tr></tbody></table></div>
 
 </section>
@@ -243,48 +243,120 @@ function cmf(b,n=20){let num=0,den=0;for(const x of b.slice(-n)){let r=x.h-x.l;i
 function obvSlope(b){if(b.length<5)return 0;let o=0,vals=[];for(let i=1;i<b.length;i++){o+=b[i].c>b[i-1].c?b[i].v:b[i].c<b[i-1].c?-b[i].v:0;vals.push(o)}return vals.length>3?(vals.at(-1)-vals.at(-4))/(mean(b.slice(-3).map(x=>x.v))*3||1):0}
 function bbWidth(b,n=20){const widths=[];for(let i=n-1;i<b.length;i++){const a=b.slice(i-n+1,i+1).map(x=>x.c),m=mean(a),sd=Math.sqrt(mean(a.map(x=>(x-m)*(x-m))));widths.push(m?4*sd/m:0)}return widths}
 function vwapBands(b){const day=b.at(-1).t-(b.at(-1).t%86400000),ss=b.filter(x=>x.t>=day);const v=ss.reduce((a,x)=>a+x.v,0)||1,wap=ss.reduce((a,x)=>a+((x.h+x.l+x.c)/3)*x.v,0)/v;const variance=ss.reduce((a,x)=>a+Math.pow((x.h+x.l+x.c)/3-wap,2)*x.v,0)/v;return{vwap:wap,sigma:Math.sqrt(variance),slope:ss.length>2?wap-((ss.slice(0,-2).reduce((a,x)=>a+((x.h+x.l+x.c)/3)*x.v,0))/(ss.slice(0,-2).reduce((a,x)=>a+x.v,0)||1)):0}}
-function regimeOf(b){const a=atrSeries(b),last=b.at(-1),atr=a.at(-1),pct=atr/last.c;return{atr,pct,name:pct<.0009?'DEAD':pct<=.002?'NORMAL':pct<=.0035?'ELEVATED':'SHOCK'}}
-function tradeFlow(trades){const buckets=new Map();for(const t of trades){const tm=+t.time||+t.execTime||0,k=Math.floor(tm/60000);if(!k)continue;const val=(+t.price||0)*(+t.size||0),d=t.side==='Buy'?val:-val;buckets.set(k,(buckets.get(k)||0)+d)}const vals=[...buckets.entries()].sort((a,b)=>a[0]-b[0]).map(x=>x[1]);return{values:vals,delta:vals.reduce((a,x)=>a+x,0),slope:vals.slice(-5).reduce((a,x)=>a+x,0)}}
-const derivativesContextCache=new Map();
-async function getDerivativesContext(sym){
- if(derivativesContextCache.has(sym))return derivativesContextCache.get(sym);
- const task=(async()=>{const [oiR,perpR,spotR]=await Promise.all([
-  get(API+'/v5/market/open-interest?category=linear&symbol='+sym+'&intervalTime=5min&limit=4').catch(()=>null),
-  get(API+'/v5/market/recent-trade?category=linear&symbol='+sym+'&limit=100').catch(()=>null),
-  get(API+'/v5/market/recent-trade?category=spot&symbol='+sym+'&limit=100').catch(()=>null)
- ]);
- const oi=(oiR?.result?.list||[]).slice().sort((a,b)=>(+a.timestamp)-(+b.timestamp)).map(x=>+x.openInterest).filter(Number.isFinite);
- const pt=perpR?.result?.list||[],st=spotR?.result?.list||[],pf=tradeFlow(pt),sf=tradeFlow(st),total=pt.reduce((a,t)=>a+(+t.price||0)*(+t.size||0),0),buy=pt.filter(t=>t.side==='Buy').reduce((a,t)=>a+(+t.price||0)*(+t.size||0),0);
- return{oiChange:oi.length>=2&&oi.at(-2)>0?(oi.at(-1)-oi.at(-2))/oi.at(-2):null,oiSeries:oi,perpCvd:pf,spotCvd:sf,takerRatio:total?buy/total:null,tradeCount:pt.length,spotCount:st.length};
- })();derivativesContextCache.set(sym,task);return task;
+function regimeOf(b,markBars){
+ const src=markBars?.length?markBars:b,ar=atrSeries(src,14),last=src.at(-1),atr=ar.at(-1),pct=atr/last.c;
+ const ranges=src.slice(-500).map(x=>(x.h-x.l)/x.c).filter(Number.isFinite).sort((x,y)=>x-y);
+ const med=ranges.length? ranges[Math.floor(ranges.length*.5)]:0,p99=ranges.length?ranges[Math.min(ranges.length-1,Math.floor(ranges.length*.99))]:0;
+ const wickRatio=med?p99/med:null;
+ let name=pct<.0009?'DEAD':pct<=.0022?'NORMAL':pct<=.004?'ELEVATED':'SHOCK';
+ return{atr,pct,name,wickRatio,medianRange:med,p99Range:p99,source:markBars?.length?'MARK':'LAST'};
 }
-function riskPlan(side,entry,extreme,atr,regime,target,kind){const minStop=atr,buffer=atr*.30;let stop=side==='LONG'?Math.min(extreme-buffer,entry-minStop):Math.max(extreme+buffer,entry+minStop);const dist=Math.abs(entry-stop),rr=dist?Math.abs(target-entry)/dist:0;return{entry,stop,tp1:target,tp2:side==='LONG'?entry+dist*1.8:entry-dist*1.8,tp3:null,rr,atr,stopPct:dist/entry,regime:regime.name,sizeFactor:regime.name==='ELEVATED'||regime.name==='SHOCK'?.5:1}}
-function scoreMatrix(side,loc,trigger,rv,flow,trend,mom){let score=0,parts=[];const add=(name,ok,pts)=>{if(ok)score+=pts;parts.push({name,ok,pts})};add('15m trend + VWAP slope',trend,2);add('VWAP band / 20-bar extreme / sweep location',loc,2);add('Closed 5m trigger',trigger,2);add('5m relative volume ≥ 1.5×',rv>=1.5,1);add('MACD + RSI momentum',mom,1);add('CVD / money-flow alignment',flow,2);return{score,parts,grade:score>=8?'A · TRADE SETUP':score>=6?'B · WATCHLIST':'NO TRADE'}}
-function findSweep(b,side){if(b.length<23)return null;const x=b.at(-1),prior=b.slice(-21,-1),lo=Math.min(...prior.map(q=>q.l)),hi=Math.max(...prior.map(q=>q.h));if(side==='LONG'&&x.l<lo&&x.c>lo)return{extreme:x.l,level:lo,bar:x};if(side==='SHORT'&&x.h>hi&&x.c<hi)return{extreme:x.h,level:hi,bar:x};return null}
-function setupForMarket(mkt,five,fifteen,daily,ctx){
- const last=five.at(-1),price=mkt.last||last.c,reg=regimeOf(five),a=atrSeries(five),atr=a.at(-1),atrPct=reg.pct;
- const avgVol=mean(five.slice(-21,-1).map(x=>x.v))||1,rv=last.v/avgVol,close=fifteen.at(-1).c,ema50=ema(fifteen.map(x=>x.c),50).at(-1),vw=vwapBands(fifteen),adx15=adx(fifteen),trendLong=close>ema50&&close>vw.vwap&&vw.slope>0&&adx15>20,trendShort=close<ema50&&close<vw.vwap&&vw.slope<0&&adx15>20,balanced=adx(five)<20&&Math.abs(price-vw.vwap)<3*atr;
- const closes=five.map(x=>x.c),hist=macdHist(closes),r=rsi(closes),mf=moneyFlow(five),cm=cmf(five),ob=obvSlope(five);
- const perp=ctx.perpCvd,spot=ctx.spotCvd,cvdLong=perp.slope>0&&perp.delta>0,cvdShort=perp.slope<0&&perp.delta<0,spotLedLong=cvdLong&&spot.slope>0,spotLedShort=cvdShort&&spot.slope<0;
- const candidates=[];
- const emit=(side,name,location,trigger,flow,trend,extreme,target,extra)=>{const fade=name.includes('VWAP');const mom=fade?(side==='LONG'?hist.at(-1)>hist.at(-2)&&r<30:hist.at(-1)<hist.at(-2)&&r>70):(side==='LONG'?hist.at(-1)>hist.at(-2)&&r>=50&&r<=70:hist.at(-1)<hist.at(-2)&&r>=30&&r<=50);const matrix=scoreMatrix(side,location,trigger,rv,flow,trend,mom);if(matrix.score<6)return;const plan=riskPlan(side,price,extreme,atr,reg,target);if(plan.rr<(name.includes('VWAP')?1.2:1.5)||plan.stopPct<.0001)return;candidates.push({sym:mkt.symbol,price,side,setup:name,status:matrix.score>=8?'CONFIRMED':'WATCHLIST',levelType:name,level:extra?.level??null,confirmationTime:last.t,breakoutTime:last.t,sweepTime:extra?.sweepTime??null,plan,score:matrix.score,grade:matrix.grade,parts:matrix.parts,regime:reg.name,sizeFactor:plan.sizeFactor,regimePct:atrPct,atrPct,rv,adx:adx15,rsi:r,macd:hist.at(-1),mfi:mf,cmf:cm,obv:ob,cvd:perp.delta,spotCvd:spot.delta,oiChange:ctx.oiChange,funding:mkt.funding,spread:mkt.spread,quoteVolume:mkt.quoteVolume,targetType:extra?.targetType||'R multiple',flowLabel:flow?'FLOW ALIGNED':'FLOW NOT ALIGNED',execution:name.includes('VWAP')?'MAKER LIMIT ONLY':'LIMIT PREFERRED · VERIFY FEES'});};
- if(reg.name==='DEAD'||mkt.spread===null||mkt.spread>=.0003)return candidates;
- const todayBars=five.filter(x=>x.t>=five.at(-1).t-(five.at(-1).t%86400000));const dayRange=todayBars.length?(Math.max(...todayBars.map(x=>x.h))-Math.min(...todayBars.map(x=>x.l))):null;
- const avgDay=daily.length>=20?mean(daily.slice(-20).map(x=>x.h-x.l)):null;
- const rangeDone=dayRange&&avgDay?dayRange/avgDay:null;
- const widths=bbWidth(five,20),widthNow=widths.at(-1)||0,widthSorted=widths.slice(-100).slice().sort((x,y)=>x-y),widthRank=widthSorted.length?widthSorted.filter(x=>x<=widthNow).length/widthSorted.length:1;const prev20=five.slice(-21,-1),priorLow=prev20.length?Math.min(...prev20.map(x=>x.l)):0,priorHigh=prev20.length?Math.max(...prev20.map(x=>x.h)):0;
- // A: swept 20-bar extreme, 5m reclaim, flow absorption, RVOL gate, OI flat/falling.
- for(const side of ['LONG','SHORT']){const sw=findSweep(five,side);if(sw&&rv>=1.5&&reg.name!=='SHOCK'||sw&&rv>=1.5&&reg.name==='SHOCK'){const flow=side==='LONG'?(perp.slope>0&&spot.slope>=0&&mf>45&&ob>-1):(perp.slope<0&&spot.slope<=0&&mf<55&&ob<1);const oiOk=ctx.oiChange===null||ctx.oiChange<=.005;const trend=side==='LONG'?trendLong:trendShort;const target=side==='LONG'?price+atr*2.4:price-atr*2.4;if(flow&&oiOk&&trend&&(reg.name==='NORMAL'||reg.name==='ELEVATED'||reg.name==='SHOCK'))emit(side,'A · SWEEP & RECLAIM',true,true,flow,trend,sw.extreme,target,{level:sw.level,sweepTime:sw.bar.t,targetType:'1.8R model'});}}
- // B: mean-reversion only in balanced conditions, ±2σ session VWAP stretch, flow exhaustion/divergence.
- const bands=vwapBands(five),upper=bands.vwap+2*bands.sigma,lower=bands.vwap-2*bands.sigma;const fundingOk=!Number.isFinite(mkt.funding)||Math.abs(mkt.funding)<.0008;const balancedMode=adx(five)<20&&Math.abs(vw.slope)<atr*.15&&rangeDone!==null&&rangeDone>.7;
- if(balanced&&balancedMode&&fundingOk&&reg.name!=='SHOCK'){if(price<=lower&&r<30&&perp.slope>=0&&mf<25)emit('LONG','B · VWAP BAND FADE',true,true,true,true,Math.min(...five.slice(-5).map(x=>x.l)),bands.vwap,{level:lower,targetType:'Session VWAP'});if(price>=upper&&r>70&&perp.slope<=0&&mf>75)emit('SHORT','B · VWAP BAND FADE',true,true,true,true,Math.max(...five.slice(-5).map(x=>x.h)),bands.vwap,{level:upper,targetType:'Session VWAP'});}
- // C: volatility compression, BB width bottom quintile proxy, box break, RVOL/CVD/OI expansion.
- const atr20=mean(a.slice(-20)),box=five.slice(-12,-1),boxHi=Math.max(...box.map(x=>x.h)),boxLo=Math.min(...box.map(x=>x.l)),compressed=atr20>0&&atr<=atr20*.60&&widthRank<=.20;
- if(compressed&&rv>=2&&ctx.oiChange!==null&&ctx.oiChange>0&&reg.name!=='SHOCK'){if(last.c>boxHi&&cvdLong)emit('LONG','C · RANGE EXPANSION',true,true,true,trendLong,boxLo,last.c+atr*2.5,{level:boxHi,targetType:'2.5R expansion'});if(last.c<boxLo&&cvdShort)emit('SHORT','C · RANGE EXPANSION',true,true,true,trendShort,boxHi,last.c-atr*2.5,{level:boxLo,targetType:'2.5R expansion'});}
+function tradeFlow(trades){
+ const buckets=new Map();for(const t of trades){const tm=+t.time||+t.execTime||0,k=Math.floor(tm/60000);if(!k)continue;const val=(+t.price||0)*(+t.size||0),d=t.side==='Buy'?val:-val;buckets.set(k,(buckets.get(k)||0)+d)}
+ const vals=[...buckets.entries()].sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
+ return{values:vals,delta:vals.reduce((a,x)=>a+x,0),slope:vals.slice(-5).reduce((a,x)=>a+x,0),last3:vals.slice(-3).reduce((a,x)=>a+x,0)};
+}
+function bbWidth(b,n=20){const widths=[];for(let i=n-1;i<b.length;i++){const a=b.slice(i-n+1,i+1).map(x=>x.c),m=mean(a),sd=Math.sqrt(mean(a.map(x=>(x-m)*(x-m))));widths.push(m?4*sd/m:0)}return widths}
+function vwapBands(b){const day=b.at(-1).t-(b.at(-1).t%86400000),ss=b.filter(x=>x.t>=day),v=ss.reduce((a,x)=>a+x.v,0)||1,wap=ss.reduce((a,x)=>a+((x.h+x.l+x.c)/3)*x.v,0)/v,variance=ss.reduce((a,x)=>a+Math.pow((x.h+x.l+x.c)/3-wap,2)*x.v,0)/v;return{vwap:wap,sigma:Math.sqrt(variance),slope:wap-((ss.slice(0,-2).reduce((a,x)=>a+((x.h+x.l+x.c)/3)*x.v,0))/(ss.slice(0,-2).reduce((a,x)=>a+x.v,0)||1))}}
+function tradeMatrix(side,trend,location,trigger,rv,mom,cvd,oi,funding){
+ const parts=[],add=(name,ok,pts)=>{parts.push({name,ok,pts});return ok?pts:0};
+ let score=0;score+=add('15m trend + VWAP slope',trend,2);score+=add('Location: VWAP band / 20-bar extreme / range edge',location,2);score+=add('Completed 5m close trigger',trigger,2);score+=add('5m RVOL ≥ 1.5',rv>=1.5,1);score+=add('MACD histogram + RSI alignment',mom,1);score+=add('CVD slope agrees; no divergence',cvd,2);score+=add('OI direction matches setup thesis',oi,1);score+=add('Funding/basis acceptable',funding,1);
+ return{score,parts,tier:score>=11?'FULL SIZE':score>=9?'HALF SIZE':score>=7?'WATCHLIST':'NO TRADE',grade:score>=11?'A':score>=9?'B':score>=7?'C':'D'};
+}
+function riskPlanPerp(side,entry,extreme,atr,regime,target,stopMode='atr'){
+ let stopDist=stopMode==='cascade'?Math.max(Math.abs(entry-extreme)+atr*.35,atr*1.1):stopMode==='box'?Math.min(Math.abs(entry-extreme),atr*1.4):stopMode==='fade'?atr:atr*1.2;
+ const stop=side==='LONG'?entry-stopDist:entry+stopDist,dist=Math.abs(entry-stop),reward=Math.abs(target-entry),rr=dist?reward/dist:0;
+ return{entry,stop,tp1:side==='LONG'?entry+dist:entry-dist,tp2:target,tp3:null,rr,atr,stopPct:dist/entry,stopDistance:dist,regime:regime.name,sizeFactor:regime.name==='NORMAL'?1:regime.name==='ELEVATED'?.5:regime.name==='SHOCK'?.5:0,stopMode};
+}
+function fundingIsExtreme(ctx,side){if(!Number.isFinite(ctx.funding))return false;const hist=ctx.fundingHistory||[],sorted=hist.map(x=>x.rate).filter(Number.isFinite).sort((a,b)=>a-b);if(sorted.length<10)return Math.abs(ctx.funding)>=.0005;const p=sorted.filter(x=>x<=ctx.funding).length/sorted.length;return side==='LONG'?p>=.9:p<=.1}
+function findSweepRecent(b,side){if(b.length<24)return null;for(let i=b.length-1;i>=Math.max(21,b.length-3);i--){const x=b[i],prior=b.slice(i-20,i),lo=Math.min(...prior.map(q=>q.l)),hi=Math.max(...prior.map(q=>q.h));if(side==='LONG'&&x.l<lo&&x.c>lo)return{extreme:x.l,level:lo,bar:x,index:i};if(side==='SHORT'&&x.h>hi&&x.c<hi)return{extreme:x.h,level:hi,bar:x,index:i}}return null}
+function setupForMarket(mkt,five,fifteen,daily,ctx,markBars){
+ const last=five.at(-1),markLast=markBars?.at(-1)?.c||mkt.mark||mkt.last,price=markLast,reg=regimeOf(five,markBars),a=atrSeries(markBars?.length?markBars:five),atr=a.at(-1),atrPct=atr/price;
+ const avgVol=mean(five.slice(-21,-1).map(x=>x.v))||1,rv=last.v/avgVol,closes=fifteen.map(x=>x.c),hist=macdHist(five.map(x=>x.c)),r=rsi(five.map(x=>x.c)),mf=moneyFlow(five),cm=cmf(five),ob=obvSlope(five);
+ const ema50=ema(closes,50).at(-1),vw=vwapBands(fifteen),adx15=adx(fifteen),trendLong=fifteen.at(-1).c>ema50&&fifteen.at(-1).c>vw.vwap&&vw.slope>0&&adx15>20,trendShort=fifteen.at(-1).c<ema50&&fifteen.at(-1).c<vw.vwap&&vw.slope<0&&adx15>20;
+ const perp=ctx.perpCvd||{slope:0,delta:0},spot=ctx.spotCvd||{slope:0,delta:0},cvdLong=perp.slope>0&&perp.last3>0,cvdShort=perp.slope<0&&perp.last3<0;
+ const basis=Number.isFinite(mkt.mark)&&Number.isFinite(mkt.index)&&mkt.index>0?(mkt.mark-mkt.index)/mkt.index:null,funding=mkt.funding,oi=ctx.oiChange,oiHigh=ctx.oiAt30dHigh===true;
+ const fundingAgainst=(side)=>fundingIsExtreme(ctx,side),basisOk=basis===null||Math.abs(basis)<.002;
+ const fundingOk=(side)=>!fundingAgainst(side)&&basisOk;
+ const widths=bbWidth(five,20),widthNow=widths.at(-1)||0,widthSorted=widths.slice(-100).slice().sort((x,y)=>x-y),widthRank=widthSorted.length?widthSorted.filter(x=>x<=widthNow).length/widthSorted.length:1;
+ const atr20=mean(a.slice(-20)),box=five.slice(-13,-1),boxHi=Math.max(...box.map(x=>x.h)),boxLo=Math.min(...box.map(x=>x.l)),compressed=atr20>0&&atr<=atr20*.60&&widthRank<=.20;
+ const candidates=[],now=Date.now(),nextFunding=Number(mkt.nextFundingTime)||0,msToFunding=nextFunding?nextFunding-now:null;
+ const fundingStampNear=msToFunding!==null&&msToFunding>=0&&msToFunding<=5*60000;
+ const emit=(side,setup,score,extreme,target,stopMode,meta={})=>{
+   if(score.score<7)return;
+   const plan=riskPlanPerp(side,price,extreme,atr,reg,target,stopMode);
+   const minRR=setup.startsWith('D')?1:1;
+   if(plan.rr<minRR||!plan.stopPct||fundingStampNear)return;
+   const full=score.score>=11,half=score.score>=9;
+   const sizeFactor=reg.name==='NORMAL'?(full?1:half?.5:0):reg.name==='ELEVATED'?.5:reg.name==='SHOCK'?.5:0;
+   plan.sizeFactor=sizeFactor;plan.tp1=side==='LONG'?price+plan.stopDistance:price-plan.stopDistance;plan.tp2=target;plan.tp3=meta.tp3??null;
+   candidates.push({sym:mkt.symbol,price,markPrice:mkt.mark,indexPrice:mkt.index,side,setup,status:score.score>=9?'CONFIRMED':'WATCHLIST',levelType:setup,level:meta.level??null,confirmationTime:last.t,breakoutTime:last.t,sweepTime:meta.sweepTime??null,plan,score:score.score,scoreMax:12,grade:score.tier,parts:score.parts,regime:reg.name,atrPct,wickRatio:reg.wickRatio,rv,adx:adx15,rsi:r,macd:hist.at(-1),mfi:mf,cmf:cm,obv:ob,cvd:perp.delta,spotCvd:spot.delta,oiChange:oi,funding,basis,spread:mkt.spread,quoteVolume:mkt.quoteVolume,liquidationProxy:meta.liquidationProxy||false,execution:setup.startsWith('D')?'MAKER ONLY — skip if taker':'LIMIT PREFERRED',riskTier:full?'FULL':half?'HALF':'WATCHLIST',fundingStampNear});
+ };
+ if(reg.name==='DEAD'||(reg.name==='SHOCK'&&true)||mkt.spread===null||mkt.spread>=.0003||!basisOk)return candidates;
+ const prior20=five.slice(-21,-1),priorLow=Math.min(...prior20.map(x=>x.l)),priorHigh=Math.max(...prior20.map(x=>x.h));
+ // A — Cascade Sweep & Reclaim: liquidation print OR RVOL>=2 with OI falling 1.5–3%; reclaim and CVD absorption.
+ for(const side of ['LONG','SHORT']){
+  const sw=findSweepRecent(five,side);if(!sw)continue;
+  const forcedOi=Number.isFinite(oi)&&oi<=-.015&&oi>=-.03,liquidationEvidence=ctx.liquidationDetected===true,volumeEvidence=rv>=2&&(forcedOi||liquidationEvidence);
+  const absorption=side==='LONG'?perp.slope>0&&perp.last3>0:perp.slope<0&&perp.last3<0;
+  const oiScore=forcedOi||liquidationEvidence;
+  const trend=side==='LONG'?trendLong:trendShort,flow=absorption&&(side==='LONG'?mf>=45:mf<=55);
+  if(volumeEvidence&&absorption&&fundingOk(side)&&trend){
+   const score=tradeMatrix(side,trend,true,last.c>priorLow&&last.c<priorHigh,rv,side==='LONG'?hist.at(-1)>hist.at(-2)&&r>=50&&r<=70:hist.at(-1)<hist.at(-2)&&r>=30&&r<=50,flow,oiScore,true);
+   const target=side==='LONG'?price+atr*2.0:price-atr*2.0;
+   emit(side,'A · CASCADE SWEEP & RECLAIM',score,sw.extreme,target,'cascade',{level:sw.level,sweepTime:sw.bar.t,liquidationProxy:!liquidationEvidence});
+  }
+ }
+ // B — Funding squeeze reversal: crowded funding + OI high + stall/loss of VWAP + completed 5m swing break.
+ const swingLow=Math.min(...five.slice(-7,-1).map(x=>x.l)),swingHigh=Math.max(...five.slice(-7,-1).map(x=>x.h));
+ for(const side of ['LONG','SHORT']){
+  const crowd=fundingAgainst(side)&&oiHigh,stall=side==='SHORT'?(price<swingLow||price<vw.vwap):(price>swingHigh||price>vw.vwap);
+  const ratioExtreme=side==='SHORT'?ctx.longShortRatio>=1.8:ctx.longShortRatio>0&&ctx.longShortRatio<=.55;
+  const trigger=side==='SHORT'?last.c<swingLow:last.c>swingHigh;
+  const flow=side==='SHORT'?cvdShort:cvdLong,trend=side==='SHORT'?trendShort:trendLong;
+  if(crowd&&stall&&ratioExtreme&&trigger&&flow){
+   const score=tradeMatrix(side,trend,true,true,rv,side==='LONG'?hist.at(-1)>hist.at(-2):hist.at(-1)<hist.at(-2),flow,true,true);
+   const target=side==='LONG'?price+atr*2:price-atr*2;
+   emit(side,'B · FUNDING SQUEEZE REVERSAL',score,side==='LONG'?swingLow:swingHigh,target,'atr',{level:side==='LONG'?swingHigh:swingLow});
+  }
+ }
+ // C — Compression breakout: BB width lowest quintile, ATR contraction, RVOL>=2, OI +1%, CVD and basis/funding gates.
+ if(compressed&&rv>=2&&Number.isFinite(oi)&&oi>=.01&&reg.name!=='SHOCK'){
+  if(last.c>boxHi&&cvdLong&&fundingOk('LONG')){const score=tradeMatrix('LONG',trendLong,true,true,rv,hist.at(-1)>hist.at(-2)&&r>=50,cvdLong,true,true);emit('LONG','C · COMPRESSION BREAKOUT',score,boxLo,price+atr*3,'box',{level:boxHi});}
+  if(last.c<boxLo&&cvdShort&&fundingOk('SHORT')){const score=tradeMatrix('SHORT',trendShort,true,true,rv,hist.at(-1)<hist.at(-2)&&r<=50,cvdShort,true,true);emit('SHORT','C · COMPRESSION BREAKOUT',score,boxHi,price-atr*3,'box',{level:boxLo});}
+ }
+ // D — Conditional VWAP fade: neutral funding, ADX<20, ±2σ, extreme RSI and exhausting CVD; maker only.
+ const band=vwapBands(five),upper=band.vwap+2*band.sigma,lower=band.vwap-2*band.sigma,neutralFunding=Number.isFinite(funding)&&Math.abs(funding)<.0005;
+ if(adx(five)<20&&neutralFunding&&reg.name!=='SHOCK'){
+  if(price<=lower&&r<30&&perp.slope>0){const score=tradeMatrix('LONG',true,true,true,rv,hist.at(-1)>hist.at(-2),true,true,true);emit('LONG','D · VWAP BAND FADE',score,Math.min(...five.slice(-5).map(x=>x.l)),band.vwap,'fade',{level:lower});}
+  if(price>=upper&&r>70&&perp.slope<0){const score=tradeMatrix('SHORT',true,true,true,rv,hist.at(-1)<hist.at(-2),true,true,true);emit('SHORT','D · VWAP BAND FADE',score,Math.max(...five.slice(-5).map(x=>x.h)),band.vwap,'fade',{level:upper});}
+ }
  return candidates.sort((x,y)=>y.score-x.score);
 }
-async function analyseMarket(mkt){const sym=mkt.symbol;const [five,fifteen,daily,ctx]=await Promise.all([candles(sym,'5m',140),candles(sym,'15',100),candles(sym,'D',25),getDerivativesContext(sym)]);return setupForMarket(mkt,five,fifteen,daily,ctx)}
-
+async function getDerivativesContext(sym){
+ const [oiR,perpR,spotR,fundingR,ratioR]=await Promise.all([
+  get(API+'/v5/market/open-interest?category=linear&symbol='+sym+'&intervalTime=5min&limit=200').catch(()=>null),
+  get(API+'/v5/market/recent-trade?category=linear&symbol='+sym+'&limit=100').catch(()=>null),
+  get(API+'/v5/market/recent-trade?category=spot&symbol='+sym+'&limit=100').catch(()=>null),
+  get(API+'/v5/market/funding/history?category=linear&symbol='+sym+'&limit=200').catch(()=>null),
+  get(API+'/v5/market/account-ratio?category=linear&symbol='+sym+'&period=5min&limit=30').catch(()=>null)
+ ]);
+ const oi=(oiR?.result?.list||[]).slice().sort((a,b)=>(+a.timestamp)-(+b.timestamp)).map(x=>+x.openInterest).filter(Number.isFinite);
+ const pt=perpR?.result?.list||[],st=spotR?.result?.list||[],perpCvd=tradeFlow(pt),spotCvd=tradeFlow(st);
+ const fHist=(fundingR?.result?.list||[]).map(x=>({time:+x.fundingRateTimestamp,rate:+x.fundingRate})).filter(x=>Number.isFinite(x.rate));
+ const ratio=(ratioR?.result?.list||[]).map(x=>+x.buyRatio/(+x.sellRatio||1)).filter(Number.isFinite);
+ const currentFunding=fHist.length?fHist.at(-1).rate:null;
+ return{oiChange:oi.length>=2&&oi.at(-2)>0?(oi.at(-1)-oi.at(-2))/oi.at(-2):null,oiAt30dHigh:false,oiSeries:oi,perpCvd,spotCvd,fundingHistory:fHist,funding:currentFunding,longShortRatio:ratio.at(-1)||null,ratioSeries:ratio,liquidationDetected:false,tradeCount:pt.length};
+}
+async function analyseMarket(mkt){
+ const sym=mkt.symbol;
+ const [five,fifteen,daily,ctx,markBars]=await Promise.all([
+  candles(sym,'5m',500),candles(sym,'15',100),candles(sym,'D',30),getDerivativesContext(sym),
+  get(API+'/v5/market/mark-price-kline?category=linear&symbol='+sym+'&interval=5&limit=500').then(j=>candlesToObjects(j.result?.list)).catch(()=>[])
+ ]);
+ const merged={...ctx,funding:Number.isFinite(mkt.funding)?mkt.funding:ctx.funding};
+ return setupForMarket(mkt,five,fifteen,daily,merged,markBars);
+}
 function renderRow(x){const ok=x.status==='CONFIRMED',p=x.plan||{};const name=x.sym.replace('USDT','')+'/USDT';return '<tr><td><button class="coin-link" onclick="openTradingView(\''+x.sym+'\')">'+name+'</button></td><td>'+fmt(x.price)+'</td><td>'+x.setup+'</td><td>'+fmt(x.level)+'</td><td>'+fmtTime(x.confirmationTime)+'</td><td><span class="pill '+(ok?x.side:'WAIT')+'">'+(ok?x.side+' · 8/10+':x.status)+'</span></td><td>'+(ok?fmt(p.entry):'—')+'</td><td>'+(ok?fmt(p.stop):'—')+'</td><td>'+(ok?fmt(p.tp1):'—')+'</td><td>'+(ok?p.rr.toFixed(2)+'R':'—')+'</td><td>'+x.score+'/10 · '+x.grade+' · '+x.regime+'</td></tr>'}
 function renderCard(x){const p=x.plan;const n=v=>v===null||v===undefined?'—':(v*100).toFixed(2)+'%';return `<article class="card"><div class="head"><div><strong><button class="coin-link" onclick="openTradingView('${x.sym}')">${x.sym.replace('USDT','')}/USDT</button></strong><div class="small">${x.levelType} breakout · liquidity grab + 5m reclaim</div></div><span class="pill ${x.side}">${x.side}</span></div><div class="metrics"><div class="metric"><span>Confluence score</span><b class="${x.score>=68?'positive':x.score<55?'negative':'neutral'}">${x.score}/100 · ${x.grade}</b></div><div class="metric"><span>5m relative volume</span><b>${x.relVol===null?'—':x.relVol.toFixed(2)+'× average'}</b></div><div class="metric"><span>5m open-interest change</span><b class="${x.oiChange>0?'positive':x.oiChange<0?'negative':''}">${n(x.oiChange)}</b></div><div class="metric"><span>Recent taker buy ratio</span><b>${n(x.tradeBuyRatio)}</b></div><div class="metric"><span>Funding rate · contrarian context</span><b>${n(x.funding)}</b></div><div class="metric"><span>Bid-ask spread</span><b>${n(x.spread)}</b></div><div class="metric"><span>Broken key level</span><b>${fmt(x.level)} · ${x.levelType}</b></div><div class="metric"><span>Breakout / grab time</span><b>${fmtTime(x.breakoutTime)} / ${fmtTime(x.sweepTime)}</b></div><div class="metric"><span>Grab wick extreme</span><b>${fmt(x.extreme)}</b></div><div class="metric"><span>Target source</span><b>${x.targetType}</b></div></div><div class="levels"><div class="level"><small>ENTRY</small><b>${fmt(p.entry)}</b></div><div class="level"><small>STOP — BEYOND GRAB</small><b class="bad">${fmt(p.stop)}</b></div><div class="level"><small>TP — OPPOSING HIGH/LOW</small><b class="good">${fmt(p.tp1)}</b></div></div><div class="note">Score ranks confluence; it does not guarantee direction or profit. Funding is used as a crowding/contrarian clue, not a standalone signal. Open interest and recent public trades are snapshots and may lag. Confirm live spread and execution. Entry is a scan-time reference, not an order.</div></article>`}function showSignalAlert(items){if(!items.length)return;const toast=$('signalToast');toast.className='signal-toast '+(items.some(x=>x.side==='SHORT')?'short':'');toast.innerHTML=`<strong>⚡ NEW SWEEP CONFIRMATION</strong><br>${items.slice(0,8).map(x=>`${x.side} · ${x.sym} · ${x.levelType}`).join('<br>')}<button class="secondary" onclick="document.getElementById('signalToast').classList.add('hidden')">Dismiss</button>`;toast.classList.remove('hidden')}
 function sendNotification(title,body,tag){if('Notification'in window&&Notification.permission==='granted'){try{new Notification(title,{body,tag,renotify:false})}catch(e){}}}
