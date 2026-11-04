@@ -136,13 +136,13 @@ footer{text-align:center;color:#8095b7}
 <div class="toolbar settings">
   <label>Minimum 24h volume (USDT M)<br><input id="minVol" type="number" min="0" max="10000" step="0.5" value="5" style="width:105px"></label>
   <label>Displayed coins<br><select id="maxResults"><option>10</option><option selected>25</option><option>35</option><option>50</option></select></label>
-  <label>Equity USDT<br><input id="equity" type="number" min="0" placeholder="Optional" style="width:105px"></label><label>Risk %<br><select id="riskPct"><option value="0.25">0.25%</option><option value="0.5" selected>0.50%</option></select></label><label>Leverage cap<br><select id="levCap"><option>3</option><option selected>5</option><option>10</option></select></label><span class="tag">PERP ATR(14) · 12-POINT MATRIX · FUNDING / BASIS / OI · MARK-PRICE RISK</span>
+  <label>Equity USDT<br><input id="equity" type="number" min="0" placeholder="Optional" style="width:105px"></label><label>Risk %<br><select id="riskPct"><option value="0.25">0.25%</option><option value="0.5" selected>0.50%</option></select></label><label>Leverage cap<br><select id="levCap"><option>3</option><option selected>5</option><option>10</option></select></label><span class="tag">5M SCALPING · EMA 9 / EMA 20 · CROSS + RETEST + BREAKOUT</span>
 </div>
 <div class="stats" id="marketAnalysis">
 <div class="stat"><small>Markets analysed</small><strong id="marketCount">—</strong></div><div class="stat"><small>LONG setups</small><strong class="good" id="longs">—</strong></div><div class="stat"><small>SHORT setups</small><strong class="bad" id="shorts">—</strong></div><div class="stat"><small>Waiting level events</small><strong id="waits">—</strong></div>
 </div>
 <section class="panel" id="waitingPanel">
-<div class="section"><h2>Market Setups — Waiting &amp; Confirmed</h2><div class="filters"><span class="tag">Four perp setups · 12-point scoring · mark-price ATR</span><span class="tag">5m close · funding/basis/OI checks</span><span class="tag">No trade if dead/shock regime, spread ≥ 0.03%, funding veto, or score below 9/12</span></div></div>
+<div class="section"><h2>Market Setups — Waiting &amp; Confirmed</h2><div class="filters"><span class="tag">One setup · 5-minute EMA 9/20 cross and retest</span><span class="tag">Entry after retest candle and breakout close · 1:3 risk/reward</span><span class="tag">Long and short use mirrored rules · only closed 5m candles</span></div></div>
 <div class="tablewrap"><table><thead><tr><th>SYMBOL</th><th>PRICE</th><th>KEY LEVEL</th><th>LEVEL PRICE</th><th>5M CONFIRM TIME</th><th>STATUS</th><th>ENTRY</th><th>STOP</th><th>TARGET</th><th>R:R</th><th>CONFLUENCE</th></tr></thead><tbody id="rows"><tr><td colspan="7" class="muted">Loading market data…</td></tr></tbody></table></div>
 
 </section>
@@ -261,29 +261,38 @@ function riskPlanPerp(side,entry,extreme,atr,regime,target,stopMode='cascade'){
 }
 function fundingIsExtreme(ctx,side){if(!Number.isFinite(ctx.funding))return false;const hist=ctx.fundingHistory||[],sorted=hist.map(x=>x.rate).filter(Number.isFinite).sort((a,b)=>a-b);if(sorted.length<10)return Math.abs(ctx.funding)>=.0005;const p=sorted.filter(x=>x<=ctx.funding).length/sorted.length;return side==='LONG'?p>=.9:p<=.1}
 function findSweepRecent(b,side){if(b.length<24)return null;for(let i=b.length-1;i>=Math.max(21,b.length-5);i--){const x=b[i],prior=b.slice(i-20,i),lo=Math.min(...prior.map(q=>q.l)),hi=Math.max(...prior.map(q=>q.h));if(side==='LONG'&&x.l<lo&&x.c>lo)return{extreme:x.l,level:lo,bar:x,index:i};if(side==='SHORT'&&x.h>hi&&x.c<hi)return{extreme:x.h,level:hi,bar:x,index:i}}return null}
-function setupForMarket(mkt,five,fifteen,daily,ctx,markBars){
- const last=five.at(-1),price=last.c,atr=atrSeries(five,14).at(-1),atrPct=atr/price,reg=regimeOf(five,markBars);
- const avgVol=mean(five.slice(-21,-1).map(x=>x.v))||1,rv=last.v/avgVol,closes=fifteen.map(x=>x.c),ema50=ema(closes,50).at(-1),vw=vwapBands(fifteen);
- const trendLong=fifteen.length>50&&fifteen.at(-1).c>ema50&&fifteen.at(-1).c>vw.vwap&&vw.slope>0;
- const trendShort=fifteen.length>50&&fifteen.at(-1).c<ema50&&fifteen.at(-1).c<vw.vwap&&vw.slope<0;
- const perp=ctx.perpCvd||{slope:0,delta:0,last3:0},cvdLong=perp.slope>0&&perp.last3>0,cvdShort=perp.slope<0&&perp.last3<0;
- const funding=Number.isFinite(mkt.funding)?mkt.funding:ctx.funding,basis=Number.isFinite(mkt.mark)&&Number.isFinite(mkt.index)&&mkt.index>0?(mkt.mark-mkt.index)/mkt.index:null;
- const basisOk=basis===null||Math.abs(basis)<.002,fundingAgainst=side=>fundingIsExtreme({...ctx,funding},side);
- const nextFunding=Number(mkt.nextFundingTime)||0,msToFunding=nextFunding?nextFunding-Date.now():null,fundingStampNear=msToFunding!==null&&msToFunding>=0&&msToFunding<=5*60000;
- const spreadOk=Number.isFinite(mkt.spread)&&mkt.spread<.0003,candidates=[];
- if(five.length<30||!Number.isFinite(atrPct)||atrPct<.0015||reg.name==='DEAD'||!spreadOk||!basisOk||fundingStampNear)return candidates;
- const emit=(side,sw)=>{
-  if(!sw||fundingAgainst(side))return;
-  const trend=side==='LONG'?trendLong:trendShort,cvd=side==='LONG'?cvdLong:cvdShort,fundingSupport=Number.isFinite(funding)&&!fundingAgainst(side);
-  const score=tradeMatrix(side,trend,true,true,rv,false,cvd,false,fundingSupport),entry=sw.level;
-  const plan=riskPlanPerp(side,entry,sw.extreme,atr,reg,0,'cascade');
-  if(!plan.stopDistance||!Number.isFinite(plan.stop)||!Number.isFinite(plan.tp1))return;
-  plan.sizeFactor=[.25,.5,.75,1,1.25][score.score]*(reg.name==='ELEVATED'?.75:reg.name==='SHOCK'?.5:1);
-  plan.entryType='RESTING LIMIT AT RECLAIM LEVEL';
-  candidates.push({sym:mkt.symbol,price,markPrice:mkt.mark,indexPrice:mkt.index,side,setup:'A · 20-BAR SWEEP & RECLAIM',status:'CONFIRMED',levelType:'20-bar sweep/reclaim',level:sw.level,confirmationTime:sw.bar.t,breakoutTime:sw.bar.t,sweepTime:sw.bar.t,extreme:sw.extreme,plan,score:score.score,scoreMax:4,grade:score.grade,parts:score.parts,regime:reg.name,atrPct,rv,adx:null,rsi:null,macd:null,cvd:perp.delta,oiChange:ctx.oiChange,funding,basis,spread:mkt.spread,quoteVolume:mkt.quoteVolume,execution:'RESTING LIMIT — NO TAKER CHASE',riskTier:score.tier,fundingStampNear});
+function setupForMarket(mkt,five){
+ const closes=five.map(x=>x.c),e9=ema(closes,9),e20=ema(closes,20),out=[];
+ if(five.length<40)return out;
+ const lastIndex=five.length-1,last=five[lastIndex],atr=atrSeries(five,14).at(-1);
+ const findSignal=(side)=>{
+  const bullish=side==='LONG';
+  for(let cross=lastIndex-6;cross<=lastIndex-3;cross++){
+   if(cross<21)continue;
+   const crossed=bullish?(e9[cross]>e20[cross]&&e9[cross-1]<=e20[cross-1]):(e9[cross]<e20[cross]&&e9[cross-1]>=e20[cross-1]);
+   if(!crossed)continue;
+   const retestEnd=Math.min(cross+3,lastIndex-1);
+   for(let retest=cross+1;retest<=retestEnd;retest++){
+    const rb=five[retest],zoneLow=Math.min(e9[retest],e20[retest]),zoneHigh=Math.max(e9[retest],e20[retest]);
+    const touched=bullish?rb.l<=zoneHigh*1.001:rb.h>=zoneLow*.999;
+    const reclaimed=bullish?rb.c>zoneHigh&&rb.c>rb.o:rb.c<zoneLow&&rb.c<rb.o;
+    if(!touched||!reclaimed)continue;
+    const breakout=bullish?Math.max(...five.slice(cross,retest+1).map(x=>x.h)):Math.min(...five.slice(cross,retest+1).map(x=>x.l));
+    if(lastIndex<=retest||lastIndex>retest+3)continue;
+    const confirmed=bullish?last.c>breakout&&last.c>e9[lastIndex]&&e9[lastIndex]>e20[lastIndex]:last.c<breakout&&last.c<e9[lastIndex]&&e9[lastIndex]<e20[lastIndex];
+    if(!confirmed)continue;
+    const entry=last.c,extreme=bullish?Math.min(...five.slice(retest,lastIndex+1).map(x=>x.l)):Math.max(...five.slice(retest,lastIndex+1).map(x=>x.h));
+    const pad=Math.max(atr*.10,entry*.0002),stop=bullish?extreme-pad:extreme+pad,risk=Math.abs(entry-stop);
+    if(!Number.isFinite(risk)||risk<=0)continue;
+    const target=bullish?entry+3*risk:entry-3*risk;
+    const plan={entry,stop,tp1:target,tp2:null,tp3:null,rr:3,atr,stopDistance:risk,stopPct:risk/entry,sizeFactor:1,entryType:'5M CONFIRMATION CLOSE',targetR:3};
+    return[{sym:mkt.symbol,price:entry,side,setup:'9/20 EMA CROSS · RETEST · BREAKOUT',status:'CONFIRMED',levelType:'Previous breakout '+(bullish?'high':'low'),level:breakout,confirmationTime:last.t,breakoutTime:five[cross].t,sweepTime:five[retest].t,extreme,plan,score:null,scoreMax:null,grade:'EMA 9/20',parts:[],regime:'5M EMA',atrPct:atr/entry,rv:null,adx:null,rsi:null,macd:null,cvd:null,oiChange:null,funding:null,basis:null,spread:mkt.spread,quoteVolume:mkt.quoteVolume,execution:'CLOSED 5M BREAKOUT CONFIRMATION',riskTier:'1:3 RISK / REWARD',fundingStampNear:false}];
+   }
+  }
+  return[];
  };
- emit('LONG',findSweepRecent(five,'LONG'));emit('SHORT',findSweepRecent(five,'SHORT'));
- return candidates.sort((x,y)=>y.score-x.score);
+ out.push(...findSignal('LONG'),...findSignal('SHORT'));
+ return out;
 }
 async function getDerivativesContext(sym){
  const [oiR,oiLongR,perpR,spotR,fundingR,ratioR]=await Promise.all([
@@ -301,20 +310,15 @@ async function getDerivativesContext(sym){
  return{oiChange:oi.length>=2&&oi.at(-2)>0?(oi.at(-1)-oi.at(-2))/oi.at(-2):null,oiAt30dHigh,oiSeries:oi,oiLongSeries:oiLong,perpCvd,spotCvd,fundingHistory:fHist,funding:currentFunding,longShortRatio:ratio.at(-1)||null,ratioSeries:ratio,liquidationDetected:false,tradeCount:pt.length};
 }
 async function analyseMarket(mkt){
- const sym=mkt.symbol;
- const [five,fifteen,ctx,markBars]=await Promise.all([
-  candles(sym,'5m',240),candles(sym,'15',100),getDerivativesContext(sym),
-  get(API+'/v5/market/mark-price-kline?category=linear&symbol='+sym+'&interval=5&limit=240').then(j=>candlesToObjects(j.result?.list)).catch(()=>[])
- ]);
- const merged={...ctx,funding:Number.isFinite(mkt.funding)?mkt.funding:ctx.funding};
- return setupForMarket(mkt,five,fifteen,[],merged,markBars);
+ const five=await candles(mkt.symbol,'5m',240);
+ return setupForMarket(mkt,five);
 }
-function renderRow(x){const ok=x.status==='CONFIRMED',p=x.plan||{},cfg=settings(),cash=cfg.equity*cfg.riskPct,rawQty=cfg.equity>0&&p.stopDistance>0?cash/p.stopDistance:null,qty=rawQty!==null?Math.min(rawQty,cfg.equity*cfg.levCap/p.entry):null,notional=qty?qty*p.entry:null,lev=notional&&cfg.equity?notional/cfg.equity:null,actualRisk=qty?qty*p.stopDistance:null;const name=x.sym.replace('USDT','')+'/USDT';return '<tr><td><button class="coin-link" onclick="openTradingView(\\''+x.sym+'\\')">'+name+'</button></td><td>'+fmt(x.price)+'</td><td>'+x.setup+'</td><td>'+fmt(x.level)+'</td><td>'+fmtTime(x.confirmationTime)+'</td><td><span class="pill '+(ok?x.side:'WAIT')+'">'+(ok?x.side+' · '+x.riskTier:x.status)+'</span></td><td>'+fmt(p.entry)+'</td><td>'+fmt(p.stop)+'</td><td>'+fmt(p.tp1)+' / '+fmt(p.tp2)+'</td><td>'+p.rr.toFixed(2)+'R</td><td>'+x.score+'/4 · '+x.grade+' · size '+p.sizeFactor+'× · '+x.regime+' · OI '+signedPct(x.oiChange)+' · F '+signedPct(x.funding)+' · '+(qty?'Qty '+fmt(qty)+' · '+(lev?lev.toFixed(1)+'×':'')+' · risk '+fmt(actualRisk)+' USDT':'Enter equity for qty')+'</td></tr>'}
+function renderRow(x){const p=x.plan||{},cfg=settings(),cash=cfg.equity*cfg.riskPct,rawQty=cfg.equity>0&&p.stopDistance>0?cash/p.stopDistance:null,qty=rawQty!==null?Math.min(rawQty,cfg.equity*cfg.levCap/p.entry):null,notional=qty?qty*p.entry:null,lev=notional&&cfg.equity?notional/cfg.equity:null,actualRisk=qty?qty*p.stopDistance:null;const name=x.sym.replace('USDT','')+'/USDT';return '<tr><td><button class="coin-link" onclick="openTradingView(\\''+x.sym+'\\')">'+name+'</button></td><td>'+fmt(x.price)+'</td><td>'+x.setup+'</td><td>'+fmt(x.level)+'</td><td>'+fmtTime(x.confirmationTime)+'</td><td><span class="pill '+x.side+'">'+x.side+'</span></td><td>'+fmt(p.entry)+'</td><td>'+fmt(p.stop)+'</td><td>'+fmt(p.tp1)+'</td><td>1:3</td><td>EMA 9/20 · '+(qty?'Qty '+fmt(qty)+' · '+(lev?lev.toFixed(1)+'×':'')+' · risk '+fmt(actualRisk)+' USDT':'Enter equity for qty')+'</td></tr>'}
 function renderCard(x){const p=x.plan;const n=v=>v===null||v===undefined?'—':(v*100).toFixed(2)+'%';return `<article class="card"><div class="head"><div><strong><button class="coin-link" onclick="openTradingView('${x.sym}')">${x.sym.replace('USDT','')}/USDT</button></strong><div class="small">${x.levelType} breakout · liquidity grab + 5m reclaim</div></div><span class="pill ${x.side}">${x.side}</span></div><div class="metrics"><div class="metric"><span>Confluence score</span><b class="${x.score>=68?'positive':x.score<55?'negative':'neutral'}">${x.score}/100 · ${x.grade}</b></div><div class="metric"><span>5m relative volume</span><b>${x.relVol===null?'—':x.relVol.toFixed(2)+'× average'}</b></div><div class="metric"><span>5m open-interest change</span><b class="${x.oiChange>0?'positive':x.oiChange<0?'negative':''}">${n(x.oiChange)}</b></div><div class="metric"><span>Recent taker buy ratio</span><b>${n(x.tradeBuyRatio)}</b></div><div class="metric"><span>Funding rate · contrarian context</span><b>${n(x.funding)}</b></div><div class="metric"><span>Bid-ask spread</span><b>${n(x.spread)}</b></div><div class="metric"><span>Broken key level</span><b>${fmt(x.level)} · ${x.levelType}</b></div><div class="metric"><span>Breakout / grab time</span><b>${fmtTime(x.breakoutTime)} / ${fmtTime(x.sweepTime)}</b></div><div class="metric"><span>Grab wick extreme</span><b>${fmt(x.extreme)}</b></div><div class="metric"><span>Target source</span><b>${x.targetType}</b></div></div><div class="levels"><div class="level"><small>ENTRY</small><b>${fmt(p.entry)}</b></div><div class="level"><small>STOP — BEYOND GRAB</small><b class="bad">${fmt(p.stop)}</b></div><div class="level"><small>TP — OPPOSING HIGH/LOW</small><b class="good">${fmt(p.tp1)}</b></div></div><div class="note">Score ranks confluence; it does not guarantee direction or profit. Funding is used as a crowding/contrarian clue, not a standalone signal. Open interest and recent public trades are snapshots and may lag. Confirm live spread and execution. Entry is a scan-time reference, not an order.</div></article>`}function showSignalAlert(items){if(!items.length)return;const toast=$('signalToast');toast.className='signal-toast '+(items.some(x=>x.side==='SHORT')?'short':'');toast.innerHTML=`<strong>⚡ NEW SWEEP CONFIRMATION</strong><br>${items.slice(0,8).map(x=>`${x.side} · ${x.sym} · ${x.levelType}`).join('<br>')}<button class="secondary" onclick="document.getElementById('signalToast').classList.add('hidden')">Dismiss</button>`;toast.classList.remove('hidden')}
 function sendNotification(title,body,tag){if('Notification'in window&&Notification.permission==='granted'){try{new Notification(title,{body,tag,renotify:false})}catch(e){}}}
 function notifyScanResults(items){const fresh=items.filter(x=>previousSignals.get(x.sym+'|'+x.levelType)!==x.side);if(fresh.length){showSignalAlert(fresh);sendNotification('Crypto Signal Desk — confirmed sweep',fresh.slice(0,8).map(x=>`${x.sym} ${x.side} ${x.levelType}`).join('\n'),'sweep-'+Date.now())}previousSignals=new Map(items.map(x=>[x.sym+'|'+x.levelType,x.side]));}
-function paintPartial(results,done,total){const all=results.filter(x=>!x.error).flat(),waits=all.filter(x=>x.status!=='CONFIRMED'),confirmed=all.filter(x=>x.status==='CONFIRMED');$('rows').innerHTML=[...confirmed,...waits].sort((a,b)=>b.score-a.score).slice(0,settings().maxResults).map(renderRow).join('')||'<tr><td colspan="11">No qualifying setups yet.</td></tr>';$('marketCount').textContent=done;$('longs').textContent=confirmed.filter(x=>x.side==='LONG').length;$('shorts').textContent=confirmed.filter(x=>x.side==='SHORT').length;$('waits').textContent=waits.length;$('status').textContent='Scanning '+done+'/'+total+' markets · '+waits.length+' watchlist · '+confirmed.length+' confirmed';}
-async function run(){if(scanBusy)return;scanBusy=true;$('status').textContent='Loading active Bybit USDT perpetual markets…';$('rows').innerHTML='<tr><td colspan="11">Scanning 5m perpetual-futures setups…</td></tr>';try{const universe=await pickUniverse(),results=[],batchSize=12;for(let i=0;i<universe.length;i+=batchSize){const batch=universe.slice(i,i+batchSize);const out=await Promise.all(batch.map(async m=>{try{return await analyseMarket(m)}catch(e){return{error:e.message,sym:m.symbol}}}));results.push(...out);paintPartial(results,Math.min(i+batch.length,universe.length),universe.length)}const all=results.filter(x=>!x.error).flat(),raw=all.filter(x=>x.status==='CONFIRMED'),confirmed=[...new Map(raw.map(x=>[x.sym+'|'+x.side+'|'+x.setup,x])).values()],waits=all.filter(x=>x.status!=='CONFIRMED');$('rows').innerHTML=[...confirmed,...waits].sort((a,b)=>b.score-a.score).slice(0,settings().maxResults).map(renderRow).join('')||'<tr><td colspan="11" class="muted">No sweep/reclaim setups met the ATR and execution vetoes.</td></tr>';$('marketCount').textContent=universe.length;$('longs').textContent=confirmed.filter(x=>x.side==='LONG').length;$('shorts').textContent=confirmed.filter(x=>x.side==='SHORT').length;$('waits').textContent=waits.length;notifyScanResults(confirmed);recordTrades(confirmed);$('status').textContent='Scan complete · '+universe.length+' markets · '+waits.length+' waiting level events · '+confirmed.length+' 5m-confirmed trades';}catch(e){$('status').textContent='Scan failed: '+e.message;$('rows').innerHTML='<tr><td colspan="11" class="bad">'+e.message+'</td></tr>'}finally{scanBusy=false}}
+function paintPartial(results,done,total){const all=results.filter(x=>!x.error).flat(),waits=all.filter(x=>x.status!=='CONFIRMED'),confirmed=all.filter(x=>x.status==='CONFIRMED');$('rows').innerHTML=[...confirmed,...waits].sort((a,b)=>b.score-a.score).slice(0,settings().maxResults).map(renderRow).join('')||'<tr><td colspan="11">No completed EMA 9/20 setup yet.</td></tr>';$('marketCount').textContent=done;$('longs').textContent=confirmed.filter(x=>x.side==='LONG').length;$('shorts').textContent=confirmed.filter(x=>x.side==='SHORT').length;$('waits').textContent=waits.length;$('status').textContent='Scanning '+done+'/'+total+' markets · '+confirmed.length+' EMA setups found';}
+async function run(){if(scanBusy)return;scanBusy=true;$('status').textContent='Loading active Bybit USDT perpetual markets…';$('rows').innerHTML='<tr><td colspan="11">Scanning 5m EMA 9/20 cross-retest setups…</td></tr>';try{const universe=await pickUniverse(),results=[],batchSize=12;for(let i=0;i<universe.length;i+=batchSize){const batch=universe.slice(i,i+batchSize);const out=await Promise.all(batch.map(async m=>{try{return await analyseMarket(m)}catch(e){return{error:e.message,sym:m.symbol}}}));results.push(...out);paintPartial(results,Math.min(i+batch.length,universe.length),universe.length)}const all=results.filter(x=>!x.error).flat(),raw=all.filter(x=>x.status==='CONFIRMED'),confirmed=[...new Map(raw.map(x=>[x.sym+'|'+x.side+'|'+x.setup,x])).values()],waits=all.filter(x=>x.status!=='CONFIRMED');$('rows').innerHTML=[...confirmed,...waits].sort((a,b)=>b.score-a.score).slice(0,settings().maxResults).map(renderRow).join('')||'<tr><td colspan="11" class="muted">No completed EMA cross, retest and breakout pattern found.</td></tr>';$('marketCount').textContent=universe.length;$('longs').textContent=confirmed.filter(x=>x.side==='LONG').length;$('shorts').textContent=confirmed.filter(x=>x.side==='SHORT').length;$('waits').textContent=waits.length;notifyScanResults(confirmed);recordTrades(confirmed);$('status').textContent='Scan complete · '+universe.length+' markets · '+confirmed.length+' EMA-confirmed trades';}catch(e){$('status').textContent='Scan failed: '+e.message;$('rows').innerHTML='<tr><td colspan="11" class="bad">'+e.message+'</td></tr>'}finally{scanBusy=false}}
 initSettings();['minVol','maxResults'].forEach(id=>$(id).addEventListener('change',saveSettings));
 $('downloadResults').addEventListener('click',exportResults);$('downloadSource').addEventListener('click',exportSource);$('clearResults').addEventListener('click',clearAllTrades);$('resultRows').addEventListener('click',e=>{const b=e.target.closest('[data-delete-index]');if(b)deleteTrade(Number(b.dataset.deleteIndex))});$('refreshNews').addEventListener('click',loadMarketNews);renderHistory();loadMarketNews();setInterval(loadMarketNews,300000);setInterval(updateHistoryPrices,30000);updateHistoryPrices();
 $('scanNow').addEventListener('click',run);
