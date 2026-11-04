@@ -126,7 +126,7 @@ footer{text-align:center;color:#8095b7}
 <style id="centered-stats-and-management">.stats{display:flex!important;justify-content:center!important;align-items:stretch;gap:12px;flex-wrap:wrap;max-width:1120px;margin:0 auto 18px}.stats .stat{flex:0 1 250px;min-width:210px;text-align:center}.results-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.delete-trade{background:#522638;border-color:#9d4660;padding:5px 8px}.news-list{display:grid;gap:8px}.news-item{padding:12px;border:1px solid rgba(107,151,212,.25);border-radius:10px;background:rgba(6,15,30,.5)}.news-item a{color:#a9d3ff;font-weight:750;text-decoration:none}.news-item a:hover{text-decoration:underline}.news-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:7px;color:var(--muted);font-size:10px}.impact-high{color:#ff9cac;border:1px solid rgba(255,111,145,.35);background:rgba(177,51,83,.15)}.impact-watch{color:#ffe09a;border:1px solid rgba(255,209,102,.3);background:rgba(164,119,35,.15)}@media(max-width:650px){.stats .stat{flex:1 1 42%;min-width:145px}}</style></head>
 <body>
 <div id="signalToast" class="signal-toast hidden" role="alert" aria-live="assertive"></div>
-<header><div><h1>Crypto Signal Desk <span class="blue">ULTIMATE</span></h1><p>SCALPING ONLY · Previous day / week / month levels · Breakout + liquidity grab confirmation</p></div><div class="small">ALL ACTIVE BYBIT USDT PERPETUALS · PUBLIC MARKET DATA · NO API KEY · READ-ONLY</div></header>
+<header><div><h1>Crypto Signal Desk <span class="blue">ULTIMATE</span></h1><p>SCALPING ONLY · Previous day / week / month levels · Breakout + liquidity grab confirmation</p></div><div class="small">BYBIT USDT PERPETUALS · FUNDING + OI + VOLUME + PUBLIC TRADE FLOW · NO API KEY</div></header>
 <main>
 <div class="toolbar">
 <span class="tag">ENTRY: KEY-LEVEL BREAKOUT + 1-MINUTE LIQUIDITY GRAB</span>
@@ -146,7 +146,7 @@ footer{text-align:center;color:#8095b7}
 <div class="tablewrap"><table><thead><tr><th>SYMBOL</th><th>LAST PRICE</th><th>LEVEL TYPE</th><th>LEVEL PRICE</th><th>BREAKOUT TIME</th><th>STATUS</th><th>1M DETAILS</th></tr></thead><tbody id="rows"><tr><td colspan="7" class="muted">Loading market data…</td></tr></tbody></table></div>
 
 </section>
-<section class="panel" id="tradeResults"><div class="section"><h2>Confirmed Scalps — Key-Level Liquidity Strategy</h2><span class="small">Breakout, liquidity grab and reclaim only. TP at opposing previous high/low; SL beyond grab wick.</span></div><div id="cards" class="grid"><p class="muted">Trade plans will appear after the scan.</p></div></section>\n<section class="panel" id="confluencePerformance"><div class="section"><h2>Scalping Strategy Performance</h2><span class="small">Target-first-touch outcomes from locally tracked completed scalps</span></div><div class="history-summary" id="confluenceSummary"></div><div class="context-grid" id="confluenceBands"></div><div id="confluenceAdvice" class="note"></div><p class="note">Win rate = trades where TP1 was observed before SL ÷ all completed trades. This is a local, snapshot-based estimate—not exchange fills or a backtest. Browser storage is device-specific.</p></section>
+<section class="panel" id="tradeResults"><div class="section"><h2>Confirmed Scalps — Key-Level Liquidity Strategy</h2><span class="small">Liquidity-grab trigger ranked with 1m volume, open interest, taker flow, funding and spread.</span></div><div id="cards" class="grid"><p class="muted">Trade plans will appear after the scan.</p></div></section>\n<section class="panel" id="confluencePerformance"><div class="section"><h2>Scalping Strategy Performance</h2><span class="small">Target-first-touch outcomes from locally tracked completed scalps</span></div><div class="history-summary" id="confluenceSummary"></div><div class="context-grid" id="confluenceBands"></div><div id="confluenceAdvice" class="note"></div><p class="note">Win rate = trades where TP1 was observed before SL ÷ all completed trades. This is a local, snapshot-based estimate—not exchange fills or a backtest. Browser storage is device-specific.</p></section>
 <section class="panel" id="liveResults"><div class="results-head"><h2>Live Trade Results &amp; Winning Rate</h2><div class="results-actions"><button id="downloadResults" class="secondary">Download Results CSV</button><button id="clearResults" class="secondary">Clear All Results</button></div></div><div class="history-summary" id="historySummary"></div><div class="history-table"><table><thead><tr><th>TIME</th><th>SYMBOL</th><th>SIDE</th><th>ENTRY</th><th>LIVE PRICE</th><th>STOP LOSS</th><th>TP1</th><th>TP2</th><th>TP3</th><th>RESULT</th><th>LEVEL</th><th>MANAGE</th></tr></thead><tbody id="resultRows"><tr><td colspan="12">No confirmed trades recorded yet.</td></tr></tbody></table></div><p class="note">Results are tracked locally using periodic public ticker snapshots. Outcomes are simulated threshold touches, not exchange fills. Prices are sampled every 30 seconds, so the dashboard cannot prove which level traded first between polls. Export CSV regularly.</p></section>
 <section class="panel" id="marketNews"><div class="section"><h2>Market News &amp; Sudden-Move Alerts</h2><div class="results-actions"><span class="small" id="newsUpdated">Waiting for first update…</span><button id="refreshNews" class="secondary">Refresh News</button></div></div><p class="note">Important headlines from CoinDesk. High-attention labels are keyword-based prompts to review the story, not predictions or verified causes of price moves. News refreshes automatically every 5 minutes.</p><div id="newsItems" class="news-list"><p class="muted">Loading latest market news…</p></div></section>
 
@@ -212,6 +212,47 @@ function makeRiskPlan(side,entry,extreme,target){
   const reward=Math.abs(target-entry);
   return{entry,stop,tp1:target,tp2:null,tp3:null,rr:risk?reward/risk:0};
 }
+async function getDerivativesContext(sym){
+  const [oiRes,tradeRes]=await Promise.all([
+    get(`${API}/v5/market/open-interest?category=linear&symbol=${sym}&intervalTime=5min&limit=3`).catch(()=>null),
+    get(`${API}/v5/market/recent-trade?category=linear&symbol=${sym}&limit=100`).catch(()=>null)
+  ]);
+  const oi=(oiRes?.result?.list||[]).map(x=>+x.openInterest).filter(Number.isFinite);
+  const oiChange=oi.length>=2&&oi.at(-2)>0?(oi.at(-1)-oi.at(-2))/oi.at(-2):null;
+  const trades=tradeRes?.result?.list||[];
+  let buy=0,sell=0;
+  for(const t of trades){const value=(+t.price||0)*(+t.size||0);if(t.side==='Buy')buy+=value;else if(t.side==='Sell')sell+=value;}
+  const total=buy+sell;
+  return{oiChange,buy,sell,tradeBuyRatio:total?buy/total:null,tradeCount:trades.length};
+}
+function scoreScalpContext(side,bars,confirm,mkt,ctx,plan){
+  const prior=bars.slice(-31,-1),avgVol=prior.length?prior.reduce((a,b)=>a+b.v,0)/prior.length:0;
+  const relVol=avgVol>0?confirm.v/avgVol:null;
+  const range=Math.max(confirm.h-confirm.l,1e-12),body=Math.abs(confirm.c-confirm.o)/range;
+  const spread=mkt.spread,flow=ctx.tradeBuyRatio,oi=ctx.oiChange,funding=mkt.funding;
+  let score=35,parts=[];
+  const volPts=relVol===null?0:relVol>=2.5?18:relVol>=1.7?14:relVol>=1.2?9:relVol>=0.8?4:0;
+  score+=volPts;parts.push(['1m relative volume',relVol,volPts,18]);
+  const bodyPts=body>=.7?12:body>=.5?9:body>=.3?5:1;
+  score+=bodyPts;parts.push(['confirmation candle body',body,bodyPts,12]);
+  let oiPts=0;
+  if(oi!==null)oiPts=oi>=.015?15:oi>=.005?11:oi>0?7:oi<=-.015?-8:oi<0?-4:2;
+  score+=oiPts;parts.push(['5m open-interest change',oi,oiPts,15]);
+  let flowPts=0;
+  if(flow!==null){const aligned=side==='LONG'?flow:1-flow;flowPts=aligned>=.65?18:aligned>=.57?13:aligned>=.52?7:aligned<=.4?-9:-3;}
+  score+=flowPts;parts.push(['recent taker flow buy ratio',flow,flowPts,18]);
+  let fundPts=0;
+  if(Number.isFinite(funding)){const crowd=side==='LONG'?funding:-funding;fundPts=crowd>=.0008?-8:crowd>=.0003?-4:crowd<=-.0008?8:crowd<=-.0003?5:2;}
+  score+=fundPts;parts.push(['current funding rate',funding,fundPts,8]);
+  let spreadPts=spread===null?4:spread<=.0005?10:spread<=.001?7:spread<=.002?3:-5;
+  score+=spreadPts;parts.push(['bid-ask spread',spread,spreadPts,10]);
+  const rrPts=plan.rr>=2?7:plan.rr>=1.5?5:plan.rr>=1?2:-8;
+  score+=rrPts;parts.push(['target / stop reward-risk',plan.rr,rrPts,7]);
+  score=Math.max(0,Math.min(100,Math.round(score)));
+  return{score,relVol,body,oiChange:oi,tradeBuyRatio:flow,funding,spread,tradeCount:ctx.tradeCount,parts,
+    grade:score>=80?'A · HIGH CONFLUENCE':score>=68?'B · GOOD CONFLUENCE':score>=55?'C · MIXED':'D · LOW CONFLUENCE'};
+}
+
 function findSweepSetup(bars,level,kind){
   // A completed 1m candle must first close beyond the key level.
   // Then price sweeps back through the level and closes back on the breakout side.
@@ -254,9 +295,12 @@ async function analyseMarket(mkt){
       if((found.side==='LONG'&&target<=price)||(found.side==='SHORT'&&target>=price))continue;
       const plan=makeRiskPlan(found.side,price,found.extreme,target);
       if(!(plan.stop>0&&Math.abs(price-plan.stop)>0))continue;
+      const ctx=await getDerivativesContext(sym);
+      const confluence=scoreScalpContext(found.side,one,found.confirm,mkt,ctx,plan);
       out.push({sym,price,side:found.side,levelType:level.type,level:level.price,status:'CONFIRMED',
         breakoutTime:found.breakout.t,sweepTime:found.sweep.t,candleCount:1,candles:[found.confirm],
-        plan,extreme:found.extreme,targetType:opposing?.type||'RECENT SWING',quoteVolume:mkt.quoteVolume});
+        plan,extreme:found.extreme,targetType:opposing?.type||'RECENT SWING',quoteVolume:mkt.quoteVolume,
+        funding:mkt.funding,oi:mkt.oi,spread:mkt.spread,...confluence});
     }else{
       const recent=one.slice(-5);
       const crossed=recent.some(x=>level.kind==='HIGH'?x.c>level.price:x.c<level.price);
@@ -270,7 +314,7 @@ async function analyseMarket(mkt){
   return out;
 }
 function renderRow(x){return `<tr><td><button class="coin-link" onclick="openTradingView('${x.sym}')">${x.sym.replace('USDT','')}/USDT</button></td><td>${fmt(x.price)}</td><td>${x.levelType}</td><td>${fmt(x.level)}</td><td>${fmtTime(x.breakoutTime)}</td><td><span class="pill WAIT">${x.status}</span></td><td>${x.status==='CONFIRMED'?`${x.candleCount} ${x.side==='LONG'?'GREEN':'RED'} candles after sweep`:'Waiting for liquidity sweep and reclaim'}</td></tr>`}
-function renderCard(x){const p=x.plan;return `<article class="card"><div class="head"><div><strong><button class="coin-link" onclick="openTradingView('${x.sym}')">${x.sym.replace('USDT','')}/USDT</button></strong><div class="small">${x.levelType} breakout · liquidity grab + 1m reclaim</div></div><span class="pill ${x.side}">${x.side}</span></div><div class="metrics"><div class="metric"><span>Broken key level</span><b>${fmt(x.level)} · ${x.levelType}</b></div><div class="metric"><span>Breakout time</span><b>${fmtTime(x.breakoutTime)}</b></div><div class="metric"><span>Liquidity grab time</span><b>${fmtTime(x.sweepTime)}</b></div><div class="metric"><span>Grab wick extreme</span><b>${fmt(x.extreme)}</b></div><div class="metric"><span>Entry reference</span><b>${fmt(p.entry)}</b></div><div class="metric"><span>Target source</span><b>${x.targetType}</b></div></div><div class="levels"><div class="level"><small>ENTRY</small><b>${fmt(p.entry)}</b></div><div class="level"><small>STOP — BEYOND GRAB</small><b class="bad">${fmt(p.stop)}</b></div><div class="level"><small>TP — OPPOSING HIGH/LOW</small><b class="good">${fmt(p.tp1)}</b></div></div><div class="note">Entry is a reference at scan time, not an executed order. Stop is placed just beyond the liquidity-grab wick. Target is the nearest opposing previous day/week/month level; recent 1m swing is used only if no opposing key level is available. Verify spread and execution before entry.</div></article>`}function showSignalAlert(items){if(!items.length)return;const toast=$('signalToast');toast.className='signal-toast '+(items.some(x=>x.side==='SHORT')?'short':'');toast.innerHTML=`<strong>⚡ NEW SWEEP CONFIRMATION</strong><br>${items.slice(0,8).map(x=>`${x.side} · ${x.sym} · ${x.levelType}`).join('<br>')}<button class="secondary" onclick="document.getElementById('signalToast').classList.add('hidden')">Dismiss</button>`;toast.classList.remove('hidden')}
+function renderCard(x){const p=x.plan;const n=v=>v===null||v===undefined?'—':(v*100).toFixed(2)+'%';return `<article class="card"><div class="head"><div><strong><button class="coin-link" onclick="openTradingView('${x.sym}')">${x.sym.replace('USDT','')}/USDT</button></strong><div class="small">${x.levelType} breakout · liquidity grab + 1m reclaim</div></div><span class="pill ${x.side}">${x.side}</span></div><div class="metrics"><div class="metric"><span>Confluence score</span><b class="${x.score>=68?'positive':x.score<55?'negative':'neutral'}">${x.score}/100 · ${x.grade}</b></div><div class="metric"><span>1m relative volume</span><b>${x.relVol===null?'—':x.relVol.toFixed(2)+'× average'}</b></div><div class="metric"><span>5m open-interest change</span><b class="${x.oiChange>0?'positive':x.oiChange<0?'negative':''}">${n(x.oiChange)}</b></div><div class="metric"><span>Recent taker buy ratio</span><b>${n(x.tradeBuyRatio)}</b></div><div class="metric"><span>Funding rate · contrarian context</span><b>${n(x.funding)}</b></div><div class="metric"><span>Bid-ask spread</span><b>${n(x.spread)}</b></div><div class="metric"><span>Broken key level</span><b>${fmt(x.level)} · ${x.levelType}</b></div><div class="metric"><span>Breakout / grab time</span><b>${fmtTime(x.breakoutTime)} / ${fmtTime(x.sweepTime)}</b></div><div class="metric"><span>Grab wick extreme</span><b>${fmt(x.extreme)}</b></div><div class="metric"><span>Target source</span><b>${x.targetType}</b></div></div><div class="levels"><div class="level"><small>ENTRY</small><b>${fmt(p.entry)}</b></div><div class="level"><small>STOP — BEYOND GRAB</small><b class="bad">${fmt(p.stop)}</b></div><div class="level"><small>TP — OPPOSING HIGH/LOW</small><b class="good">${fmt(p.tp1)}</b></div></div><div class="note">Score ranks confluence; it does not guarantee direction or profit. Funding is used as a crowding/contrarian clue, not a standalone signal. Open interest and recent public trades are snapshots and may lag. Confirm live spread and execution. Entry is a scan-time reference, not an order.</div></article>`}function showSignalAlert(items){if(!items.length)return;const toast=$('signalToast');toast.className='signal-toast '+(items.some(x=>x.side==='SHORT')?'short':'');toast.innerHTML=`<strong>⚡ NEW SWEEP CONFIRMATION</strong><br>${items.slice(0,8).map(x=>`${x.side} · ${x.sym} · ${x.levelType}`).join('<br>')}<button class="secondary" onclick="document.getElementById('signalToast').classList.add('hidden')">Dismiss</button>`;toast.classList.remove('hidden')}
 function sendNotification(title,body,tag){if('Notification'in window&&Notification.permission==='granted'){try{new Notification(title,{body,tag,renotify:false})}catch(e){}}}
 function notifyScanResults(items){const fresh=items.filter(x=>previousSignals.get(x.sym+'|'+x.levelType)!==x.side);if(fresh.length){showSignalAlert(fresh);sendNotification('Crypto Signal Desk — confirmed sweep',fresh.slice(0,8).map(x=>`${x.sym} ${x.side} ${x.levelType}`).join('\n'),'sweep-'+Date.now())}previousSignals=new Map(items.map(x=>[x.sym+'|'+x.levelType,x.side]));}
 function paintPartial(results,done,total){const all=results.filter(x=>!x.error).flat(),waits=all.filter(x=>x.status!=='CONFIRMED'),confirmed=all.filter(x=>x.status==='CONFIRMED');$('rows').innerHTML=waits.slice(0,settings().maxResults).map(renderRow).join('')||'<tr><td colspan="7" class="muted">No fresh breakout levels currently waiting.</td></tr>';$('cards').innerHTML=confirmed.map(renderCard).join('')||'<p class="muted">No confirmed liquidity-sweep trades yet.</p>';$('marketCount').textContent=done;$('longs').textContent=confirmed.filter(x=>x.side==='LONG').length;$('shorts').textContent=confirmed.filter(x=>x.side==='SHORT').length;$('waits').textContent=waits.length;$('status').textContent=`Scanned ${done}/${total} markets · ${waits.length} waiting levels · ${confirmed.length} confirmed trades`;}
@@ -279,6 +323,6 @@ initSettings();['minVol','maxResults'].forEach(id=>$(id).addEventListener('chang
 $('downloadResults').addEventListener('click',exportResults);$('downloadSource').addEventListener('click',exportSource);$('clearResults').addEventListener('click',clearAllTrades);$('resultRows').addEventListener('click',e=>{const b=e.target.closest('[data-delete-index]');if(b)deleteTrade(Number(b.dataset.deleteIndex))});$('refreshNews').addEventListener('click',loadMarketNews);renderHistory();loadMarketNews();setInterval(loadMarketNews,300000);setInterval(updateHistoryPrices,30000);updateHistoryPrices();
 $('scanNow').addEventListener('click',run);
 $('notify').addEventListener('click',async()=>{if(!('Notification'in window)){$('notifyStatus').textContent='Browser notifications not supported';return}try{const permission=await Notification.requestPermission();$('notifyStatus').textContent=permission==='granted'?'Notifications enabled':'Permission not granted';$('notify').textContent=permission==='granted'?'Notifications enabled':'Enable desktop trade alerts';}catch(e){$('notifyStatus').textContent='Could not enable notifications'}});
-$('status').textContent='Ready · institutional confluence mode · scan for validated daily, weekly and monthly liquidity events.';
+$('status').textContent='Ready · professional scalp confluence ranking · validate signals before execution.';
 run();
 </script></body></html>
