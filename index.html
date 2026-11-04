@@ -276,7 +276,7 @@ function setupForMarket(mkt,five,fifteen,daily,ctx,markBars){
  const ema50=ema(closes,50).at(-1),vw=vwapBands(fifteen),adx15=adx(fifteen),trendLong=fifteen.at(-1).c>ema50&&fifteen.at(-1).c>vw.vwap&&vw.slope>0&&adx15>20,trendShort=fifteen.at(-1).c<ema50&&fifteen.at(-1).c<vw.vwap&&vw.slope<0&&adx15>20;
  const perp=ctx.perpCvd||{slope:0,delta:0},spot=ctx.spotCvd||{slope:0,delta:0},cvdLong=perp.slope>0&&perp.last3>0,cvdShort=perp.slope<0&&perp.last3<0;
  const basis=Number.isFinite(mkt.mark)&&Number.isFinite(mkt.index)&&mkt.index>0?(mkt.mark-mkt.index)/mkt.index:null,funding=mkt.funding,oi=ctx.oiChange,oiHigh=ctx.oiAt30dHigh===true;
- const fundingAgainst=(side)=>fundingIsExtreme(ctx,side),basisOk=basis===null||Math.abs(basis)<.002;
+ const fundingAgainst=(side)=>fundingIsExtreme(ctx,side),fundingRanks=(ctx.fundingHistory||[]).map(x=>x.rate).filter(Number.isFinite).sort((x,y)=>x-y),fundingPctRank=fundingRanks.length?fundingRanks.filter(x=>x<=funding).length/fundingRanks.length:null,fundingCrowdLong=fundingPctRank!==null?fundingPctRank>=.9:Number.isFinite(funding)&&funding>=.0005,fundingCrowdShort=fundingPctRank!==null?fundingPctRank<=.1:Number.isFinite(funding)&&funding<=-.0005,basisOk=basis===null||Math.abs(basis)<.002;
  const fundingOk=(side)=>!fundingAgainst(side)&&basisOk;
  const widths=bbWidth(five,20),widthNow=widths.at(-1)||0,widthSorted=widths.slice(-100).slice().sort((x,y)=>x-y),widthRank=widthSorted.length?widthSorted.filter(x=>x<=widthNow).length/widthSorted.length:1;
  const atr20=mean(a.slice(-20)),box=five.slice(-13,-1),boxHi=Math.max(...box.map(x=>x.h)),boxLo=Math.min(...box.map(x=>x.l)),compressed=atr20>0&&atr<=atr20*.60&&widthRank<=.20;
@@ -289,7 +289,7 @@ function setupForMarket(mkt,five,fifteen,daily,ctx,markBars){
    if(plan.rr<minRR||!plan.stopPct||fundingStampNear)return;
    const full=score.score>=11,half=score.score>=9;
    const sizeFactor=reg.name==='NORMAL'?(full?1:half?.5:0):reg.name==='ELEVATED'?.5:reg.name==='SHOCK'?.5:0;
-   plan.sizeFactor=sizeFactor;plan.tp1=side==='LONG'?price+plan.stopDistance:price-plan.stopDistance;plan.tp2=target;plan.tp3=meta.tp3??null;
+   plan.sizeFactor=sizeFactor;plan.tp1=meta.tp1??(side==='LONG'?price+plan.stopDistance:price-plan.stopDistance);plan.tp2=target;plan.tp3=meta.tp3??null;
    candidates.push({sym:mkt.symbol,price,markPrice:mkt.mark,indexPrice:mkt.index,side,setup,status:score.score>=9?'CONFIRMED':'WATCHLIST',levelType:setup,level:meta.level??null,confirmationTime:last.t,breakoutTime:last.t,sweepTime:meta.sweepTime??null,plan,score:score.score,scoreMax:12,grade:score.tier,parts:score.parts,regime:reg.name,atrPct,wickRatio:reg.wickRatio,rv,adx:adx15,rsi:r,macd:hist.at(-1),mfi:mf,cmf:cm,obv:ob,cvd:perp.delta,spotCvd:spot.delta,oiChange:oi,funding,basis,spread:mkt.spread,quoteVolume:mkt.quoteVolume,liquidationProxy:meta.liquidationProxy||false,execution:setup.startsWith('D')?'MAKER ONLY — skip if taker':'LIMIT PREFERRED',riskTier:full?'FULL':half?'HALF':'WATCHLIST',fundingStampNear});
  };
  if(reg.name==='DEAD'||mkt.spread===null||mkt.spread>=.0003||!basisOk)return candidates;
@@ -310,7 +310,7 @@ function setupForMarket(mkt,five,fifteen,daily,ctx,markBars){
  // B — Funding squeeze reversal: crowded funding + OI high + stall/loss of VWAP + completed 5m swing break.
  const swingLow=Math.min(...five.slice(-7,-1).map(x=>x.l)),swingHigh=Math.max(...five.slice(-7,-1).map(x=>x.h));
  for(const side of ['LONG','SHORT']){
-  const crowd=fundingAgainst(side)&&oiHigh,stall=side==='SHORT'?(price<swingLow||price<vw.vwap):(price>swingHigh||price>vw.vwap);
+  const crowd=(side==='SHORT'?fundingCrowdLong:fundingCrowdShort)&&oiHigh,stall=side==='SHORT'?(price<swingLow||price<vw.vwap):(price>swingHigh||price>vw.vwap);
   const ratioExtreme=side==='SHORT'?ctx.longShortRatio>=1.8:ctx.longShortRatio>0&&ctx.longShortRatio<=.55;
   const trigger=side==='SHORT'?last.c<swingLow:last.c>swingHigh;
   const flow=side==='SHORT'?cvdShort:cvdLong,trend=side==='SHORT'?trendShort:trendLong;
@@ -328,8 +328,8 @@ function setupForMarket(mkt,five,fifteen,daily,ctx,markBars){
  // D — Conditional VWAP fade: neutral funding, ADX<20, ±2σ, extreme RSI and exhausting CVD; maker only.
  const band=vwapBands(five),upper=band.vwap+2*band.sigma,lower=band.vwap-2*band.sigma,neutralFunding=Number.isFinite(funding)&&Math.abs(funding)<.0005;
  if(adx(five)<20&&neutralFunding&&reg.name!=='SHOCK'){
-  if(price<=lower&&r<30&&perp.slope>0){const score=tradeMatrix('LONG',true,true,true,rv,hist.at(-1)>hist.at(-2),true,true,true);emit('LONG','D · VWAP BAND FADE',score,Math.min(...five.slice(-5).map(x=>x.l)),band.vwap,'fade',{level:lower});}
-  if(price>=upper&&r>70&&perp.slope<0){const score=tradeMatrix('SHORT',true,true,true,rv,hist.at(-1)<hist.at(-2),true,true,true);emit('SHORT','D · VWAP BAND FADE',score,Math.max(...five.slice(-5).map(x=>x.h)),band.vwap,'fade',{level:upper});}
+  if(price<=lower&&r<30&&perp.slope>0){const score=tradeMatrix('LONG',true,true,true,rv,hist.at(-1)>hist.at(-2),true,true,true);emit('LONG','D · VWAP BAND FADE',score,Math.min(...five.slice(-5).map(x=>x.l)),band.vwap+band.sigma,'fade',{level:lower,tp1:band.vwap});}
+  if(price>=upper&&r>70&&perp.slope<0){const score=tradeMatrix('SHORT',true,true,true,rv,hist.at(-1)<hist.at(-2),true,true,true);emit('SHORT','D · VWAP BAND FADE',score,Math.max(...five.slice(-5).map(x=>x.h)),band.vwap-band.sigma,'fade',{level:upper,tp1:band.vwap});}
  }
  return candidates.sort((x,y)=>y.score-x.score);
 }
