@@ -250,79 +250,39 @@ function tradeFlow(trades){
 function bbWidth(b,n=20){const widths=[];for(let i=n-1;i<b.length;i++){const a=b.slice(i-n+1,i+1).map(x=>x.c),m=mean(a),sd=Math.sqrt(mean(a.map(x=>(x-m)*(x-m))));widths.push(m?4*sd/m:0)}return widths}
 function vwapBands(b){const day=b.at(-1).t-(b.at(-1).t%86400000),ss=b.filter(x=>x.t>=day),v=ss.reduce((a,x)=>a+x.v,0)||1,wap=ss.reduce((a,x)=>a+((x.h+x.l+x.c)/3)*x.v,0)/v,variance=ss.reduce((a,x)=>a+Math.pow((x.h+x.l+x.c)/3-wap,2)*x.v,0)/v;return{vwap:wap,sigma:Math.sqrt(variance),slope:wap-((ss.slice(0,-2).reduce((a,x)=>a+((x.h+x.l+x.c)/3)*x.v,0))/(ss.slice(0,-2).reduce((a,x)=>a+x.v,0)||1))}}
 function tradeMatrix(side,trend,location,trigger,rv,mom,cvd,oi,funding){
- const parts=[],add=(name,ok,pts)=>{parts.push({name,ok,pts});return ok?pts:0};
- let score=0;score+=add('15m trend + VWAP slope',trend,2);score+=add('Location: VWAP band / 20-bar extreme / range edge',location,2);score+=add('Completed 5m close trigger',trigger,2);score+=add('5m RVOL ≥ 1.5',rv>=1.5,1);score+=add('MACD histogram + RSI alignment',mom,1);score+=add('CVD slope agrees; no divergence',cvd,2);score+=add('OI direction matches setup thesis',oi,1);score+=add('Funding/basis acceptable',funding,1);
- return{score,parts,tier:score>=11?'FULL SIZE':score>=9?'HALF SIZE':score>=7?'WATCHLIST':'NO TRADE',grade:score>=11?'A':score>=9?'B':score>=7?'C':'D'};
+ const parts=[{name:'5m RVOL ≥ 1.5',ok:rv>=1.5},{name:'CVD absorption agrees',ok:cvd},{name:'15m trend agreement',ok:trend},{name:'Funding supports / neutral',ok:funding}];
+ const score=parts.reduce((n,p)=>n+(p.ok?1:0),0);
+ return{score,parts,tier:['0.25× size','0.50× size','0.75× size','1.00× size','1.25× size'][score],grade:score+'/4'};
 }
-function riskPlanPerp(side,entry,extreme,atr,regime,target,stopMode='atr'){
- let stopDist=stopMode==='cascade'?Math.max(Math.abs(entry-extreme)+atr*.35,atr*1.1):stopMode==='box'?Math.min(Math.abs(entry-extreme),atr*1.4):stopMode==='fade'?atr:atr*1.2;
- const bandFloor=regime.name==='NORMAL'?entry*.0025:regime.name==='ELEVATED'?entry*.00425:regime.name==='SHOCK'?entry*.0055:0;stopDist=Math.max(stopDist,bandFloor);
- const stop=side==='LONG'?entry-stopDist:entry+stopDist,dist=Math.abs(entry-stop),reward=Math.abs(target-entry),rr=dist?reward/dist:0;
- return{entry,stop,tp1:side==='LONG'?entry+dist:entry-dist,tp2:target,tp3:null,rr,atr,stopPct:dist/entry,stopDistance:dist,regime:regime.name,sizeFactor:regime.name==='NORMAL'?1:regime.name==='ELEVATED'?.5:regime.name==='SHOCK'?.5:0,stopMode};
+function riskPlanPerp(side,entry,extreme,atr,regime,target,stopMode='cascade'){
+ const buffer=Math.max(atr*.15,entry*.0002),stop=side==='LONG'?extreme-buffer:extreme+buffer;
+ const dist=Math.abs(entry-stop),targetPrice=side==='LONG'?entry+dist*2.5:entry-dist*2.5;
+ return{entry,stop,tp1:targetPrice,tp2:null,tp3:null,rr:2.5,atr,stopPct:dist/entry,stopDistance:dist,regime:regime.name,sizeFactor:1,stopMode,entryType:'RESTING LIMIT',targetR:2.5};
 }
 function fundingIsExtreme(ctx,side){if(!Number.isFinite(ctx.funding))return false;const hist=ctx.fundingHistory||[],sorted=hist.map(x=>x.rate).filter(Number.isFinite).sort((a,b)=>a-b);if(sorted.length<10)return Math.abs(ctx.funding)>=.0005;const p=sorted.filter(x=>x<=ctx.funding).length/sorted.length;return side==='LONG'?p>=.9:p<=.1}
 function findSweepRecent(b,side){if(b.length<24)return null;for(let i=b.length-1;i>=Math.max(21,b.length-5);i--){const x=b[i],prior=b.slice(i-20,i),lo=Math.min(...prior.map(q=>q.l)),hi=Math.max(...prior.map(q=>q.h));if(side==='LONG'&&x.l<lo&&x.c>lo)return{extreme:x.l,level:lo,bar:x,index:i};if(side==='SHORT'&&x.h>hi&&x.c<hi)return{extreme:x.h,level:hi,bar:x,index:i}}return null}
 function setupForMarket(mkt,five,fifteen,daily,ctx,markBars){
- const last=five.at(-1),markLast=markBars?.at(-1)?.c||mkt.mark||mkt.last,price=markLast,reg=regimeOf(five,markBars),a=atrSeries(markBars?.length?markBars:five),atr=a.at(-1),atrPct=atr/price;
- const avgVol=mean(five.slice(-21,-1).map(x=>x.v))||1,rv=last.v/avgVol,closes=fifteen.map(x=>x.c),hist=macdHist(five.map(x=>x.c)),r=rsi(five.map(x=>x.c)),mf=moneyFlow(five),cm=cmf(five),ob=obvSlope(five);
- const ema50=ema(closes,50).at(-1),vw=vwapBands(fifteen),adx15=adx(fifteen),trendLong=fifteen.at(-1).c>ema50&&fifteen.at(-1).c>vw.vwap&&vw.slope>0&&adx15>20,trendShort=fifteen.at(-1).c<ema50&&fifteen.at(-1).c<vw.vwap&&vw.slope<0&&adx15>20;
- const perp=ctx.perpCvd||{slope:0,delta:0},spot=ctx.spotCvd||{slope:0,delta:0},cvdLong=perp.slope>0&&perp.last3>0,cvdShort=perp.slope<0&&perp.last3<0;
- const basis=Number.isFinite(mkt.mark)&&Number.isFinite(mkt.index)&&mkt.index>0?(mkt.mark-mkt.index)/mkt.index:null,funding=mkt.funding,oi=ctx.oiChange,oiHigh=ctx.oiAt30dHigh===true;
- const fundingAgainst=(side)=>fundingIsExtreme(ctx,side),fundingRanks=(ctx.fundingHistory||[]).map(x=>x.rate).filter(Number.isFinite).sort((x,y)=>x-y),fundingPctRank=fundingRanks.length?fundingRanks.filter(x=>x<=funding).length/fundingRanks.length:null,fundingCrowdLong=fundingPctRank!==null?fundingPctRank>=.9:Number.isFinite(funding)&&funding>=.0005,fundingCrowdShort=fundingPctRank!==null?fundingPctRank<=.1:Number.isFinite(funding)&&funding<=-.0005,basisOk=basis===null||Math.abs(basis)<.002;
- const fundingOk=(side)=>!fundingAgainst(side)&&basisOk;
- const widths=bbWidth(five,20),widthNow=widths.at(-1)||0,widthSorted=widths.slice(-100).slice().sort((x,y)=>x-y),widthRank=widthSorted.length?widthSorted.filter(x=>x<=widthNow).length/widthSorted.length:1;
- const atr20=mean(a.slice(-20)),box=five.slice(-13,-1),boxHi=Math.max(...box.map(x=>x.h)),boxLo=Math.min(...box.map(x=>x.l)),compressed=atr20>0&&atr<=atr20*.80&&widthRank<=.30;
- const candidates=[],now=Date.now(),nextFunding=Number(mkt.nextFundingTime)||0,msToFunding=nextFunding?nextFunding-now:null;
- const fundingStampNear=msToFunding!==null&&msToFunding>=0&&msToFunding<=5*60000;
- const emit=(side,setup,score,extreme,target,stopMode,meta={})=>{
-   if(score.score<7)return;if(reg.name==='SHOCK'&&!setup.startsWith('A ·'))return;
-   const plan=riskPlanPerp(side,price,extreme,atr,reg,target,stopMode);
-   const minRR=setup.startsWith('D')?1:1;
-   if(plan.rr<minRR||!plan.stopPct||fundingStampNear)return;
-   const full=score.score>=11,half=score.score>=9;
-   const sizeFactor=reg.name==='NORMAL'?(full?1:half?.5:0):reg.name==='ELEVATED'?.5:reg.name==='SHOCK'?.5:0;
-   plan.sizeFactor=sizeFactor;plan.tp1=meta.tp1??(side==='LONG'?price+plan.stopDistance:price-plan.stopDistance);plan.tp2=target;plan.tp3=meta.tp3??null;
-   candidates.push({sym:mkt.symbol,price,markPrice:mkt.mark,indexPrice:mkt.index,side,setup,status:score.score>=9?'CONFIRMED':'WATCHLIST',levelType:setup,level:meta.level??null,confirmationTime:last.t,breakoutTime:last.t,sweepTime:meta.sweepTime??null,plan,score:score.score,scoreMax:12,grade:score.tier,parts:score.parts,regime:reg.name,atrPct,wickRatio:reg.wickRatio,rv,adx:adx15,rsi:r,macd:hist.at(-1),mfi:mf,cmf:cm,obv:ob,cvd:perp.delta,spotCvd:spot.delta,oiChange:oi,funding,basis,spread:mkt.spread,quoteVolume:mkt.quoteVolume,liquidationProxy:meta.liquidationProxy||false,execution:setup.startsWith('D')?'MAKER ONLY — skip if taker':'LIMIT PREFERRED',riskTier:full?'FULL':half?'HALF':'WATCHLIST',fundingStampNear});
+ const last=five.at(-1),price=last.c,atr=atrSeries(five,14).at(-1),atrPct=atr/price,reg=regimeOf(five,markBars);
+ const avgVol=mean(five.slice(-21,-1).map(x=>x.v))||1,rv=last.v/avgVol,closes=fifteen.map(x=>x.c),ema50=ema(closes,50).at(-1),vw=vwapBands(fifteen);
+ const trendLong=fifteen.length>50&&fifteen.at(-1).c>ema50&&fifteen.at(-1).c>vw.vwap&&vw.slope>0;
+ const trendShort=fifteen.length>50&&fifteen.at(-1).c<ema50&&fifteen.at(-1).c<vw.vwap&&vw.slope<0;
+ const perp=ctx.perpCvd||{slope:0,delta:0,last3:0},cvdLong=perp.slope>0&&perp.last3>0,cvdShort=perp.slope<0&&perp.last3<0;
+ const funding=Number.isFinite(mkt.funding)?mkt.funding:ctx.funding,basis=Number.isFinite(mkt.mark)&&Number.isFinite(mkt.index)&&mkt.index>0?(mkt.mark-mkt.index)/mkt.index:null;
+ const basisOk=basis===null||Math.abs(basis)<.002,fundingAgainst=side=>fundingIsExtreme({...ctx,funding},side);
+ const nextFunding=Number(mkt.nextFundingTime)||0,msToFunding=nextFunding?nextFunding-Date.now():null,fundingStampNear=msToFunding!==null&&msToFunding>=0&&msToFunding<=5*60000;
+ const spreadOk=Number.isFinite(mkt.spread)&&mkt.spread<.0003,candidates=[];
+ if(five.length<30||!Number.isFinite(atrPct)||atrPct<.0015||reg.name==='DEAD'||!spreadOk||!basisOk||fundingStampNear)return candidates;
+ const emit=(side,sw)=>{
+  if(!sw||fundingAgainst(side))return;
+  const trend=side==='LONG'?trendLong:trendShort,cvd=side==='LONG'?cvdLong:cvdShort,fundingSupport=Number.isFinite(funding)&&!fundingAgainst(side);
+  const score=tradeMatrix(side,trend,true,true,rv,false,cvd,false,fundingSupport),entry=sw.level;
+  const plan=riskPlanPerp(side,entry,sw.extreme,atr,reg,0,'cascade');
+  if(!plan.stopDistance||!Number.isFinite(plan.stop)||!Number.isFinite(plan.tp1))return;
+  plan.sizeFactor=[.25,.5,.75,1,1.25][score.score]*(reg.name==='ELEVATED'?.75:reg.name==='SHOCK'?.5:1);
+  plan.entryType='RESTING LIMIT AT RECLAIM LEVEL';
+  candidates.push({sym:mkt.symbol,price,markPrice:mkt.mark,indexPrice:mkt.index,side,setup:'A · 20-BAR SWEEP & RECLAIM',status:'CONFIRMED',levelType:'20-bar sweep/reclaim',level:sw.level,confirmationTime:sw.bar.t,breakoutTime:sw.bar.t,sweepTime:sw.bar.t,extreme:sw.extreme,plan,score:score.score,scoreMax:4,grade:score.grade,parts:score.parts,regime:reg.name,atrPct,rv,adx:null,rsi:null,macd:null,cvd:perp.delta,oiChange:ctx.oiChange,funding,basis,spread:mkt.spread,quoteVolume:mkt.quoteVolume,execution:'RESTING LIMIT — NO TAKER CHASE',riskTier:score.tier,fundingStampNear});
  };
- if(reg.name==='DEAD'||mkt.spread===null||mkt.spread>=.0003||!basisOk)return candidates;
- const prior20=five.slice(-21,-1),priorLow=Math.min(...prior20.map(x=>x.l)),priorHigh=Math.max(...prior20.map(x=>x.h));
- // A — Cascade Sweep & Reclaim: liquidation print OR RVOL>=2 with OI falling 1.5–3%; reclaim and CVD absorption.
- for(const side of ['LONG','SHORT']){
-  const sw=findSweepRecent(five,side);if(!sw)continue;
-  const forcedOi=Number.isFinite(oi)&&oi<=-.005&&oi>=-.05,liquidationEvidence=ctx.liquidationDetected===true,volumeEvidence=rv>=2&&(forcedOi||liquidationEvidence);
-  const absorption=side==='LONG'?perp.slope>0&&perp.last3>0:perp.slope<0&&perp.last3<0;
-  const oiScore=forcedOi||liquidationEvidence;
-  const trend=side==='LONG'?trendLong:trendShort,flow=absorption&&(side==='LONG'?mf>=45:mf<=55);
-  if(volumeEvidence&&absorption&&fundingOk(side)&&trend){
-   const score=tradeMatrix(side,trend,true,last.c>priorLow&&last.c<priorHigh,rv,side==='LONG'?hist.at(-1)>hist.at(-2)&&r>=50&&r<=70:hist.at(-1)<hist.at(-2)&&r>=30&&r<=50,flow,oiScore,true);
-   const target=side==='LONG'?price+atr*2.0:price-atr*2.0;
-   emit(side,'A · CASCADE SWEEP & RECLAIM',score,sw.extreme,target,'cascade',{level:sw.level,sweepTime:sw.bar.t,liquidationProxy:!liquidationEvidence});
-  }
- }
- // B — Funding squeeze reversal: crowded funding + OI high + stall/loss of VWAP + completed 5m swing break.
- const swingLow=Math.min(...five.slice(-7,-1).map(x=>x.l)),swingHigh=Math.max(...five.slice(-7,-1).map(x=>x.h));
- for(const side of ['LONG','SHORT']){
-  const crowd=(side==='SHORT'?fundingCrowdLong:fundingCrowdShort)&&Number.isFinite(oi)&&oi>=.005,stall=side==='SHORT'?(price<swingLow||price<vw.vwap):(price>swingHigh||price>vw.vwap);
-  const ratioExtreme=side==='SHORT'?ctx.longShortRatio>=1.6:ctx.longShortRatio>0&&ctx.longShortRatio<=.65;
-  const trigger=side==='SHORT'?last.c<swingLow:last.c>swingHigh;
-  const flow=side==='SHORT'?cvdShort:cvdLong,trend=side==='SHORT'?trendShort:trendLong;
-  if(crowd&&stall&&ratioExtreme&&trigger&&flow){
-   const score=tradeMatrix(side,trend,true,true,rv,side==='LONG'?hist.at(-1)>hist.at(-2):hist.at(-1)<hist.at(-2),flow,true,true);
-   const target=side==='LONG'?price+atr*2:price-atr*2;
-   emit(side,'B · FUNDING SQUEEZE REVERSAL',score,side==='LONG'?swingLow:swingHigh,target,'atr',{level:side==='LONG'?swingHigh:swingLow});
-  }
- }
- // C — Compression breakout: BB width lowest quintile, ATR contraction, RVOL>=2, OI +1%, CVD and basis/funding gates.
- if(compressed&&rv>=1.5&&Number.isFinite(oi)&&oi>=.003&&reg.name!=='SHOCK'){
-  if(last.c>boxHi&&cvdLong&&fundingOk('LONG')){const score=tradeMatrix('LONG',trendLong,true,true,rv,hist.at(-1)>hist.at(-2)&&r>=50,cvdLong,true,true);emit('LONG','C · COMPRESSION BREAKOUT',score,boxLo,price+atr*3,'box',{level:boxHi});}
-  if(last.c<boxLo&&cvdShort&&fundingOk('SHORT')){const score=tradeMatrix('SHORT',trendShort,true,true,rv,hist.at(-1)<hist.at(-2)&&r<=50,cvdShort,true,true);emit('SHORT','C · COMPRESSION BREAKOUT',score,boxHi,price-atr*3,'box',{level:boxLo});}
- }
- // D — Conditional VWAP fade: neutral funding, ADX<20, ±2σ, extreme RSI and exhausting CVD; maker only.
- const band=vwapBands(five),upper=band.vwap+1.8*band.sigma,lower=band.vwap-1.8*band.sigma,neutralFunding=Number.isFinite(funding)&&Math.abs(funding)<.0005;
- if(adx(five)<20&&neutralFunding&&reg.name!=='SHOCK'){
-  if(price<=lower*1.001&&r<35&&perp.slope>0){const score=tradeMatrix('LONG',true,true,true,rv,hist.at(-1)>hist.at(-2),true,true,true);emit('LONG','D · VWAP BAND FADE',score,Math.min(...five.slice(-5).map(x=>x.l)),band.vwap+band.sigma,'fade',{level:lower,tp1:band.vwap});}
-  if(price>=upper*.999&&r>65&&perp.slope<0){const score=tradeMatrix('SHORT',true,true,true,rv,hist.at(-1)<hist.at(-2),true,true,true);emit('SHORT','D · VWAP BAND FADE',score,Math.max(...five.slice(-5).map(x=>x.h)),band.vwap-band.sigma,'fade',{level:upper,tp1:band.vwap});}
- }
+ emit('LONG',findSweepRecent(five,'LONG'));emit('SHORT',findSweepRecent(five,'SHORT'));
  return candidates.sort((x,y)=>y.score-x.score);
 }
 async function getDerivativesContext(sym){
@@ -349,12 +309,12 @@ async function analyseMarket(mkt){
  const merged={...ctx,funding:Number.isFinite(mkt.funding)?mkt.funding:ctx.funding};
  return setupForMarket(mkt,five,fifteen,[],merged,markBars);
 }
-function renderRow(x){const ok=x.status==='CONFIRMED',p=x.plan||{},cfg=settings(),cash=cfg.equity*cfg.riskPct,rawQty=cfg.equity>0&&p.stopDistance>0?cash/p.stopDistance:null,qty=rawQty!==null?Math.min(rawQty,cfg.equity*cfg.levCap/p.entry):null,notional=qty?qty*p.entry:null,lev=notional&&cfg.equity?notional/cfg.equity:null,actualRisk=qty?qty*p.stopDistance:null;const name=x.sym.replace('USDT','')+'/USDT';return '<tr><td><button class="coin-link" onclick="openTradingView(\\''+x.sym+'\\')">'+name+'</button></td><td>'+fmt(x.price)+'</td><td>'+x.setup+'</td><td>'+fmt(x.level)+'</td><td>'+fmtTime(x.confirmationTime)+'</td><td><span class="pill '+(ok?x.side:'WAIT')+'">'+(ok?x.side+' · '+x.riskTier:x.status)+'</span></td><td>'+fmt(p.entry)+'</td><td>'+fmt(p.stop)+'</td><td>'+fmt(p.tp1)+' / '+fmt(p.tp2)+'</td><td>'+p.rr.toFixed(2)+'R</td><td>'+x.score+'/12 · '+x.grade+' · '+x.regime+' · OI '+signedPct(x.oiChange)+' · F '+signedPct(x.funding)+' · '+(qty?'Qty '+fmt(qty)+' · '+(lev?lev.toFixed(1)+'×':'')+' · risk '+fmt(actualRisk)+' USDT':'Enter equity for qty')+'</td></tr>'}
+function renderRow(x){const ok=x.status==='CONFIRMED',p=x.plan||{},cfg=settings(),cash=cfg.equity*cfg.riskPct,rawQty=cfg.equity>0&&p.stopDistance>0?cash/p.stopDistance:null,qty=rawQty!==null?Math.min(rawQty,cfg.equity*cfg.levCap/p.entry):null,notional=qty?qty*p.entry:null,lev=notional&&cfg.equity?notional/cfg.equity:null,actualRisk=qty?qty*p.stopDistance:null;const name=x.sym.replace('USDT','')+'/USDT';return '<tr><td><button class="coin-link" onclick="openTradingView(\\''+x.sym+'\\')">'+name+'</button></td><td>'+fmt(x.price)+'</td><td>'+x.setup+'</td><td>'+fmt(x.level)+'</td><td>'+fmtTime(x.confirmationTime)+'</td><td><span class="pill '+(ok?x.side:'WAIT')+'">'+(ok?x.side+' · '+x.riskTier:x.status)+'</span></td><td>'+fmt(p.entry)+'</td><td>'+fmt(p.stop)+'</td><td>'+fmt(p.tp1)+' / '+fmt(p.tp2)+'</td><td>'+p.rr.toFixed(2)+'R</td><td>'+x.score+'/4 · '+x.grade+' · size '+p.sizeFactor+'× · '+x.regime+' · OI '+signedPct(x.oiChange)+' · F '+signedPct(x.funding)+' · '+(qty?'Qty '+fmt(qty)+' · '+(lev?lev.toFixed(1)+'×':'')+' · risk '+fmt(actualRisk)+' USDT':'Enter equity for qty')+'</td></tr>'}
 function renderCard(x){const p=x.plan;const n=v=>v===null||v===undefined?'—':(v*100).toFixed(2)+'%';return `<article class="card"><div class="head"><div><strong><button class="coin-link" onclick="openTradingView('${x.sym}')">${x.sym.replace('USDT','')}/USDT</button></strong><div class="small">${x.levelType} breakout · liquidity grab + 5m reclaim</div></div><span class="pill ${x.side}">${x.side}</span></div><div class="metrics"><div class="metric"><span>Confluence score</span><b class="${x.score>=68?'positive':x.score<55?'negative':'neutral'}">${x.score}/100 · ${x.grade}</b></div><div class="metric"><span>5m relative volume</span><b>${x.relVol===null?'—':x.relVol.toFixed(2)+'× average'}</b></div><div class="metric"><span>5m open-interest change</span><b class="${x.oiChange>0?'positive':x.oiChange<0?'negative':''}">${n(x.oiChange)}</b></div><div class="metric"><span>Recent taker buy ratio</span><b>${n(x.tradeBuyRatio)}</b></div><div class="metric"><span>Funding rate · contrarian context</span><b>${n(x.funding)}</b></div><div class="metric"><span>Bid-ask spread</span><b>${n(x.spread)}</b></div><div class="metric"><span>Broken key level</span><b>${fmt(x.level)} · ${x.levelType}</b></div><div class="metric"><span>Breakout / grab time</span><b>${fmtTime(x.breakoutTime)} / ${fmtTime(x.sweepTime)}</b></div><div class="metric"><span>Grab wick extreme</span><b>${fmt(x.extreme)}</b></div><div class="metric"><span>Target source</span><b>${x.targetType}</b></div></div><div class="levels"><div class="level"><small>ENTRY</small><b>${fmt(p.entry)}</b></div><div class="level"><small>STOP — BEYOND GRAB</small><b class="bad">${fmt(p.stop)}</b></div><div class="level"><small>TP — OPPOSING HIGH/LOW</small><b class="good">${fmt(p.tp1)}</b></div></div><div class="note">Score ranks confluence; it does not guarantee direction or profit. Funding is used as a crowding/contrarian clue, not a standalone signal. Open interest and recent public trades are snapshots and may lag. Confirm live spread and execution. Entry is a scan-time reference, not an order.</div></article>`}function showSignalAlert(items){if(!items.length)return;const toast=$('signalToast');toast.className='signal-toast '+(items.some(x=>x.side==='SHORT')?'short':'');toast.innerHTML=`<strong>⚡ NEW SWEEP CONFIRMATION</strong><br>${items.slice(0,8).map(x=>`${x.side} · ${x.sym} · ${x.levelType}`).join('<br>')}<button class="secondary" onclick="document.getElementById('signalToast').classList.add('hidden')">Dismiss</button>`;toast.classList.remove('hidden')}
 function sendNotification(title,body,tag){if('Notification'in window&&Notification.permission==='granted'){try{new Notification(title,{body,tag,renotify:false})}catch(e){}}}
 function notifyScanResults(items){const fresh=items.filter(x=>previousSignals.get(x.sym+'|'+x.levelType)!==x.side);if(fresh.length){showSignalAlert(fresh);sendNotification('Crypto Signal Desk — confirmed sweep',fresh.slice(0,8).map(x=>`${x.sym} ${x.side} ${x.levelType}`).join('\n'),'sweep-'+Date.now())}previousSignals=new Map(items.map(x=>[x.sym+'|'+x.levelType,x.side]));}
 function paintPartial(results,done,total){const all=results.filter(x=>!x.error).flat(),waits=all.filter(x=>x.status!=='CONFIRMED'),confirmed=all.filter(x=>x.status==='CONFIRMED');$('rows').innerHTML=[...confirmed,...waits].sort((a,b)=>b.score-a.score).slice(0,settings().maxResults).map(renderRow).join('')||'<tr><td colspan="11">No qualifying setups yet.</td></tr>';$('marketCount').textContent=done;$('longs').textContent=confirmed.filter(x=>x.side==='LONG').length;$('shorts').textContent=confirmed.filter(x=>x.side==='SHORT').length;$('waits').textContent=waits.length;$('status').textContent='Scanning '+done+'/'+total+' markets · '+waits.length+' watchlist · '+confirmed.length+' confirmed';}
-async function run(){if(scanBusy)return;scanBusy=true;$('status').textContent='Loading active Bybit USDT perpetual markets…';$('rows').innerHTML='<tr><td colspan="11">Scanning 5m perpetual-futures setups…</td></tr>';try{const universe=await pickUniverse(),results=[],batchSize=12;for(let i=0;i<universe.length;i+=batchSize){const batch=universe.slice(i,i+batchSize);const out=await Promise.all(batch.map(async m=>{try{return await analyseMarket(m)}catch(e){return{error:e.message,sym:m.symbol}}}));results.push(...out);paintPartial(results,Math.min(i+batch.length,universe.length),universe.length)}const all=results.filter(x=>!x.error).flat(),raw=all.filter(x=>x.status==='CONFIRMED'),confirmed=[...new Map(raw.map(x=>[x.sym+'|'+x.side+'|'+x.setup,x])).values()],waits=all.filter(x=>x.status!=='CONFIRMED');$('rows').innerHTML=[...confirmed,...waits].sort((a,b)=>b.score-a.score).slice(0,settings().maxResults).map(renderRow).join('')||'<tr><td colspan="11" class="muted">No qualifying setups. Check the regime and cost filters; do not force a trade.</td></tr>';$('marketCount').textContent=universe.length;$('longs').textContent=confirmed.filter(x=>x.side==='LONG').length;$('shorts').textContent=confirmed.filter(x=>x.side==='SHORT').length;$('waits').textContent=waits.length;notifyScanResults(confirmed);recordTrades(confirmed);$('status').textContent='Scan complete · '+universe.length+' markets · '+waits.length+' waiting level events · '+confirmed.length+' 5m-confirmed trades';}catch(e){$('status').textContent='Scan failed: '+e.message;$('rows').innerHTML='<tr><td colspan="11" class="bad">'+e.message+'</td></tr>'}finally{scanBusy=false}}
+async function run(){if(scanBusy)return;scanBusy=true;$('status').textContent='Loading active Bybit USDT perpetual markets…';$('rows').innerHTML='<tr><td colspan="11">Scanning 5m perpetual-futures setups…</td></tr>';try{const universe=await pickUniverse(),results=[],batchSize=12;for(let i=0;i<universe.length;i+=batchSize){const batch=universe.slice(i,i+batchSize);const out=await Promise.all(batch.map(async m=>{try{return await analyseMarket(m)}catch(e){return{error:e.message,sym:m.symbol}}}));results.push(...out);paintPartial(results,Math.min(i+batch.length,universe.length),universe.length)}const all=results.filter(x=>!x.error).flat(),raw=all.filter(x=>x.status==='CONFIRMED'),confirmed=[...new Map(raw.map(x=>[x.sym+'|'+x.side+'|'+x.setup,x])).values()],waits=all.filter(x=>x.status!=='CONFIRMED');$('rows').innerHTML=[...confirmed,...waits].sort((a,b)=>b.score-a.score).slice(0,settings().maxResults).map(renderRow).join('')||'<tr><td colspan="11" class="muted">No sweep/reclaim setups met the ATR and execution vetoes.</td></tr>';$('marketCount').textContent=universe.length;$('longs').textContent=confirmed.filter(x=>x.side==='LONG').length;$('shorts').textContent=confirmed.filter(x=>x.side==='SHORT').length;$('waits').textContent=waits.length;notifyScanResults(confirmed);recordTrades(confirmed);$('status').textContent='Scan complete · '+universe.length+' markets · '+waits.length+' waiting level events · '+confirmed.length+' 5m-confirmed trades';}catch(e){$('status').textContent='Scan failed: '+e.message;$('rows').innerHTML='<tr><td colspan="11" class="bad">'+e.message+'</td></tr>'}finally{scanBusy=false}}
 initSettings();['minVol','maxResults'].forEach(id=>$(id).addEventListener('change',saveSettings));
 $('downloadResults').addEventListener('click',exportResults);$('downloadSource').addEventListener('click',exportSource);$('clearResults').addEventListener('click',clearAllTrades);$('resultRows').addEventListener('click',e=>{const b=e.target.closest('[data-delete-index]');if(b)deleteTrade(Number(b.dataset.deleteIndex))});$('refreshNews').addEventListener('click',loadMarketNews);renderHistory();loadMarketNews();setInterval(loadMarketNews,300000);setInterval(updateHistoryPrices,30000);updateHistoryPrices();
 $('scanNow').addEventListener('click',run);
