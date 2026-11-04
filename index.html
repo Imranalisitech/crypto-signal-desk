@@ -302,7 +302,7 @@ async function analyseMarket(mkt){
       const ctx=await getDerivativesContext(sym);
       const confluence=scoreScalpContext(found.side,five,found.confirm,mkt,ctx,plan);
       out.push({sym,price,side:found.side,levelType:level.type,level:level.price,status:'CONFIRMED',
-        breakoutTime:found.breakout.t,sweepTime:found.sweep.t,candleCount:1,candles:[found.confirm],
+        breakoutTime:found.breakout.t,sweepTime:found.sweep.t,confirmationTime:found.confirm.t,candleCount:1,candles:[found.confirm],
         plan,extreme:found.extreme,targetType:opposing?.type||'RECENT SWING',quoteVolume:mkt.quoteVolume,
         funding:mkt.funding,oi:mkt.oi,spread:mkt.spread,...confluence});
     }else{
