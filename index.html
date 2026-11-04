@@ -270,53 +270,52 @@ async function loadDerivatives(sym,mkt,tf){const period=({'1m':'5m','3m':'5m','5
 function adaptiveSpreadLimit(quoteVolume){const q=Number(quoteVolume)||0; if(q>=500e6)return 0.0008; if(q>=100e6)return 0.0010; if(q>=25e6)return 0.0014; if(q>=5e6)return 0.0019; return 0.0025}
 function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v))}
 async function analyseMarket(mkt,tf,btcReturns,ethReturns,threshold,btcRegime,cfg){
-  let sym=mkt.symbol,frames=[...new Set([tf,'5m','15m','1h','4h'])],loaded=await Promise.all([...frames.map(f=>candles(sym,f,100)),candles(sym,'D',4).catch(()=>[])]);
-  let byFrame={};frames.forEach((f,i)=>byFrame[f]=loaded[i]);const daily=loaded[frames.length]||[],pdh=daily.length?daily.at(-1).h:null,pdl=daily.length?daily.at(-1).l:null;
-  let main=byFrame[tf],c5=byFrame['5m'],c15=byFrame['15m'],c1h=byFrame['1h'],c4h=byFrame['4h'];
-  let t=analyzeTechnical(main),b5=trend(c5),b15=trend(c15),b1=trend(c1h),b4=trend(c4h),scoreL=0,scoreS=0,whyL=[],whyS=[],symReturns=returns(main.map(x=>x.c)),corrBTC=btcReturns?.length?corr(symReturns,btcReturns):null,corrETH=ethReturns?.length?corr(symReturns,ethReturns):null;
-  const add=(cond,pts,side,reason)=>{if(cond){if(side==='L'){scoreL+=pts;whyL.push(reason)}else{scoreS+=pts;whyS.push(reason)}}};
-  add(t.p>t.e21&&t.e9>t.e21&&t.e21>t.e50,12,'L','EMA stack bullish');add(t.p<t.e21&&t.e9<t.e21&&t.e21<t.e50,12,'S','EMA stack bearish');
-  add([b5,b15,b1,b4].filter(x=>x==='UP').length>=3,14,'L','Multi-timeframe trend aligned');add([b5,b15,b1,b4].filter(x=>x==='DOWN').length>=3,14,'S','Multi-timeframe trend aligned');
-  add(t.rv>52&&t.rv<72,7,'L','RSI bullish zone');add(t.rv<48&&t.rv>28,7,'S','RSI bearish zone');
-  add(t.m.hist>0&&t.m.line>t.m.signal,8,'L','MACD bullish');add(t.m.hist<0&&t.m.line<t.m.signal,8,'S','MACD bearish');
-  add(t.adxv>20&&t.p>t.e21,6,'L','Directional strength');add(t.adxv>20&&t.p<t.e21,6,'S','Directional strength');
-  add(t.volRatio>1.2&&t.p>main.at(-2).c,7,'L','Relative volume supports up move');add(t.volRatio>1.2&&t.p<main.at(-2).c,7,'S','Relative volume supports down move');
-  add(t.p>t.vwap,4,'L','Above rolling VWAP');add(t.p<t.vwap,4,'S','Below rolling VWAP');
-  add(t.bbPos>.65&&t.bbPos<1.1,3,'L','Upper Bollinger region');add(t.bbPos<.35&&t.bbPos>-.1,3,'S','Lower Bollinger region');
-  add(t.st==='UP',5,'L','Supertrend bullish');add(t.st==='DOWN',5,'S','Supertrend bearish');
-  add(t.obvUp&&t.p>t.e21,3,'L','OBV trend positive');add(!t.obvUp&&t.p<t.e21,3,'S','OBV trend negative');add(t.p>t.vp.poc*1.002,3,'L','Price above recent volume-profile POC');add(t.p<t.vp.poc*.998,3,'S','Price below recent volume-profile POC');
-  add(t.breakLong,8,'L','Confirmed candle-close breakout with relative volume');add(t.breakShort,8,'S','Confirmed candle-close breakdown with relative volume');add(t.sweepLow,7,'L','Sell-side liquidity sweep and reclaim');add(t.sweepHigh,7,'S','Buy-side liquidity sweep and rejection');add(t.displacementLong,5,'L','Bullish displacement candle');add(t.displacementShort,5,'S','Bearish displacement candle');
-  if(corrBTC!==null&&corrBTC>.65&&((btcRegime?.oneHour==='UP'&&t.p>t.e21)||(btcRegime?.oneHour==='DOWN'&&t.p<t.e21)))add(true,2,t.p>t.e21?'L':'S','BTC correlation supports prevailing direction');
-  if(corrETH!==null&&corrETH>.65&&((b1==='UP'&&t.p>t.e21)||(b1==='DOWN'&&t.p<t.e21)))add(true,2,t.p>t.e21?'L':'S','ETH correlation supports prevailing direction');
-  // Fetch higher-cost derivatives only for symbols with a meaningful preliminary technical score.
-  let der=Math.max(scoreL,scoreS)>=18?await loadDerivatives(sym,mkt,tf):derivativeData(mkt);
-  if(der.taker!==null){add(der.taker>1.12,8,'L','Binance taker volume buy-dominant');add(der.taker<.89,8,'S','Binance taker volume sell-dominant')}
-  if(der.imbalance!==null){add(der.imbalance>.12,5,'L','Binance order-book bid depth imbalance');add(der.imbalance<-.12,5,'S','Binance order-book ask depth imbalance')}
-  if(der.oiChange!==null){add(der.oiChange>.006&&t.p>main.at(-2).c,7,'L','Price rising with open-interest expansion');add(der.oiChange>.006&&t.p<main.at(-2).c,7,'S','Price falling with open-interest expansion')}
-  if(der.funding!==null){add(der.funding<-.0003&&t.p>main.at(-2).c,5,'L','Negative funding with bullish price response');add(der.funding>.0008&&t.p<main.at(-2).c,5,'S','Crowded positive funding with bearish price response')}
-  if(der.longShort!==null){add(der.longShort<.85&&t.p>t.e21,2,'L','Global accounts not long-heavy');add(der.longShort>1.25&&t.p<t.e21,2,'S','Global accounts long-heavy')}
-  if(der.oiAccel!==null){add(der.oiAccel>.003&&t.p>main.at(-2).c,2,'L','Open-interest expansion accelerating with price');add(der.oiAccel>.003&&t.p<main.at(-2).c,2,'S','Open-interest expansion accelerating on selloff')}
-  // BTC 1h + 4h alignment applies a countertrend score penalty; it does not blindly dictate an altcoin trade.
-  if(btcRegime?.oneHour==='UP'&&btcRegime?.fourHour==='UP'){scoreS=Math.max(0,scoreS-10);whyS.push('BTC 1h/4h bullish: countertrend penalty -10')}
-  if(btcRegime?.oneHour==='DOWN'&&btcRegime?.fourHour==='DOWN'){scoreL=Math.max(0,scoreL-10);whyL.push('BTC 1h/4h bearish: countertrend penalty -10')}
-  let side=scoreL>scoreS?'LONG':scoreS>scoreL?'SHORT':'WAIT',raw=Math.max(scoreL,scoreS),edge=Math.abs(scoreL-scoreS),score=Math.min(100,Math.round(raw));
-  let reasons=side==='LONG'?whyL:side==='SHORT'?whyS:[],contra=side==='LONG'?scoreS:scoreL;
-  const htfLong=b15==='UP'||b1==='UP'||b4==='UP',htfShort=b15==='DOWN'||b1==='DOWN'||b4==='DOWN',htfHardOppLong=b1==='DOWN'&&b4==='DOWN',htfHardOppShort=b1==='UP'&&b4==='UP';
-  const nearPDH=pdh&&Math.abs(t.p-pdh)<=t.a*.35,nearPDL=pdl&&Math.abs(t.p-pdl)<=t.a*.35;
-  const longStructure=t.breakLong||t.sweepLow||t.displacementLong,shortStructure=t.breakShort||t.sweepHigh||t.displacementShort;
-  const longCandle=t.lastBar.c>t.lastBar.o&&t.closeLoc>.58,shortCandle=t.lastBar.c<t.lastBar.o&&t.closeLoc<.42;
-  const longConfirm=t.p>t.e21&&htfLong&&!htfHardOppLong&&longStructure&&longCandle&&t.rv>28&&t.rv<76&&t.extensionAtr<2.4&&!(nearPDH&&!t.breakLong);
-  const shortConfirm=t.p<t.e21&&htfShort&&!htfHardOppShort&&shortStructure&&shortCandle&&t.rv>24&&t.rv<72&&t.extensionAtr<2.4&&!(nearPDL&&!t.breakShort);
-  if(raw<threshold||edge<7)side='WAIT';
-  if(side==='LONG'&&!longConfirm){side='WAIT';reasons.push('Blocked: missing LONG structure/HTF/VWAP/candle confirmation')}
-  if(side==='SHORT'&&!shortConfirm){side='WAIT';reasons.push('Blocked: missing SHORT structure/HTF/VWAP/candle confirmation')}
-  let confidence=score,quality=side==='WAIT'?'IFLC confirmation: WAIT':score>=72?'Strong IFLC confluence':score>=62?'Good IFLC confluence':'Moderate IFLC confluence';let plan=buildPlan(side,t);
-  let rr=plan.rr,spreadLimit=adaptiveSpreadLimit(mkt.quoteVolume),atrLimit=cfg.adaptiveAtrMax||6,riskValid=side!=='WAIT'&&plan.stop!==null&&rr>=3&&der.spread!==null&&der.spread<spreadLimit&&t.atrPct<atrLimit;
-  if(side!=='WAIT'&&!riskValid){side='WAIT';quality='Filtered by risk/liquidity';plan=buildPlan('WAIT',t)}
-  let priceMove=main.length>2?(main.at(-1).c-main.at(-3).c)/main.at(-3).c:0,liqRisk='LOW';
-  if(der.oiChange!==null&&der.oiChange>.025&&Math.abs(priceMove)>.015&&(Math.abs(der.funding||0)>.0005||(der.oiAccel||0)>.005))liqRisk='HIGH';
-  else if((der.oiChange!==null&&der.oiChange>.012)||Math.abs(der.funding||0)>.0008)liqRisk='ELEVATED';
-  return{sym,price:t.p,livePrice:mkt.last||t.p,lastCandle:t.lastBar,pdh,pdl,pdhPdlPosition:pdh&&pdl?(t.p>pdh?'Above PDH':t.p<pdl?'Below PDL':'Between PDH–PDL'):'N/A',side,score,confidence,quality,reasons,contra,trend:[b5,b15,b1,b4],rsi:t.rv,adx:t.adxv,macd:t.m.hist,structure:{breakLong:t.breakLong,breakShort:t.breakShort,sweepHigh:t.sweepHigh,sweepLow:t.sweepLow,displacementLong:t.displacementLong,displacementShort:t.displacementShort,extensionAtr:t.extensionAtr},vol:t.volRatio,stoch:t.stoch,funding:der.funding,oi:der.oiChange,oiAccel:der.oiAccel,taker:der.taker,imbalance:der.imbalance,spread:der.spread,atrPct:t.atrPct,corr:corrBTC,corrBTC,corrETH,liqRisk,ls:der.longShort,topAccount:der.topAccount,topPosition:der.topPosition,basis:der.basis,change:mkt.change,quoteVolume:mkt.quoteVolume,tech:t,plan};
+ const sym=mkt.symbol,frames=[...new Set([tf,'5m','15m','1h','4h'])],loaded=await Promise.all([...frames.map(f=>candles(sym,f,100)),candles(sym,'D',4).catch(()=>[])]);
+ const byFrame={};frames.forEach((f,i)=>byFrame[f]=loaded[i]);const daily=loaded[frames.length]||[],pdh=daily.length?daily.at(-1).h:null,pdl=daily.length?daily.at(-1).l:null;
+ const main=byFrame[tf],c5=byFrame['5m'],c15=byFrame['15m'],c1h=byFrame['1h'],c4h=byFrame['4h'],t=analyzeTechnical(main);
+ const b5=trend(c5),b15=trend(c15),b1=trend(c1h),b4=trend(c4h),trendList=[b5,b15,b1,b4];
+ const longStructure=t.breakLong||t.sweepLow||t.displacementLong,shortStructure=t.breakShort||t.sweepHigh||t.displacementShort;
+ const preliminary=(longStructure&&t.p>t.e21)||(shortStructure&&t.p<t.e21)||((b15==='UP'||b1==='UP')&&t.p>t.e21)||((b15==='DOWN'||b1==='DOWN')&&t.p<t.e21);
+ const der=preliminary?await loadDerivatives(sym,mkt,tf):derivativeData(mkt);
+ const corrBTC=btcReturns?.length?corr(returns(main.map(x=>x.c)),btcReturns):null,corrETH=ethReturns?.length?corr(returns(main.map(x=>x.c)),ethReturns):null;
+ let long=0,short=0,whyL=[],whyS=[];
+ const add=(condition,points,side,reason)=>{if(!condition)return;if(side==='L'){long+=points;whyL.push(reason)}else{short+=points;whyS.push(reason)}};
+ // Macro / market regime: BTC direction is a market-context proxy, not institutional flow.
+ add(btcRegime?.oneHour==='UP'&&btcRegime?.fourHour==='UP',10,'L','BTC 1h/4h macro regime bullish');
+ add(btcRegime?.oneHour==='DOWN'&&btcRegime?.fourHour==='DOWN',10,'S','BTC 1h/4h macro regime bearish');
+ add(corrBTC!==null&&corrBTC>.65&&b1==='UP',5,'L','High BTC correlation with bullish BTC trend');
+ add(corrBTC!==null&&corrBTC>.65&&b1==='DOWN',5,'S','High BTC correlation with bearish BTC trend');
+ // Derivatives / capital-pressure proxies.
+ if(der.taker!==null){add(der.taker>1.12,12,'L','Binance Futures taker buy volume dominant');add(der.taker<.89,12,'S','Binance Futures taker sell volume dominant')}
+ if(der.oiChange!==null){add(der.oiChange>.006&&t.p>main.at(-2).c,10,'L','Price up with expanding open interest');add(der.oiChange>.006&&t.p<main.at(-2).c,10,'S','Price down with expanding open interest')}
+ if(der.funding!==null&&Number.isFinite(der.funding)){add(der.funding<-.0003&&t.p>main.at(-2).c,4,'L','Negative funding with positive price response');add(der.funding>.0008&&t.p<main.at(-2).c,4,'S','Crowded positive funding with negative price response')}
+ if(der.basis!==null&&Number.isFinite(der.basis)){add(der.basis>0&&t.p>main.at(-2).c,4,'L','Positive mark/index basis supports bullish pressure');add(der.basis<0&&t.p<main.at(-2).c,4,'S','Negative mark/index basis supports bearish pressure')}
+ // Visible liquidity.
+ if(der.imbalance!==null){add(der.imbalance>.12,8,'L','Order-book bid depth imbalance');add(der.imbalance<-.12,8,'S','Order-book ask depth imbalance')}
+ if(der.spread!==null){add(der.spread<adaptiveSpreadLimit(mkt.quoteVolume),4,'L','Spread/liquidity acceptable');add(der.spread<adaptiveSpreadLimit(mkt.quoteVolume),4,'S','Spread/liquidity acceptable')}
+ add(t.atrPct<(cfg.adaptiveAtrMax||6),3,'L','Volatility within execution limits');add(t.atrPct<(cfg.adaptiveAtrMax||6),3,'S','Volatility within execution limits');
+ // Technical timing and structure confirmation.
+ add(t.p>t.e21&&t.e9>t.e21&&t.e21>t.e50,8,'L','EMA structure bullish');add(t.p<t.e21&&t.e9<t.e21&&t.e21<t.e50,8,'S','EMA structure bearish');
+ add([b5,b15,b1,b4].filter(x=>x==='UP').length>=3,8,'L','Multi-timeframe trend alignment');add([b5,b15,b1,b4].filter(x=>x==='DOWN').length>=3,8,'S','Multi-timeframe trend alignment');
+ add(t.breakLong,10,'L','Closed-candle breakout with relative volume');add(t.breakShort,10,'S','Closed-candle breakdown with relative volume');
+ add(t.sweepLow,8,'L','Sell-side liquidity sweep and reclaim');add(t.sweepHigh,8,'S','Buy-side liquidity sweep and rejection');
+ add(t.displacementLong,6,'L','Bullish displacement candle');add(t.displacementShort,6,'S','Bearish displacement candle');
+ add(t.rv>50&&t.rv<78,4,'L','RSI supports bullish momentum');add(t.rv<50&&t.rv>22,4,'S','RSI supports bearish momentum');
+ const htfLong=b15==='UP'||b1==='UP'||b4==='UP',htfShort=b15==='DOWN'||b1==='DOWN'||b4==='DOWN',hardOppL=b1==='DOWN'&&b4==='DOWN',hardOppS=b1==='UP'&&b4==='UP';
+ const longCandle=t.lastBar.c>t.lastBar.o&&t.closeLoc>.58,shortCandle=t.lastBar.c<t.lastBar.o&&t.closeLoc<.42;
+ const nearPDH=pdh&&Math.abs(t.p-pdh)<=t.a*.35,nearPDL=pdl&&Math.abs(t.p-pdl)<=t.a*.35;
+ const longConfirm=t.p>t.e21&&htfLong&&!hardOppL&&longStructure&&longCandle&&t.extensionAtr<2.6&&!(nearPDH&&!t.breakLong);
+ const shortConfirm=t.p<t.e21&&htfShort&&!hardOppS&&shortStructure&&shortCandle&&t.extensionAtr<2.6&&!(nearPDL&&!t.breakShort);
+ const sideScoreL=Math.min(100,long),sideScoreS=Math.min(100,short),side=sideScoreL>sideScoreS?'LONG':sideScoreS>sideScoreL?'SHORT':'WAIT',score=Math.max(sideScoreL,sideScoreS),edge=Math.abs(sideScoreL-sideScoreS);
+ let signal=side;if(score<threshold||edge<7)signal='WAIT';
+ if(signal==='LONG'&&!longConfirm)signal='WAIT';if(signal==='SHORT'&&!shortConfirm)signal='WAIT';
+ const reasons=side==='LONG'?whyL:side==='SHORT'?whyS:[],contra=side==='LONG'?sideScoreS:sideScoreL;
+ let quality=signal==='WAIT'?'IFLC confirmation: WAIT':score>=72?'Strong IFLC confluence':score>=62?'Good IFLC confluence':'Moderate IFLC confluence';
+ let plan=buildPlan(signal,t),spreadLimit=adaptiveSpreadLimit(mkt.quoteVolume),riskValid=signal!=='WAIT'&&plan.stop!==null&&plan.rr>=3&&der.spread!==null&&der.spread<spreadLimit&&t.atrPct<(cfg.adaptiveAtrMax||6);
+ if(signal!=='WAIT'&&!riskValid){signal='WAIT';quality='Filtered by risk/liquidity';plan=buildPlan('WAIT',t)}
+ const move=main.length>2?(main.at(-1).c-main.at(-3).c)/main.at(-3).c:0;let liqRisk='LOW';
+ if(der.oiChange!==null&&der.oiChange>.025&&Math.abs(move)>.015&&Math.abs(der.funding||0)>.0005)liqRisk='HIGH';else if((der.oiChange||0)>.012||Math.abs(der.funding||0)>.0008)liqRisk='ELEVATED';
+ return{sym,price:t.p,livePrice:mkt.last||t.p,lastCandle:t.lastBar,pdh,pdl,pdhPdlPosition:pdh&&pdl?(t.p>pdh?'Above PDH':t.p<pdl?'Below PDL':'Between PDH–PDL'):'N/A',side:signal,score:Math.round(score),confidence:Math.round(score),quality,reasons,contra,trend:trendList,rsi:t.rv,adx:t.adxv,macd:t.m.hist,structure:{breakLong:t.breakLong,breakShort:t.breakShort,sweepHigh:t.sweepHigh,sweepLow:t.sweepLow,displacementLong:t.displacementLong,displacementShort:t.displacementShort,extensionAtr:t.extensionAtr},vol:t.volRatio,stoch:t.stoch,funding:der.funding,oi:der.oiChange,oiAccel:der.oiAccel,taker:der.taker,imbalance:der.imbalance,spread:der.spread,atrPct:t.atrPct,corr:corrBTC,corrBTC,corrETH,liqRisk,ls:null,topAccount:null,topPosition:null,basis:der.basis,change:mkt.change,quoteVolume:mkt.quoteVolume,tech:t,plan,flowScore:Math.max(0,Math.min(100,Math.round((Math.max(long,short)/100)*100))),strategy:'IFLC'};
 }
 function renderRow(x){let p=x.plan,fmtp=n=>n===null||n===undefined?'—':fmt(n),isWait=x.side==='WAIT';return `<tr><td><button class="coin-link" onclick="openTradingView('${x.sym}',${p.entry||0},${p.stop||0},${p.tp1||0},'${x.side}')">${x.sym.replace('USDT','')}/USDT</button></td><td>${fmt(x.price)}</td><td><span class="pill ${x.side}">${x.side}${isWait?' · WATCH':''}</span></td><td>${fmtp(p.entry)}</td><td class="bad">${fmtp(p.stop)}</td><td class="good">${fmtp(p.tp1)}</td><td class="good">${fmtp(p.tp2)}</td><td class="good">${fmtp(p.tp3)}</td><td>${p.rr?p.rr.toFixed(1)+':1':'—'}</td><td><b>${x.score}/100</b></td><td>${x.trend.join(' / ')}</td><td>${x.rsi.toFixed(1)}</td><td>${x.adx.toFixed(1)}</td><td class="${x.macd>=0?'positive':'negative'}">${fmt(x.macd)}</td><td>${x.vol.toFixed(2)}x</td><td>${x.stoch.toFixed(1)}</td><td>${pct(x.funding)}</td><td class="${(x.oi||0)>=0?'positive':'negative'}">${x.oi===null?'—':signedPct(x.oi)}</td><td>${x.taker===null?'—':x.taker.toFixed(2)}</td><td>${x.imbalance===null?'—':(x.imbalance*100).toFixed(1)+'%'}</td><td>${x.atrPct.toFixed(2)}%</td><td>${signedPct(x.tech.vp.dist)}</td><td>${x.corrBTC===null?'—':x.corrBTC.toFixed(2)}</td><td>${x.corrETH===null?'—':x.corrETH.toFixed(2)}</td><td class="${x.liqRisk==='HIGH'?'bad':x.liqRisk==='ELEVATED'?'warn':'good'}">${x.liqRisk}</td><td>${x.ls===null?'—':x.ls.toFixed(2)}</td><td>${x.topAccount===null?'—':x.topAccount.toFixed(2)}</td><td>${x.topPosition===null?'—':x.topPosition.toFixed(2)}</td><td>${pct(x.basis)}</td></tr>`}
 function renderCard(x){let p=x.plan,cl=x.side==='LONG'?'good':x.side==='SHORT'?'bad':'warn';return `<article class="card"><div class="head"><div><strong><button class="coin-link" onclick="openTradingView('${x.sym}')">${x.sym.replace('USDT','')}/USDT</button></strong><div class="small">${x.quality} · ${x.score}/100 · 24h ${signedPct(x.change)}</div></div><span class="pill ${x.side}">${x.side}</span></div><div class="metrics"><div class="metric"><span>Price / RSI / ADX</span><b>${fmt(x.price)} · ${x.rsi.toFixed(1)} · ${x.adx.toFixed(1)}</b></div><div class="metric"><span>PDH / PDL (previous completed day)</span><b>${x.pdh?fmt(x.pdh):'—'} / ${x.pdl?fmt(x.pdl):'—'} · ${x.pdhPdlPosition||'N/A'}</b></div><div class="metric"><span>Trend 5m / 15m / 1h / 4h</span><b>${x.trend.join(' / ')}</b></div><div class="metric"><span>Volume / Stoch RSI</span><b>${x.vol.toFixed(2)}x · ${x.stoch.toFixed(1)}</b></div><div class="metric"><span>Structure / liquidity event</span><b>${x.structure?.sweepHigh?'High sweep':x.structure?.sweepLow?'Low sweep':x.structure?.breakShort?'Bear break':x.structure?.breakLong?'Bull break':x.structure?.displacementShort?'Bear displacement':x.structure?.displacementLong?'Bull displacement':'No trigger'}</b></div><div class="metric"><span>Funding / OI change</span><b>${pct(x.funding)} · ${x.oi===null?'—':signedPct(x.oi)}</b></div><div class="metric"><span>Taker ratio / Book imbalance</span><b>${x.taker===null?'—':x.taker.toFixed(2)} · ${x.imbalance===null?'—':(x.imbalance*100).toFixed(1)+'%'}</b></div><div class="metric"><span>Binance account L/S · Top-trader data N/A</span><b>${x.ls===null?'—':x.ls.toFixed(2)} · ${x.topAccount===null?'—':x.topAccount.toFixed(2)}</b></div><div class="metric"><span>Top-trader position L/S</span><b>${x.topPosition===null?'—':x.topPosition.toFixed(2)}</b></div><div class="metric"><span>BTC / ETH correlation</span><b>${x.corrBTC===null?'—':x.corrBTC.toFixed(2)} · ${x.corrETH===null?'—':x.corrETH.toFixed(2)}</b></div><div class="metric"><span>Volume-profile POC / Squeeze-risk proxy</span><b>${fmt(x.tech.vp.poc)} · ${x.liqRisk}</b></div></div><div class="levels"><div class="level"><small>ENTRY REF</small><b>${fmt(p.entry)}</b></div><div class="level"><small>STOP LOSS</small><b class="bad">${fmt(p.stop)}</b></div><div class="level"><small>TP1 · 1R</small><b class="good">${fmt(p.tp1)}</b></div><div class="level"><small>TP2 · 2R</small><b class="good">${fmt(p.tp2)}</b></div></div><div class="levels"><div class="level"><small>TP3 · 3R</small><b class="good">${fmt(p.tp3)}</b></div><div class="level"><small>R:R TO TP2</small><b>${p.rr?p.rr.toFixed(1)+':1':'—'}</b></div></div><div class="bar"><i style="width:${x.score}%"></i></div><div class="note"><b>Confluence:</b> ${x.reasons.length?x.reasons.join(' · '):'No aligned directional evidence'}. <br><b>Execution check:</b> wait for a retest or candle close, verify live spread and avoid entries immediately before major news. Stop/targets are estimates, not guaranteed fills.</div></article>`}
