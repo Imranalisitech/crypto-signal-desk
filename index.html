@@ -136,7 +136,7 @@ footer{text-align:center;color:#8095b7}
 <div class="toolbar settings">
   <label>Minimum 24h volume (USDT M)<br><input id="minVol" type="number" min="0" max="10000" step="0.5" value="5" style="width:105px"></label>
   <label>Displayed coins<br><select id="maxResults"><option>10</option><option selected>25</option><option>35</option><option>50</option></select></label>
-  <span class="tag">PERP ATR(14) · 12-POINT MATRIX · FUNDING / BASIS / OI · MARK-PRICE RISK</span>
+  <label>Equity USDT<br><input id="equity" type="number" min="0" placeholder="Optional" style="width:105px"></label><label>Risk %<br><select id="riskPct"><option value="0.25">0.25%</option><option value="0.5" selected>0.50%</option></select></label><label>Leverage cap<br><select id="levCap"><option>3</option><option selected>5</option><option>10</option></select></label><span class="tag">PERP ATR(14) · 12-POINT MATRIX · FUNDING / BASIS / OI · MARK-PRICE RISK</span>
 </div>
 <div class="stats" id="marketAnalysis">
 <div class="stat"><small>Markets analysed</small><strong id="marketCount">—</strong></div><div class="stat"><small>LONG setups</small><strong class="good" id="longs">—</strong></div><div class="stat"><small>SHORT setups</small><strong class="bad" id="shorts">—</strong></div><div class="stat"><small>Waiting level events</small><strong id="waits">—</strong></div>
@@ -172,7 +172,7 @@ function openTradingView(symbol){const url='https://www.tradingview.com/chart/?s
 window.openTradingView=openTradingView;
 
 const SETTINGS_KEY='cryptoSignalDesk.sweepSettings.v1';
-function settings(){return{minVol:Math.max(0,Number($('minVol').value)||0)*1e6,maxResults:Math.max(10,Math.min(50,Number($('maxResults').value)||25))}}
+function settings(){return{minVol:Math.max(0,Number($('minVol').value)||0)*1e6,maxResults:Math.max(10,Math.min(50,Number($('maxResults').value)||25)),equity:Math.max(0,Number($('equity')?.value)||0),riskPct:Number($('riskPct')?.value||.5)/100,levCap:Math.min(10,Math.max(1,Number($('levCap')?.value)||5))}}
 function saveSettings(){try{localStorage.setItem(SETTINGS_KEY,JSON.stringify({minVol:$('minVol').value,maxResults:$('maxResults').value}))}catch(e){}}
 function initSettings(){try{const v=JSON.parse(localStorage.getItem(SETTINGS_KEY)||'null');if(v){if(v.minVol!==undefined)$('minVol').value=v.minVol;if(v.maxResults!==undefined)$('maxResults').value=v.maxResults}}catch(e){}}
 function fmt(n){if(!Number.isFinite(n))return'—';let a=Math.abs(n);return a>=10000?n.toLocaleString(undefined,{maximumFractionDigits:2}):a>=100?n.toFixed(2):a>=1?n.toFixed(4):n.toFixed(6)}
@@ -200,7 +200,7 @@ async function pickUniverse(){
   return liquid.map(t=>{
     const bid=+t.bid1Price||0,ask=+t.ask1Price||0,mid=bid>0&&ask>0?(bid+ask)/2:0;
     return {symbol:t.symbol,quoteVolume:+t.turnover24h,last:+t.lastPrice,
-      funding:+t.fundingRate,oi:+t.openInterest,mark:+t.markPrice,index:+t.indexPrice,
+      funding:+t.fundingRate,oi:+t.openInterest,mark:+t.markPrice,index:+t.indexPrice,nextFundingTime:+t.nextFundingTime,
       spread:mid?(ask-bid)/mid:null};
   });
 }
@@ -265,7 +265,7 @@ function tradeMatrix(side,trend,location,trigger,rv,mom,cvd,oi,funding){
 }
 function riskPlanPerp(side,entry,extreme,atr,regime,target,stopMode='atr'){
  let stopDist=stopMode==='cascade'?Math.max(Math.abs(entry-extreme)+atr*.35,atr*1.1):stopMode==='box'?Math.min(Math.abs(entry-extreme),atr*1.4):stopMode==='fade'?atr:atr*1.2;
- const stop=side==='LONG'?entry-stopDist:entry+stopDist,dist=Math.abs(entry-stop),reward=Math.abs(target-entry),rr=dist?reward/dist:0;
+ const bandFloor=regime.name==='NORMAL'?entry*.0025:regime.name==='ELEVATED'?entry*.00425:regime.name==='SHOCK'?entry*.0055:0;stopDist=Math.max(stopDist,bandFloor);\n const stop=side==='LONG'?entry-stopDist:entry+stopDist,dist=Math.abs(entry-stop),reward=Math.abs(target-entry),rr=dist?reward/dist:0;
  return{entry,stop,tp1:side==='LONG'?entry+dist:entry-dist,tp2:target,tp3:null,rr,atr,stopPct:dist/entry,stopDistance:dist,regime:regime.name,sizeFactor:regime.name==='NORMAL'?1:regime.name==='ELEVATED'?.5:regime.name==='SHOCK'?.5:0,stopMode};
 }
 function fundingIsExtreme(ctx,side){if(!Number.isFinite(ctx.funding))return false;const hist=ctx.fundingHistory||[],sorted=hist.map(x=>x.rate).filter(Number.isFinite).sort((a,b)=>a-b);if(sorted.length<10)return Math.abs(ctx.funding)>=.0005;const p=sorted.filter(x=>x<=ctx.funding).length/sorted.length;return side==='LONG'?p>=.9:p<=.1}
@@ -283,7 +283,7 @@ function setupForMarket(mkt,five,fifteen,daily,ctx,markBars){
  const candidates=[],now=Date.now(),nextFunding=Number(mkt.nextFundingTime)||0,msToFunding=nextFunding?nextFunding-now:null;
  const fundingStampNear=msToFunding!==null&&msToFunding>=0&&msToFunding<=5*60000;
  const emit=(side,setup,score,extreme,target,stopMode,meta={})=>{
-   if(score.score<7)return;
+   if(score.score<7)return;if(reg.name==='SHOCK'&&!setup.startsWith('A ·'))return;
    const plan=riskPlanPerp(side,price,extreme,atr,reg,target,stopMode);
    const minRR=setup.startsWith('D')?1:1;
    if(plan.rr<minRR||!plan.stopPct||fundingStampNear)return;
@@ -292,7 +292,7 @@ function setupForMarket(mkt,five,fifteen,daily,ctx,markBars){
    plan.sizeFactor=sizeFactor;plan.tp1=side==='LONG'?price+plan.stopDistance:price-plan.stopDistance;plan.tp2=target;plan.tp3=meta.tp3??null;
    candidates.push({sym:mkt.symbol,price,markPrice:mkt.mark,indexPrice:mkt.index,side,setup,status:score.score>=9?'CONFIRMED':'WATCHLIST',levelType:setup,level:meta.level??null,confirmationTime:last.t,breakoutTime:last.t,sweepTime:meta.sweepTime??null,plan,score:score.score,scoreMax:12,grade:score.tier,parts:score.parts,regime:reg.name,atrPct,wickRatio:reg.wickRatio,rv,adx:adx15,rsi:r,macd:hist.at(-1),mfi:mf,cmf:cm,obv:ob,cvd:perp.delta,spotCvd:spot.delta,oiChange:oi,funding,basis,spread:mkt.spread,quoteVolume:mkt.quoteVolume,liquidationProxy:meta.liquidationProxy||false,execution:setup.startsWith('D')?'MAKER ONLY — skip if taker':'LIMIT PREFERRED',riskTier:full?'FULL':half?'HALF':'WATCHLIST',fundingStampNear});
  };
- if(reg.name==='DEAD'||(reg.name==='SHOCK'&&true)||mkt.spread===null||mkt.spread>=.0003||!basisOk)return candidates;
+ if(reg.name==='DEAD'||mkt.spread===null||mkt.spread>=.0003||!basisOk)return candidates;
  const prior20=five.slice(-21,-1),priorLow=Math.min(...prior20.map(x=>x.l)),priorHigh=Math.max(...prior20.map(x=>x.h));
  // A — Cascade Sweep & Reclaim: liquidation print OR RVOL>=2 with OI falling 1.5–3%; reclaim and CVD absorption.
  for(const side of ['LONG','SHORT']){
@@ -334,19 +334,19 @@ function setupForMarket(mkt,five,fifteen,daily,ctx,markBars){
  return candidates.sort((x,y)=>y.score-x.score);
 }
 async function getDerivativesContext(sym){
- const [oiR,perpR,spotR,fundingR,ratioR]=await Promise.all([
-  get(API+'/v5/market/open-interest?category=linear&symbol='+sym+'&intervalTime=5min&limit=200').catch(()=>null),
+ const [oiR,oiLongR,perpR,spotR,fundingR,ratioR]=await Promise.all([
+  get(API+'/v5/market/open-interest?category=linear&symbol='+sym+'&intervalTime=5min&limit=200').catch(()=>null),\n  get(API+'/v5/market/open-interest?category=linear&symbol='+sym+'&intervalTime=4h&limit=200').catch(()=>null),
   get(API+'/v5/market/recent-trade?category=linear&symbol='+sym+'&limit=100').catch(()=>null),
   get(API+'/v5/market/recent-trade?category=spot&symbol='+sym+'&limit=100').catch(()=>null),
   get(API+'/v5/market/funding/history?category=linear&symbol='+sym+'&limit=200').catch(()=>null),
   get(API+'/v5/market/account-ratio?category=linear&symbol='+sym+'&period=5min&limit=30').catch(()=>null)
  ]);
- const oi=(oiR?.result?.list||[]).slice().sort((a,b)=>(+a.timestamp)-(+b.timestamp)).map(x=>+x.openInterest).filter(Number.isFinite);
+ const oi=(oiR?.result?.list||[]).slice().sort((a,b)=>(+a.timestamp)-(+b.timestamp)).map(x=>+x.openInterest).filter(Number.isFinite),oiLong=(oiLongR?.result?.list||[]).map(x=>+x.openInterest).filter(Number.isFinite),oiAt30dHigh=oiLong.length>=150&&oiLong.at(-1)>=Math.max(...oiLong.slice(-180))*.999;
  const pt=perpR?.result?.list||[],st=spotR?.result?.list||[],perpCvd=tradeFlow(pt),spotCvd=tradeFlow(st);
  const fHist=(fundingR?.result?.list||[]).map(x=>({time:+x.fundingRateTimestamp,rate:+x.fundingRate})).filter(x=>Number.isFinite(x.rate));
  const ratio=(ratioR?.result?.list||[]).map(x=>+x.buyRatio/(+x.sellRatio||1)).filter(Number.isFinite);
  const currentFunding=fHist.length?fHist.at(-1).rate:null;
- return{oiChange:oi.length>=2&&oi.at(-2)>0?(oi.at(-1)-oi.at(-2))/oi.at(-2):null,oiAt30dHigh:false,oiSeries:oi,perpCvd,spotCvd,fundingHistory:fHist,funding:currentFunding,longShortRatio:ratio.at(-1)||null,ratioSeries:ratio,liquidationDetected:false,tradeCount:pt.length};
+ return{oiChange:oi.length>=2&&oi.at(-2)>0?(oi.at(-1)-oi.at(-2))/oi.at(-2):null,oiAt30dHigh,oiSeries:oi,oiLongSeries:oiLong,perpCvd,spotCvd,fundingHistory:fHist,funding:currentFunding,longShortRatio:ratio.at(-1)||null,ratioSeries:ratio,liquidationDetected:false,tradeCount:pt.length};
 }
 async function analyseMarket(mkt){
  const sym=mkt.symbol;
