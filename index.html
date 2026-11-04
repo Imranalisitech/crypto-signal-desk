@@ -212,18 +212,24 @@ function makeRiskPlan(side,entry,extreme,target){
   const reward=Math.abs(target-entry);
   return{entry,stop,tp1:target,tp2:null,tp3:null,rr:risk?reward/risk:0};
 }
+const derivativesContextCache=new Map();
 async function getDerivativesContext(sym){
+  if(derivativesContextCache.has(sym))return derivativesContextCache.get(sym);
+  const task=(async()=>{
   const [oiRes,tradeRes]=await Promise.all([
     get(`${API}/v5/market/open-interest?category=linear&symbol=${sym}&intervalTime=5min&limit=3`).catch(()=>null),
     get(`${API}/v5/market/recent-trade?category=linear&symbol=${sym}&limit=100`).catch(()=>null)
   ]);
-  const oi=(oiRes?.result?.list||[]).map(x=>+x.openInterest).filter(Number.isFinite);
+  const oi=(oiRes?.result?.list||[]).slice().sort((a,b)=>(+a.timestamp)-(+b.timestamp)).map(x=>+x.openInterest).filter(Number.isFinite);
   const oiChange=oi.length>=2&&oi.at(-2)>0?(oi.at(-1)-oi.at(-2))/oi.at(-2):null;
   const trades=tradeRes?.result?.list||[];
   let buy=0,sell=0;
   for(const t of trades){const value=(+t.price||0)*(+t.size||0);if(t.side==='Buy')buy+=value;else if(t.side==='Sell')sell+=value;}
   const total=buy+sell;
   return{oiChange,buy,sell,tradeBuyRatio:total?buy/total:null,tradeCount:trades.length};
+  })();
+  derivativesContextCache.set(sym,task);
+  return task;
 }
 function scoreScalpContext(side,bars,confirm,mkt,ctx,plan){
   const prior=bars.slice(-31,-1),avgVol=prior.length?prior.reduce((a,b)=>a+b.v,0)/prior.length:0;
