@@ -170,8 +170,7 @@ function saveTradeHistory(){try{localStorage.setItem(HISTORY_KEY,JSON.stringify(
 function isoNow(){return new Date().toISOString()}
 function tradeReturn(t,exit){return (t.side==='LONG'?(exit-t.entry):(t.entry-exit))/t.entry*100}
 function trackSignals(items){let changed=false;const now=isoNow(),bySymbol=new Map(items.map(x=>[x.sym,x]));
-  // Resolve only trades that existed before this completed scan. Never let the signal candle
-  // that created a trade also stop it out or hit its target before the entry could occur.
+  // Resolve only trades that existed before this completed scan. Use completed candles after the entry scan.
   for(const t of tradeHistory){if(t.status!=='OPEN')continue;const x=bySymbol.get(t.symbol);if(!x)continue;const live=Number(x.livePrice)||Number(x.price);if(!(live>0))continue;t.lastPrice=live;
     const bar=x.lastCandle,barIsAfter=bar&&Number(bar.t)>Number(t.detectedCandleTime||0);let stopHit=false,targetHit=false;
     if(barIsAfter){stopHit=t.side==='LONG'?bar.l<=t.stop:bar.h>=t.stop;targetHit=t.side==='LONG'?bar.h>=t.tp1:bar.l<=t.tp1;}
@@ -179,10 +178,13 @@ function trackSignals(items){let changed=false;const now=isoNow(),bySymbol=new M
     if(stopHit&&targetHit){t.status='AMBIGUOUS';t.result='AMBIGUOUS (SL/TP same candle)';t.exitPrice=null;t.resolvedAt=now;t.returnPct=null;changed=true}
     else if(stopHit||targetHit){t.status='CLOSED';t.result=targetHit?'WIN (TP1)':'LOSS (SL)';t.exitPrice=targetHit?t.tp1:t.stop;t.returnPct=tradeReturn(t,t.exitPrice);t.resolvedAt=now;changed=true}
   }
-  // Record new signals after existing-trade resolution, preventing same-scan instant outcomes.
+  // A fresh setup is identified by its own confirmation candle, not merely LONG/SHORT direction.
+  // This permits a new sweep in the same direction after an earlier trade was stopped out.
   for(const x of items){if(!['LONG','SHORT'].includes(x.side)||!x.plan||!(x.plan.entry>0)||!(x.plan.stop>0)||!(x.plan.tp1>0))continue;
-    const active=tradeHistory.find(t=>t.symbol===x.sym&&t.status==='OPEN'),scanKey=scanSequence+'|'+x.sym;
-    if(!active&&!scanSeenSignals.has(scanKey)&&previousSignals.get(x.sym)!==x.side){scanSeenSignals.add(scanKey);tradeHistory.push({id:x.sym+'-'+x.side+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),symbol:x.sym,side:x.side,detectedAt:now,detectedCandleTime:x.lastCandle?.t||0,entry:x.plan.entry,stop:x.plan.stop,tp1:x.plan.tp1,tp2:x.plan.tp2,tp3:x.plan.tp3,score:x.score,status:'OPEN',exitPrice:null,returnPct:null,resolvedAt:null,result:'OPEN',lastPrice:x.livePrice||x.price});changed=true}
+    const active=tradeHistory.find(t=>t.symbol===x.sym&&t.status==='OPEN'),signalTime=Number(x.signalCandleTime)||Number(x.lastCandle?.t)||0;
+    const alreadyLogged=tradeHistory.some(t=>t.symbol===x.sym&&t.side===x.side&&Number(t.signalCandleTime||t.detectedCandleTime||0)===signalTime);
+    const scanKey=scanSequence+'|'+x.sym+'|'+x.side+'|'+signalTime;
+    if(!active&&!alreadyLogged&&!scanSeenSignals.has(scanKey)){scanSeenSignals.add(scanKey);tradeHistory.push({id:x.sym+'-'+x.side+'-'+signalTime, symbol:x.sym,side:x.side,detectedAt:now,detectedCandleTime:x.lastCandle?.t||0,signalCandleTime:signalTime,entry:x.plan.entry,stop:x.plan.stop,tp1:x.plan.tp1,tp2:x.plan.tp2,tp3:x.plan.tp3,score:x.score,status:'OPEN',exitPrice:null,returnPct:null,resolvedAt:null,result:'OPEN',lastPrice:x.livePrice||x.price,sweepLevel:x.sweepLevel,sweepSource:x.sweepSource,sweepExtreme:x.sweepExtreme});changed=true}
   }
   if(changed||tradeHistory.some(t=>t.status==='OPEN'))saveTradeHistory();
 }
@@ -343,7 +345,7 @@ async function analyseMarket(mkt,tf){
 }
 function renderRow(x){const p=x.plan,f=n=>n==null?'—':fmt(n);return `<tr><td><button class="coin-link" onclick="openTradingView('${x.sym}',${p.entry||0},${p.stop||0},${p.tp1||0},'${x.side}')">${x.sym}</button></td><td>${fmt(x.price)}</td><td><span class="pill ${x.side}">${x.side}</span></td><td>${f(p.entry)}</td><td class="bad">${f(p.stop)}</td><td class="good">${f(p.tp1)}</td><td class="good">${f(p.tp2)}</td><td class="good">${f(p.tp3)}</td><td>${p.rr?p.rr.toFixed(2)+':1':'—'}</td><td>${x.confirmationText}</td><td>${x.reasons[0]}</td></tr>`}
 
-function renderCard(x){const p=x.plan;return `<article class="card"><div class="head"><div><strong><button class="coin-link" onclick="openTradingView('${x.sym}',${p.entry||0},${p.stop||0},${p.tp1||0},'${x.side}')">${x.sym}</button></strong><div class="small">${x.confirmationText}</div></div><span class="pill ${x.side}">${x.side}</span></div><div class="metrics"><div class="metric"><span>PDH · Previous Day High</span><b>${fmt(x.pdh)}</b></div><div class="metric"><span>PDL · Previous Day Low</span><b>${fmt(x.pdl)}</b></div><div class="metric"><span>PWH · Previous Week High</span><b>${fmt(x.weeklyHigh)}</b></div><div class="metric"><span>PWL · Previous Week Low</span><b>${fmt(x.weeklyLow)}</b></div><div class="metric"><span>PMH · Previous Month High</span><b>${fmt(x.monthlyHigh)}</b></div><div class="metric"><span>PML · Previous Month Low</span><b>${fmt(x.monthlyLow)}</b></div><div class="metric"><span>2nd swing pivot · stop reference</span><b>${fmt(x.sweepExtreme)}</b></div></div><div class="levels"><div class="level"><small>ENTRY</small><b>${fmt(p.entry)}</b></div><div class="level"><small>STOP LOSS</small><b class="bad">${fmt(p.stop)}</b></div><div class="level"><small>TARGET 1 · NEAREST LEVEL</small><b class="good">${fmt(p.tp1)}</b></div><div class="level"><small>TARGET 2</small><b class="good">${fmt(p.tp2)}</b></div><div class="level"><small>TARGET 3</small><b class="good">${fmt(p.tp3)}</b></div></div><div class="note">${x.reasons[0]}. A level break alone is not a trade.</div></article>`}
+function renderCard(x){const p=x.plan;return `<article class="card"><div class="head"><div><strong><button class="coin-link" onclick="openTradingView('${x.sym}',${p.entry||0},${p.stop||0},${p.tp1||0},'${x.side}')">${x.sym}</button></strong><div class="small">${x.confirmationText}</div></div><span class="pill ${x.side}">${x.side}</span></div><div class="metrics"><div class="metric"><span>PDH · Previous Day High</span><b>${fmt(x.pdh)}</b></div><div class="metric"><span>PDL · Previous Day Low</span><b>${fmt(x.pdl)}</b></div><div class="metric"><span>PWH · Previous Week High</span><b>${fmt(x.weeklyHigh)}</b></div><div class="metric"><span>PWL · Previous Week Low</span><b>${fmt(x.weeklyLow)}</b></div><div class="metric"><span>PMH · Previous Month High</span><b>${fmt(x.monthlyHigh)}</b></div><div class="metric"><span>PML · Previous Month Low</span><b>${fmt(x.monthlyLow)}</b></div><div class="metric"><span>Sweep level · reclaimed</span><b>${fmt(x.sweepLevel)}</b></div><div class="metric"><span>Sweep wick extreme</span><b>${fmt(x.sweepExtreme)}</b></div><div class="metric"><span>Stop loss · second swing pivot</span><b>${fmt(p.stop)}</b></div></div><div class="levels"><div class="level"><small>ENTRY</small><b>${fmt(p.entry)}</b></div><div class="level"><small>STOP LOSS</small><b class="bad">${fmt(p.stop)}</b></div><div class="level"><small>TARGET 1 · NEAREST LEVEL</small><b class="good">${fmt(p.tp1)}</b></div><div class="level"><small>TARGET 2</small><b class="good">${fmt(p.tp2)}</b></div><div class="level"><small>TARGET 3</small><b class="good">${fmt(p.tp3)}</b></div></div><div class="note">${x.reasons[0]}. A level break alone is not a trade.</div></article>`}
 
 async function sentiment(){try{const j=await get('https://api.alternative.me/fng/?limit=1&format=json');const v=j?.data?.[0];if(!v||!Number.isFinite(Number(v.value)))throw Error('Sentiment feed unavailable');$('fear').textContent=Number(v.value)+' · '+(v.value_classification||'Index');$('fear').title='Alternative.me Fear & Greed Index'+(v.timestamp?' · '+new Date(Number(v.timestamp)*1000).toLocaleString():'')}catch(e){$('fear').textContent='N/A';$('fear').title='Fear & Greed data currently unavailable'}}
 async function loadBtcFunding(){try{const p=await get(`${API}/fapi/v1/premiumIndex?symbol=BTCUSDT`);const rate=Number(p?.lastFundingRate);$('btcFunding').textContent=Number.isFinite(rate)?pct(rate,4):'N/A'}catch(e){$('btcFunding').textContent='N/A'}}
@@ -353,8 +355,8 @@ function sendNotification(title,body,tag){
   try{new Notification(title,{body,tag,renotify:false})}catch(e){console.warn('Notification failed',e)}
 }
 function notifyScanResults(items){
-  const now=new Map(items.map(x=>[x.sym,x.side]));
-  const fresh=items.filter(x=>previousSignals.get(x.sym)!==x.side);
+  const now=new Map(items.map(x=>[x.sym,`${x.side}:${Number(x.signalCandleTime)||0}`]));
+  const fresh=items.filter(x=>previousSignals.get(x.sym)!==now.get(x.sym));
   if(fresh.length){
     const preview=fresh.slice(0,10).map(x=>`${x.sym} ${x.side} (${x.score}/100)`).join('\n');
     showSignalAlert(fresh);
