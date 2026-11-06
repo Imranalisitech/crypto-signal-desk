@@ -260,19 +260,86 @@ async function loadDerivatives(sym,mkt,tf){const period=({'1m':'5m','3m':'5m','5
 function adaptiveSpreadLimit(quoteVolume){const q=Number(quoteVolume)||0; if(q>=500e6)return 0.0008; if(q>=100e6)return 0.0010; if(q>=25e6)return 0.0014; if(q>=5e6)return 0.0019; return 0.0025}
 function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v))}
 async function analyseMarket(mkt,tf){
- const sym=mkt.symbol,[days,weeks,months,bars]=await Promise.all([candles(sym,'D',4),candles(sym,'1w',4),candles(sym,'1M',4),candles(sym,tf,40)]);
- if(days.length<2||weeks.length<2||months.length<2||bars.length<4)throw Error('Insufficient completed candles');
- const d=days.at(-1),w=weeks.at(-1),mo=months.at(-1),p=mkt.last||bars.at(-1).c,pdh=d.h,pdl=d.l,pwh=w.h,pwl=w.l,pmh=mo.h,pml=mo.l;let L=null,S=null;const prior=bars.slice(-12,-1);
- for(let i=0;i<prior.length;i++){const b=prior[i],ix=bars.indexOf(b);if(!L&&b.l<pdl&&b.c>pdl){const c=bars.slice(ix+1).find(x=>x.l<=pdl*1.0015&&x.c>pdl&&x.c>x.o);if(c===bars.at(-1))L={s:b,c}}if(!S&&b.h>pdh&&b.c<pdh){const c=bars.slice(ix+1).find(x=>x.h>=pdh*.9985&&x.c<pdh&&x.c<x.o);if(c===bars.at(-1))S={s:b,c}}}
- // Use the second most recent confirmed swing pivot; each pivot has two completed candles on both sides.
- const swingBars=bars.slice(0,-1),swingLows=[],swingHighs=[];
- for(let i=2;i<swingBars.length-2;i++){const b=swingBars[i],left=swingBars.slice(i-2,i),right=swingBars.slice(i+1,i+3);if(left.every(x=>b.l<x.l)&&right.every(x=>b.l<x.l))swingLows.push(b.l);if(left.every(x=>b.h>x.h)&&right.every(x=>b.h>x.h))swingHighs.push(b.h)}
- let side='WAIT',entry=null,stop=null,targets=[],reason='Waiting for previous-day level sweep and later retest confirmation',sweep=null;
- if(L){side='LONG';entry=L.c.c;const eligibleLows=swingLows.filter(v=>v<entry);sweep=eligibleLows.length>=2?eligibleLows.at(-2):null;if(Number.isFinite(sweep))stop=sweep-Math.max(atr(bars)*.08,entry*.0002);targets=[pdh,pwh,pmh].filter(v=>v>entry).sort((a,b)=>a-b);reason=Number.isFinite(stop)&&stop<entry?'PDL swept and reclaimed; stop anchored below the second most recent confirmed swing low below entry':'PDL reclaim found, but two valid confirmed swing lows below entry are not available'}
- else if(S){side='SHORT';entry=S.c.c;const eligibleHighs=swingHighs.filter(v=>v>entry);sweep=eligibleHighs.length>=2?eligibleHighs.at(-2):null;if(Number.isFinite(sweep))stop=sweep+Math.max(atr(bars)*.08,entry*.0002);targets=[pdl,pwl,pml].filter(v=>v<entry).sort((a,b)=>b-a);reason=Number.isFinite(stop)&&stop>entry?'PDH swept and rejected; stop anchored above the second most recent confirmed swing high above entry':'PDH rejection found, but two valid confirmed swing highs above entry are not available'}
- targets=targets.filter((v,i,a)=>a.findIndex(z=>Math.abs(z-v)/Math.max(Math.abs(v),1e-12)<.00005)===i);const risk=entry&&Number.isFinite(stop)?Math.abs(entry-stop):null,first=targets[0],rr=risk&&first?Math.abs(first-entry)/risk:null;
- if(side!=='WAIT'&&(!targets.length||!Number.isFinite(stop)||!(risk>0)||(side==='SHORT'&&stop<=entry)||(side==='LONG'&&stop>=entry)||!Number.isFinite(rr)||rr<2)){side='WAIT';reason=!targets.length?'Confirmation found, but no next higher/lower target exists':'Setup rejected: first target offers '+(Number.isFinite(rr)?rr.toFixed(2):'invalid')+'R; minimum required is 2R';entry=null;stop=null;targets=[];sweep=null}
- const plan={entry,stop,tp1:targets[0]??null,tp2:targets[1]??null,tp3:targets[2]??null,rr:rr??null,riskDistance:risk,minRR:2,preferredRR:3};return{sym,price:p,side,score:side==='WAIT'?0:100,confidence:side==='WAIT'?0:100,quality:side==='WAIT'?'WAITING':'CONFIRMED',reasons:[reason],pdh,pdl,weeklyHigh:pwh,weeklyLow:pwl,monthlyHigh:pmh,monthlyLow:pml,sweepExtreme:sweep,confirmationText:side==='LONG'?'PDL sweep + reclaim + retest':side==='SHORT'?'PDH sweep + rejection + retest':'Waiting / rejected: '+reason,plan,change:mkt.change,quoteVolume:mkt.quoteVolume,trend:[],rsi:0,adx:0,macd:0,vol:0,stoch:0,funding:null,oi:null,taker:null,imbalance:null,atrPct:0,corrBTC:null,corrETH:null,liqRisk:'N/A',tech:{vp:{dist:0,poc:0}},structure:{}};
+ const sym=mkt.symbol,[days,weeks,months,bars]=await Promise.all([candles(sym,'D',4),candles(sym,'1w',4),candles(sym,'1M',4),candles(sym,tf,60)]);
+ if(days.length<2||weeks.length<2||months.length<2||bars.length<12)throw Error('Insufficient completed candles');
+ const d=days.at(-1),w=weeks.at(-1),mo=months.at(-1),p=mkt.last||bars.at(-1).c;
+ const pdh=d.h,pdl=d.l,pwh=w.h,pwl=w.l,pmh=mo.h,pml=mo.l,a=atr(bars);
+ const pivotLows=[],pivotHighs=[];
+ // Confirmed 2-left / 2-right pivots. These are real, completed-candle liquidity references.
+ for(let i=2;i<bars.length-2;i++){
+  const b=bars[i],left=bars.slice(i-2,i),right=bars.slice(i+1,i+3);
+  if(left.every(x=>b.l<x.l)&&right.every(x=>b.l<x.l))pivotLows.push({price:b.l,index:i,time:b.t});
+  if(left.every(x=>b.h>x.h)&&right.every(x=>b.h>x.h))pivotHighs.push({price:b.h,index:i,time:b.t});
+ }
+ const refsLow=[
+  {price:pdl,name:'previous-day low',priority:4},
+  {price:pwl,name:'previous-week low',priority:3},
+  {price:pml,name:'previous-month low',priority:2},
+  ...pivotLows.slice(-12).map(x=>({price:x.price,name:'local swing low',priority:1,index:x.index}))
+ ];
+ const refsHigh=[
+  {price:pdh,name:'previous-day high',priority:4},
+  {price:pwh,name:'previous-week high',priority:3},
+  {price:pmh,name:'previous-month high',priority:2},
+  ...pivotHighs.slice(-12).map(x=>({price:x.price,name:'local swing high',priority:1,index:x.index}))
+ ];
+ const uniqueRefs=arr=>arr.filter((x,i)=>arr.findIndex(y=>Math.abs(y.price-x.price)/Math.max(Math.abs(x.price),1e-12)<.0005)===i);
+ const lowRefs=uniqueRefs(refsLow),highRefs=uniqueRefs(refsHigh);
+ const firstSweep=(refs,side)=>{
+  const candidates=[];
+  const first=Math.max(0,bars.length-18),last=bars.length-2;
+  for(const ref of refs){
+   for(let si=first;si<=last;si++){
+    const sw=bars[si],tol=Math.max(a*.08,ref.price*.0005);
+    if(ref.index!=null&&ref.index>=si)continue;
+    const swept=side==='LONG'?sw.l<ref.price-tol&&sw.c>ref.price:sw.h>ref.price+tol&&sw.c<ref.price;
+    if(!swept)continue;
+    // Require a later retest/reclaim candle; allow it to form in the next 1–5 closed bars.
+    const end=Math.min(bars.length-1,si+5);
+    for(let ci=si+1;ci<=end;ci++){
+     if(ci<bars.length-3)continue; // ignore stale setups; signal must be recent
+     const c=bars[ci],retestTol=Math.max(a*.12,ref.price*.001);
+     const confirmed=side==='LONG'
+      ? c.l<=ref.price+retestTol&&c.c>ref.price&&c.c>c.o&&(c.c-c.l)/Math.max(c.h-c.l,1e-12)>.50
+      : c.h>=ref.price-retestTol&&c.c<ref.price&&c.c<c.o&&(c.c-c.l)/Math.max(c.h-c.l,1e-12)<.50;
+     if(confirmed)candidates.push({side,ref,sw,sweepIndex:si,confirm:c,confirmIndex:ci,priority:ref.priority||0});
+    }
+   }
+  }
+  return candidates.sort((x,y)=>y.confirmIndex-x.confirmIndex||y.priority-x.priority)[0]||null;
+ };
+ const longSetup=firstSweep(lowRefs,'LONG'),shortSetup=firstSweep(highRefs,'SHORT');
+ let setup=null;
+ if(longSetup&&shortSetup)setup=longSetup.confirmIndex>shortSetup.confirmIndex?longSetup:shortSetup.confirmIndex>longSetup.confirmIndex?shortSetup:(longSetup.priority>=shortSetup.priority?longSetup:shortSetup);
+ else setup=longSetup||shortSetup;
+ let side='WAIT',entry=null,stop=null,targets=[],reason='Waiting for a confirmed sweep, reclaim and retest of daily, weekly, monthly or local swing liquidity',sweep=null,sweepLevel=null,sweepSource=null,signalCandle=null;
+ if(setup){
+  side=setup.side;entry=setup.confirm.c;sweep=side==='LONG'?setup.sw.l:setup.sw.h;sweepLevel=setup.ref.price;sweepSource=setup.ref.name;signalCandle=setup.confirm;
+  const eligible=side==='LONG'
+   ?pivotLows.filter(x=>x.index<=setup.sweepIndex&&x.price<entry)
+   :pivotHighs.filter(x=>x.index<=setup.sweepIndex&&x.price>entry);
+  const second=eligible.length>=2?eligible.at(-2):null;
+  if(second)stop=side==='LONG'?second.price-Math.max(a*.08,entry*.0002):second.price+Math.max(a*.08,entry*.0002);
+  targets=side==='LONG'?[pdh,pwh,pmh,...pivotHighs.filter(x=>x.index>setup.sweepIndex).map(x=>x.price)].filter(v=>v>entry).sort((x,y)=>x-y)
+   :[pdl,pwl,pml,...pivotLows.filter(x=>x.index>setup.sweepIndex).map(x=>x.price)].filter(v=>v<entry).sort((x,y)=>y-x);
+  reason=side+' '+sweepSource+' swept at '+fmt(sweep)+'; reclaimed and retested with a later closed confirmation candle';
+ }
+ targets=targets.filter((v,i,arr)=>arr.findIndex(z=>Math.abs(z-v)/Math.max(Math.abs(v),1e-12)<.0005)===i);
+ const risk=entry&&Number.isFinite(stop)?Math.abs(entry-stop):null,firstTarget=targets[0],rr=risk&&firstTarget?Math.abs(firstTarget-entry)/risk:null;
+ if(side!=='WAIT'){
+  const wrongSide=(side==='LONG'&&stop>=entry)||(side==='SHORT'&&stop<=entry);
+  const tooWide=!Number.isFinite(risk)||risk/entry>.025||risk/Math.max(a,1e-12)>2;
+  if(!Number.isFinite(stop)||wrongSide||tooWide||!targets.length||!Number.isFinite(rr)||rr<2){
+   side='WAIT';
+   reason=tooWide?'Setup rejected: second-swing stop is too wide (maximum 2.5% price risk and 2 ATR); wait for a tighter valid structure':
+    !Number.isFinite(stop)?'Liquidity sweep detected, but two confirmed swing pivots are not available for the required stop':
+    !targets.length?'Liquidity sweep detected, but no valid opposing liquidity target is available':
+    'Setup rejected: nearest opposing liquidity target offers '+(Number.isFinite(rr)?rr.toFixed(2):'invalid')+'R; minimum required is 2R';
+   entry=null;stop=null;targets=[];sweep=null;sweepLevel=null;sweepSource=null;signalCandle=null;
+  }
+ }
+ const plan={entry,stop,tp1:targets[0]??null,tp2:targets[1]??null,tp3:targets[2]??null,rr:rr??null,riskDistance:risk,minRR:2,preferredRR:3};
+ return{sym,price:p,side,score:side==='WAIT'?0:100,confidence:side==='WAIT'?0:100,quality:side==='WAIT'?'WAITING':'CONFIRMED',reasons:[reason],pdh,pdl,weeklyHigh:pwh,weeklyLow:pwl,monthlyHigh:pmh,monthlyLow:pml,sweepExtreme:sweep,sweepLevel,sweepSource,signalCandleTime:signalCandle?.t||null,confirmationText:side==='LONG'?'Liquidity sweep + reclaim + retest · '+(sweepSource||''):side==='SHORT'?'Liquidity sweep + rejection + retest · '+(sweepSource||''):'Waiting / rejected: '+reason,plan,change:mkt.change,quoteVolume:mkt.quoteVolume,trend:[],rsi:0,adx:0,macd:0,vol:0,stoch:0,funding:null,oi:null,taker:null,imbalance:null,atrPct:0,corrBTC:null,corrETH:null,liqRisk:'N/A',tech:{vp:{dist:0,poc:0}},structure:{}};
 }
 function renderRow(x){const p=x.plan,f=n=>n==null?'—':fmt(n);return `<tr><td><button class="coin-link" onclick="openTradingView('${x.sym}',${p.entry||0},${p.stop||0},${p.tp1||0},'${x.side}')">${x.sym}</button></td><td>${fmt(x.price)}</td><td><span class="pill ${x.side}">${x.side}</span></td><td>${f(p.entry)}</td><td class="bad">${f(p.stop)}</td><td class="good">${f(p.tp1)}</td><td class="good">${f(p.tp2)}</td><td class="good">${f(p.tp3)}</td><td>${p.rr?p.rr.toFixed(2)+':1':'—'}</td><td>${x.confirmationText}</td><td>${x.reasons[0]}</td></tr>`}
 
