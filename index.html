@@ -144,6 +144,13 @@ footer{text-align:center;color:#8095b7}
 
 </section>
 
+<section class="panel" id="liveTradeResultsPanel">
+<div class="section"><h2>Live Trade Results</h2><span class="small">Open trades and latest outcomes · updates after each market scan</span></div>
+<div class="history-summary"><span class="tag" id="liveOpenCount">Open: 0</span><span class="tag" id="liveClosedCount">Recently closed: 0</span><span class="tag" id="liveUnrealized">Open P/L: —</span></div>
+<div class="history-table"><table><thead><tr><th>LAST UPDATED</th><th>COIN</th><th>SIDE</th><th>ENTRY</th><th>LAST PRICE</th><th>STOP LOSS</th><th>TARGET 1</th><th>LIVE P/L %</th><th>TRADE RESULT</th></tr></thead><tbody id="liveTradeRows"><tr><td colspan="9" class="muted">No trade results yet. Qualified trades will appear here after a scan.</td></tr></tbody></table></div>
+<div class="note">Live P/L uses the latest price received during a scan. Open trades are monitored and their WIN/LOSS result is recorded when a later scan detects TP1 or stop-loss. This is simulated monitoring, not exchange execution or tick-by-tick streaming.</div>
+</section>
+
 <section class="panel" id="tradeHistoryPanel">
 <div class="section"><h2>Automatic Trade Results & History</h2><span class="small">Saved in this browser · export CSV for backup</span></div>
 <div class="history-tools">
@@ -199,9 +206,24 @@ function getFilteredHistory(){const mode=$('historyPeriod').value,ref=$('history
   if(mode==='custom'){start=from?new Date(from+'T00:00:00'):null;end=to?new Date(to+'T23:59:59.999'):null}
   return tradeHistory.filter(t=>{const d=new Date(t.detectedAt);return(!start||d>=start)&&(!end||d<end) }).sort((a,b)=>b.detectedAt.localeCompare(a.detectedAt));
 }
+function renderLiveTradeResults(){
+ const open=tradeHistory.filter(t=>t.status==='OPEN').sort((a,b)=>b.detectedAt.localeCompare(a.detectedAt));
+ const recent=tradeHistory.filter(t=>t.status!=='OPEN').sort((a,b)=>(b.resolvedAt||b.detectedAt).localeCompare(a.resolvedAt||a.detectedAt)).slice(0,20);
+ const rows=[...open,...recent];
+ const pnl=t=>Number(t.entry)>0&&Number(t.lastPrice)>0?(t.side==='LONG'?(t.lastPrice-t.entry):(t.entry-t.lastPrice))/t.entry*100:null;
+ $('liveOpenCount').textContent='Open: '+open.length;
+ $('liveClosedCount').textContent='Recently closed: '+recent.length;
+ const total=open.reduce((v,t)=>v+(pnl(t)||0),0);
+ $('liveUnrealized').textContent='Open P/L: '+(open.length?(total>=0?'+':'')+total.toFixed(3)+'%':'—');
+ $('liveTradeRows').innerHTML=rows.length?rows.map(t=>{
+  const p=pnl(t),cls=(t.result||'').startsWith('WIN')?'good':t.result==='LOSS (SL)'?'bad':t.status==='OPEN'?'warn':'muted';
+  return `<tr><td>${new Date(t.resolvedAt||t.detectedAt).toLocaleString()}</td><td><button class="coin-link" onclick="openTradingView('${t.symbol}')">${t.symbol.replace('USDT','')}/USDT</button></td><td><span class="pill ${t.side}">${t.side}</span></td><td>${fmt(t.entry)}</td><td>${fmt(t.lastPrice||t.exitPrice||t.entry)}</td><td>${fmt(t.stop)}</td><td>${fmt(t.tp1)}</td><td class="${p==null?'muted':p>=0?'good':'bad'}">${p==null?'—':(p>=0?'+':'')+p.toFixed(3)+'%'}</td><td class="${cls}">${t.result||t.status}</td></tr>`;
+ }).join(''):'<tr><td colspan="9" class="muted">No trade results yet. Qualified trades will appear here after a scan.</td></tr>';
+}
 function renderTradeHistory(){const rows=getFilteredHistory(),wins=rows.filter(t=>(t.result||'').startsWith('WIN')).length,losses=rows.filter(t=>t.result==='LOSS (SL)').length,open=rows.filter(t=>t.status==='OPEN').length,decided=wins+losses;
   $('historyTotal').textContent='Trades: '+rows.length;$('historyWins').textContent='Wins: '+wins;$('historyLosses').textContent='Losses: '+losses;$('historyOpen').textContent='Open: '+open;$('historyRate').textContent='Win rate: '+(decided?(wins/decided*100).toFixed(1)+'%':'—');
   $('historyRows').innerHTML=rows.length?rows.map(t=>`<tr><td>${new Date(t.detectedAt).toLocaleString()}</td><td><button class="coin-link" onclick="openTradingView('${t.symbol}')">${t.symbol.replace('USDT','')}/USDT</button></td><td><span class="pill ${t.side}">${t.side}</span></td><td>${fmt(t.entry)}</td><td>${fmt(t.stop)}</td><td>${fmt(t.tp1)}</td><td class="${(t.result||'').startsWith('WIN')?'good':t.result==='LOSS (SL)'?'bad':'warn'}">${t.result}</td><td>${t.exitPrice?fmt(t.exitPrice):'—'}</td><td>${Number.isFinite(t.returnPct)?(t.returnPct>=0?'+':'')+t.returnPct.toFixed(3)+'%':'—'}</td><td>${t.resolvedAt?new Date(t.resolvedAt).toLocaleString():'—'}</td></tr>`).join(''):'<tr><td colspan="10" class="muted">No trades in this date range.</td></tr>';
+ renderLiveTradeResults();
 }
 function downloadHistory(){const rows=getFilteredHistory(),cols=['detectedAt','symbol','side','entry','stop','tp1','tp2','tp3','score','result','status','exitPrice','returnPct','resolvedAt','lastPrice'];const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';const csv=[cols.join(','),...rows.map(t=>cols.map(k=>q(t[k])).join(','))].join('\r\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='crypto-trade-history-'+new Date().toISOString().slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url)}
 function downloadPageBackup(){const saved=JSON.stringify(tradeHistory);const marker="<script>\n'use strict';";let backup=document.documentElement.outerHTML;if(!backup.includes(marker)){alert('Could not create a backup from this page.');return}const preload="<script>try{localStorage.setItem('cryptoSignalDesk.tradeHistory.v1',"+JSON.stringify(saved)+")}catch(e){}<\/script>\n<script>\n'use strict';";backup=backup.replace(marker,preload);const blob=new Blob([backup],{type:'text/html;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='crypto-signal-desk-backup-'+new Date().toISOString().slice(0,10)+'.html';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url)}
