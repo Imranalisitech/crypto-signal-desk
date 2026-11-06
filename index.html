@@ -262,7 +262,7 @@ async function loadDerivatives(sym,mkt,tf){const period=({'1m':'5m','3m':'5m','5
 function adaptiveSpreadLimit(quoteVolume){const q=Number(quoteVolume)||0; if(q>=500e6)return 0.0008; if(q>=100e6)return 0.0010; if(q>=25e6)return 0.0014; if(q>=5e6)return 0.0019; return 0.0025}
 function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v))}
 async function analyseMarket(mkt,tf){
- const sym=mkt.symbol,[days,weeks,months,bars]=await Promise.all([candles(sym,'D',4),candles(sym,'1w',4),candles(sym,'1M',4),candles(sym,tf,60)]);
+ const sym=mkt.symbol,[days,weeks,months,bars]=await Promise.all([candles(sym,'D',4),candles(sym,'1w',4),candles(sym,'1M',4),candles(sym,tf,240)]);
  if(days.length<2||weeks.length<2||months.length<2||bars.length<12)throw Error('Insufficient completed candles');
  const d=days.at(-1),w=weeks.at(-1),mo=months.at(-1),p=mkt.last||bars.at(-1).c;
  const pdh=d.h,pdl=d.l,pwh=w.h,pwl=w.l,pmh=mo.h,pml=mo.l,a=atr(bars);
@@ -277,19 +277,21 @@ async function analyseMarket(mkt,tf){
   {price:pdl,name:'previous-day low',priority:4},
   {price:pwl,name:'previous-week low',priority:3},
   {price:pml,name:'previous-month low',priority:2},
+  ...tradeHistory.filter(t=>t.symbol===sym&&t.side==='LONG'&&t.result==='LOSS (SL)'&&Number(t.stop)>0&&Date.now()-Date.parse(t.resolvedAt||t.detectedAt)<72*60*60*1000).slice(-5).map(t=>({price:Number(t.stop),name:'prior stopped-long liquidity',priority:2})),
   ...pivotLows.slice(-12).map(x=>({price:x.price,name:'local swing low',priority:1,index:x.index}))
  ];
  const refsHigh=[
   {price:pdh,name:'previous-day high',priority:4},
   {price:pwh,name:'previous-week high',priority:3},
   {price:pmh,name:'previous-month high',priority:2},
+  ...tradeHistory.filter(t=>t.symbol===sym&&t.side==='SHORT'&&t.result==='LOSS (SL)'&&Number(t.stop)>0&&Date.now()-Date.parse(t.resolvedAt||t.detectedAt)<72*60*60*1000).slice(-5).map(t=>({price:Number(t.stop),name:'prior stopped-short liquidity',priority:2})),
   ...pivotHighs.slice(-12).map(x=>({price:x.price,name:'local swing high',priority:1,index:x.index}))
  ];
  const uniqueRefs=arr=>arr.filter((x,i)=>arr.findIndex(y=>Math.abs(y.price-x.price)/Math.max(Math.abs(x.price),1e-12)<.0005)===i);
  const lowRefs=uniqueRefs(refsLow),highRefs=uniqueRefs(refsHigh);
  const firstSweep=(refs,side)=>{
   const candidates=[];
-  const first=Math.max(0,bars.length-18),last=bars.length-2;
+  const first=Math.max(0,bars.length-144),last=bars.length-2;
   for(const ref of refs){
    for(let si=first;si<=last;si++){
     const sw=bars[si],tol=Math.max(a*.08,ref.price*.0005);
