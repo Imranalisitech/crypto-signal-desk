@@ -187,7 +187,7 @@ footer{text-align:center;color:#8095b7}
 </main><footer>Crypto Signal Desk ULTIMATE · Eligible Binance public USDT perpetual markets · Educational decision-support tool, not financial advice. Crypto futures can cause rapid and total loss. Always independently verify every level before trading.</footer>
 <script>
 'use strict';
-const API='https://fapi.binance.com', COIN_SKIP=new Set(['USDC','FDUSD','TUSD','USDP','BUSD','USDE','DAI','USDS','USTC','EUR','WBETH','WETH']);
+const API='https://crypto-signal-desk-market-data.onrender.com', COIN_SKIP=new Set(['USDC','FDUSD','TUSD','USDP','BUSD','USDE','DAI','USDS','USTC','EUR','WBETH','WETH']);
 const $=id=>document.getElementById(id);let latest=[],allMarketRows=[],scanBusy=false,requestTail=Promise.resolve(),lastRequestAt=0,previousSignals=new Map(),hasCompletedScan=false;
 const HISTORY_KEY='cryptoSignalDesk.tradeHistory.v1';let tradeHistory=loadTradeHistory(),scanSequence=0,scanSeenSignals=new Set();
 function loadTradeHistory(){try{const v=JSON.parse(localStorage.getItem(HISTORY_KEY)||'[]');return Array.isArray(v)?v:[]}catch{return[]}}
