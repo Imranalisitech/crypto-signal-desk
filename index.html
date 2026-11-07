@@ -266,7 +266,24 @@ function initSettings(){}
 function customSettingChanged(){}
 
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-let activeRequests=0,requestQueue=[];async function get(url,timeout=12000){if(activeRequests>=8)await new Promise(resolve=>requestQueue.push(resolve));while(Date.now()-lastRequestAt<70)await pause(70-(Date.now()-lastRequestAt));activeRequests++;lastRequestAt=Date.now();const c=new AbortController(),t=setTimeout(()=>c.abort(),timeout);try{const r=await fetch(url,{signal:c.signal,cache:'no-store'});if(!r.ok)throw Error('Binance HTTP '+r.status);return await r.json()}catch(e){if(e.name==='AbortError')throw Error('Binance request timed out');throw e}finally{clearTimeout(t);activeRequests--;const next=requestQueue.shift();if(next)next()}}
+let activeRequests=0,requestQueue=[];async function get(url,timeout=12000){
+ if(activeRequests>=3)await new Promise(resolve=>requestQueue.push(resolve));
+ while(Date.now()-lastRequestAt<260)await pause(260-(Date.now()-lastRequestAt));
+ activeRequests++;lastRequestAt=Date.now();
+ const c=new AbortController(),t=setTimeout(()=>c.abort(),timeout);
+ try{
+  const r=await fetch(url,{signal:c.signal,cache:'no-store'});
+  if(!r.ok){
+   let detail='';try{detail=await r.text()}catch(e){}
+   const retry=r.headers.get('Retry-After');
+   if(r.status===418)throw Error('Binance temporarily IP-banned this network (HTTP 418). Stop scanning and wait '+(retry?retry+' seconds':'for the ban to expire')+'.');
+   if(r.status===429)throw Error('Binance rate limit reached (HTTP 429). Retry-After: '+(retry||'not supplied')+' seconds. Wait before scanning again.');
+   throw Error('Binance HTTP '+r.status+(detail?' · '+detail.slice(0,180):''));
+  }
+  return await r.json();
+ }catch(e){if(e.name==='AbortError')throw Error('Binance request timed out');throw e}
+ finally{clearTimeout(t);activeRequests--;const next=requestQueue.shift();if(next)next()}
+}
 const mean=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:0;
 function ema(a,n){if(!a.length)return NaN;const k=2/(n+1);let v=a[0];for(let i=1;i<a.length;i++)v=a[i]*k+v*(1-k);return v}
 function sma(a,n){return mean(a.slice(-n))}
