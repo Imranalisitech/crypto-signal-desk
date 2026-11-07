@@ -1,7 +1,7 @@
 /* Independent 1H Big Move Scanner */
 (function(){
 'use strict';
-var $=function(id){return document.getElementById(id)},API='https://fapi.binance.com';
+var $=function(id){return document.getElementById(id)},API='https://crypto-signal-desk-market-data.onrender.com';
 var S={busy:false,rows:[],bars:new Map(),universe:[]};
 var mean=function(a){return a.length?a.reduce(function(s,x){return s+x},0)/a.length:0};
 var qtile=function(a,q){if(!a.length)return 0;var z=a.slice().sort(function(x,y){return x-y}),p=(z.length-1)*q,i=Math.floor(p),f=p-i;return z[i]*(1-f)+(z[Math.min(i+1,z.length-1)]||z[i])*f};
