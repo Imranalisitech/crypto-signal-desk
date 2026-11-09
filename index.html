@@ -94,6 +94,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 .card[data-a="chart"]:focus-visible{outline:2px solid #7db8ff;outline-offset:3px}
 
 
+.auto-track-state{font-weight:650;font-size:12px;padding:8px 4px;margin:9px 0 0;color:var(--long)}
 </style>
 </head>
 <body>
@@ -126,11 +127,11 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 
 
 <section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins are not confirmed trades. Only active exchange-derived indicators contribute to signals. Final TP is three times the actual stop distance (1:3 R:R); targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
-<section id="sot"><h2>Open trades <small>tracked automatically against live mark price</small></h2><div class="tw" id="ot"></div></section>
-<section><h2>Trade result history <span><button id="clearHistory" type="button">Clear history</button> <button id="csv" type="button">Export CSV</button></span></h2>
+<section id="sot"><h2>Automatically tracked trades <small>every new confirmed signal is recorded without clicking</small></h2><div class="tw" id="ot"></div></section>
+<section><h2>All automatic trade results <span><button id="clearHistory" type="button">Clear history</button> <button id="csv" type="button">Export CSV</button></span></h2>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
 
-<p class="mut" style="font-size:12px">Targets are planned levels, not guaranteed outcomes. RSI, candlesticks, trading volume and exchange funding are screening inputs, not forecasts. Signals and tracked trades are simulated: the dashboard never places orders. Results use mark-price polling and include your fee setting, so real fills can differ. Educational tool, not financial advice.</p>
+<p class="mut" style="font-size:12px">Trades are registered automatically while the dashboard is open. Tracking is saved in this browser; when it is closed, no new signals can be detected and intraperiod price movements may be missed. Targets are planned levels, not guaranteed outcomes. RSI, candlesticks, trading volume and exchange funding are screening inputs, not forecasts. Signals and tracked trades are simulated: the dashboard never places orders. Results use mark-price polling and include your fee setting, so real fills can differ. Educational tool, not financial advice.</p>
 </main>
 <div id="tradeChartModal" class="trade-chart-modal" hidden>
   <div id="tradeChartDialog" class="trade-chart-dialog" role="dialog" aria-modal="true" aria-labelledby="tradeChartTitle" tabindex="-1">
@@ -178,15 +179,20 @@ async function getTickers(){
   const[tk,pi]=await Promise.all([J(B+'ticker/24hr',40),J(B+'premiumIndex',10)]);
   pi.forEach(x=>M[x.symbol]={p:+x.markPrice,fr:+x.lastFundingRate*100});
   return tk.map(x=>({symbol:x.symbol,chg:+x.priceChangePercent,vol:+x.quoteVolume}))}
-let st={hist:[],open:[],pins:[],set:{}};
+let st={hist:[],open:[],pins:[],trackedKeys:{},set:{}};
 try{st=Object.assign(st,JSON.parse(localStorage.getItem('scan1')||'{}'))}catch(e){}
+if(!Array.isArray(st.open))st.open=[];
+if(!Array.isArray(st.hist))st.hist=[];
+if(!st.trackedKeys||typeof st.trackedKeys!=='object'||Array.isArray(st.trackedKeys))st.trackedKeys={};
 const save=()=>{try{localStorage.setItem('scan1',JSON.stringify(st))}catch(e){}};
 const IDS=['ex','acct','risk','fundlim','fee','minvol','topn'];
 if(st.set.v!==4){st.set.v=4;st.set.topn=600;st.set.minvol=0;st.set.ex='bybit';save()}
 IDS.forEach(i=>{if(st.set[i]!=null)$(i).value=st.set[i]});
 try{banUntil=+localStorage.getItem('ban_'+EX())||0}catch(e){}
-$('showot').checked=!!st.set.showot;
-let R={},M={},seen=new Set(),audio=null,notif=false,busy=false,lastScan=null,err='',prog='';let watchLimit=50,watchQuery='';
+// Auto-tracked trades are visible by default after this upgrade.
+if(!st.set.autoTrackV){st.set.showot=true;st.set.autoTrackV=1;save()}
+$('showot').checked=st.set.showot!==false;
+let R={},M={},audio=null,notif=false,busy=false,lastScan=null,err='',prog='';let watchLimit=50,watchQuery='';
 let lim=false,dur=0,scanFailures=0,liveRenderTimer=null;
 function queueLiveRender(){
   if(liveRenderTimer!==null)return;
@@ -238,11 +244,14 @@ async function scan(){
       const r=res[x.symbol];
       if(failure){r.status='error';scanFailures++}
       R[x.symbol]={...r};
+      if(!failure&&r.status==='confirm'&&r.plan){
+        const fresh=registerConfirmedTrade(r);
+        if(fresh)fire(r);
+      }
     });
     if(Date.now()<banUntil){lim=false;wait=(banUntil-Date.now())/1000+5;err=banMsg()}
     else{lastScan=new Date();err='';dur=Math.round((Date.now()-t0)/1000);if(lim){lim=false;wait=90;err=XN()+' rate limit reached, so the scanner is slowing down. Reduce the scan universe or the minimum trading volume threshold.'}}
-    const bl=blocked();
-    Object.values(R).filter(r=>r.status==='confirm').forEach(r=>{const k=r.sym+r.plan.ck;if(!seen.has(k)){seen.add(k);if(!bl)fire(r)}});
+
   }catch(e){if(Date.now()<banUntil){err=banMsg();wait=(banUntil-Date.now())/1000+5}else err='Could not load '+XN()+' data: '+e.message+'. Check your connection or VPN; retrying.'}
   busy=false;clearTimeout(liveRenderTimer);liveRenderTimer=null;render();setTimeout(scan,wait*1000);
 }
@@ -252,20 +261,45 @@ function fire(r){
 }
 const day=()=>new Date().toISOString().slice(0,10);
 const today=()=>st.hist.filter(x=>new Date(x.close).toISOString().slice(0,10)===day());
-function blocked(){
-  const t=today();let s=0;for(let i=t.length-1;i>=0&&t[i].r<0;i--)s++;
-  if(t.length>=10)return'10 trades reached today';
-  if(s>=3)return'3 losses in a row: take a 1 hour break';
-  if(-t.reduce((a,x)=>a+x.r,0)*n('risk')>=2)return'2% daily loss limit reached';
-  return'';
+// A confirmed candle is one signal even when it reappears on repeated scans.
+// Keep its identity through reloads and after its TP/SL result was recorded.
+function signalKey(r){
+  const ck=Number(r.plan?.ck);
+  if(!r.sym||!['long','short'].includes(r.dir)||!(ck>0))return null;
+  return [EX(),r.sym,r.dir,ck].join(':');
 }
-function take(s){
-  const r=R[s];if(!r||r.status!=='confirm'||blocked()||st.open.some(t=>t.sym===s))return;
-  const p=r.plan;st.open.push({id:Date.now(),sym:s,dir:r.dir,en:p.en,stop:p.stop,stop0:p.stop,tp1:p.tp1,tp2:p.tp2,sp:p.sp,r$:p.r$,open:Date.now(),tp1h:false,targetMode:'fixed3r',horizonMs:4*3600000});save();render();
+function registerConfirmedTrade(r){
+  if(r.status!=='confirm'||!r.plan)return false;
+  const key=signalKey(r),p=r.plan;
+  if(!key||st.trackedKeys[key])return false;
+  if(![p.en,p.stop,p.tp2,p.sp].every(v=>Number.isFinite(v)&&v>0))return false;
+  const direction=r.dir==='long'?1:-1;
+  if(direction*(p.en-p.stop)<=0||direction*(p.tp2-p.en)<=0)return false;
+  const rr=Math.abs(p.tp2-p.en)/Math.abs(p.en-p.stop);
+  if(!Number.isFinite(rr)||Math.abs(rr-3)>.01)return false;
+  // Do not create the same candle's signal twice, even if old stored data
+  // predates this trackedKeys registry.
+  if(st.open.some(t=>t.signalKey===key)||st.hist.some(t=>t.signalKey===key)){
+    st.trackedKeys[key]=Date.now();save();return false;
+  }
+  const now=Date.now();
+  const track={
+    id:now+'-'+Math.random().toString(36).slice(2,8),
+    signalKey:key,sym:r.sym,dir:r.dir,en:p.en,stop:p.stop,
+    stop0:p.stop,tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,
+    open:now,signalCandle:p.ck,source:EX(),
+    tp1h:false,targetMode:'fixed3r',horizonMs:4*3600000
+  };
+  st.open.push(track);
+  st.trackedKeys[key]=now;
+  save();
+  return true;
 }
 function closeT(t,why,px,gross){
   const net=gross-n('fee')/t.sp;
-  st.hist.push({id:t.id,sym:t.sym,dir:t.dir,open:t.open,close:Date.now(),en:t.en,ex:px,r:net,pnl:net*t.r$,why});
+  st.hist.push({id:t.id,signalKey:t.signalKey||null,sym:t.sym,dir:t.dir,open:t.open,
+    signalCandle:t.signalCandle||null,source:t.source||null,close:Date.now(),
+    en:t.en,stop:t.stop0,tp:t.tp2,ex:px,r:net,pnl:net*t.r$,why});
   st.open=st.open.filter(x=>x.id!==t.id);save();
 }
 function monitor(){
@@ -296,8 +330,11 @@ const tv=s=>`<a class="tvl" href="https://www.tradingview.com/chart/?symbol=${EX
 const pill=(c,t)=>`<span class="pill ${c}">${t}</span>`;
 const star=s=>`<button class="ic" data-a="pin" data-s="${s}" title="Pin to watchlist">${st.pins.includes(s)?'★':'☆'}</button>`;
 const tbl=(h,rows,e)=>rows.length?`<table><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr>${rows.join('')}</table>`:`<div class="empty">${e}</div>`;
-function card(r,bl){
- const p=r.plan,t=st.open.some(x=>x.sym===r.sym),rsi=r.rsi||{},pat=r.pattern||{};
+function card(r){
+ const p=r.plan,key=signalKey(r);
+ const tracking=st.open.some(x=>x.signalKey===key);
+ const recorded=st.hist.some(x=>x.signalKey===key);
+ const rsi=r.rsi||{},pat=r.pattern||{};
  const checks=[
   ['Entry',fp(p.en)],['SL ('+f(p.sp,2)+'%)',fp(p.stop)],
   ['Final TP (3R / '+f(p.tp2pct,2)+'%)',fp(p.tp2)],['Target R:R','1 : '+f(p.rr,1)],
@@ -310,19 +347,20 @@ function card(r,bl){
   '" role="button" tabindex="0"><div class="ch"><button class="coin-chart" type="button" data-a="chart" data-s="'+r.sym+'">'+
   nm(r.sym)+'</button>'+star(r.sym)+'<span class="m">'+fp(M[r.sym].p)+'</span></div><table class="kv">'+
   checks.map(x=>'<tr><td>'+x[0]+'</td><td>'+x[1]+'</td></tr>').join('')+'</table>'+
-  '<button class="p" data-a="take" data-s="'+r.sym+'" '+(bl||t?'disabled':'')+'>'+(t?'Tracking':'Track this trade')+
-  '</button><button class="p" data-a="chart" data-s="'+r.sym+'" style="margin-top:7px">View Entry / SL / TP chart</button></div>';
+  '<div class="auto-track-state">'+(tracking?'● Automatically tracking this trade':
+    recorded?'✓ Result recorded automatically':'✓ Signal registered for automatic tracking')+'</div>'+
+  '<button class="p" data-a="chart" data-s="'+r.sym+'" style="margin-top:7px">View Entry / SL / TP chart</button></div>';
 }
 function render(){
   const watchScroll=$('wl').scrollTop,longScroll=$('cl').scrollTop,shortScroll=$('cs').scrollTop;
   $('sot').hidden=!$('showot').checked;
-  const bl=blocked(),L=Object.values(R),cf=L.filter(r=>r.status==='confirm'),cl=cf.filter(r=>r.dir==='long'),cs=cf.filter(r=>r.dir==='short'),t=today(),dr=t.reduce((a,x)=>a+x.r,0);
+  const L=Object.values(R),cf=L.filter(r=>r.status==='confirm'),cl=cf.filter(r=>r.dir==='long'),cs=cf.filter(r=>r.dir==='short'),t=today(),dr=t.reduce((a,x)=>a+x.r,0);
   $('dot').className='dot '+(err?'bad':lastScan?'ok':'');
   if(!busy)$('stat').textContent=lastScan?XN()+' futures · last scan '+lastScan.toLocaleTimeString()+' · '+L.length+' coins · took '+dur+'s'+(scanFailures?' · '+scanFailures+' data errors':''):'Starting…';
-  $('ban').innerHTML=err?`<div class="ban err">${err}</div>`:bl?`<div class="ban">Signals paused: ${bl}</div>`:'';
+  $('ban').innerHTML=err?`<div class="ban err">${err}</div>`:'';
   $('kpi').innerHTML=[['Long signals',cl.length],['Short signals',cs.length],['Watching',L.filter(r=>r.status==='watch').length],['Open trades',st.open.length],['Today',t.length+' trades'],['Today result',f(dr)+' R']].map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join('');
-  $('cl').innerHTML=cl.length?cl.map(r=>card(r,bl)).join(''):'<div class="empty">No confirmed long setups right now.</div>';
-  $('cs').innerHTML=cs.length?cs.map(r=>card(r,bl)).join(''):'<div class="empty">No confirmed short setups right now.</div>';
+  $('cl').innerHTML=cl.length?cl.map(r=>card(r)).join(''):'<div class="empty">No confirmed long setups right now.</div>';
+  $('cs').innerHTML=cs.length?cs.map(r=>card(r)).join(''):'<div class="empty">No confirmed short setups right now.</div>';
   $('cl').scrollTop=longScroll;$('cs').scrollTop=shortScroll;
   $('nl').textContent=cl.length+' coins';$('ns').textContent=cs.length+' coins';
   const wlAll=L.filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).sort((a,b)=>{const m=r=>r.G?r.G.filter(g=>!g.ok).length:9;return m(a)-m(b)||(b.score||0)-(a.score||0)});
@@ -341,9 +379,9 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
  }), 'No candidates yet.');
     $('wl').scrollTop=watchScroll;
   $('ot').innerHTML=tbl(['Coin','Side','Entry','Now','Stop','Final TP','Live R','Age',''],st.open.map(o=>{const px=M[o.sym]&&M[o.sym].p,sg=o.dir==='long'?1:-1,rn=px?(px-o.en)*sg/Math.abs(o.en-o.stop0):null;
-    return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp2)}</td><td class="${rn>=0?'long-t':'short-t'}">${f(rn)} R</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td><button data-a="close" data-s="${o.id}">Close</button></td></tr>`}),'No open trades. Use “Track this trade” on a confirmed signal.');
+    return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp2)}</td><td class="${rn>=0?'long-t':'short-t'}">${f(rn)} R</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td><button data-a="close" data-s="${o.id}">Close</button></td></tr>`}),'No open trades yet. Every new confirmed signal is enrolled automatically while this dashboard is running.');
   const H=st.hist,w=H.filter(x=>x.r>0),lo=H.filter(x=>x.r<=0),tr=H.reduce((a,x)=>a+x.r,0),gl=Math.abs(lo.reduce((a,x)=>a+x.r,0));
-  $('stats').innerHTML=[['Trades',H.length],['Win rate',H.length?f(w.length/H.length*100,0)+'%':'–'],['Total R',f(tr)],['Total P&L','$'+f(H.reduce((a,x)=>a+x.pnl,0))],['Avg R',H.length?f(tr/H.length):'–'],['Profit factor',gl?f(w.reduce((a,x)=>a+x.r,0)/gl):'–']].map(x=>`<span>${x[0]}: <b>${x[1]}</b></span>`).join('');
+  $('stats').innerHTML=[['Closed results',H.length],['Auto-tracked open',st.open.length],['Win rate',H.length?f(w.length/H.length*100,0)+'%':'–'],['Total R',f(tr)],['Total P&L','$'+f(H.reduce((a,x)=>a+x.pnl,0))],['Avg R',H.length?f(tr/H.length):'–'],['Profit factor',gl?f(w.reduce((a,x)=>a+x.r,0)/gl):'–']].map(x=>`<span>${x[0]}: <b>${x[1]}</b></span>`).join('');
   $('hs').innerHTML=tbl(['Closed','Coin','Side','Entry','Exit','Result','P&L','Reason'],[...H].reverse().slice(0,100).map(x=>`<tr><td>${new Date(x.close).toLocaleString()}</td><td>${tv(x.sym)}</td><td>${pill(x.dir==='long'?'pl':'ps',x.dir.toUpperCase())}</td><td>${fp(x.en)}</td><td>${fp(x.ex)}</td><td class="${x.r>0?'long-t':'short-t'}">${f(x.r)} R</td><td class="${x.pnl>0?'long-t':'short-t'}">$${f(x.pnl)}</td><td class="mut">${x.why}</td></tr>`),'No closed trades yet.');
   eq();
 }
@@ -356,7 +394,6 @@ function eq(){
 }
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,s=b.dataset.s;
   if(a==='pin'){st.pins=st.pins.includes(s)?st.pins.filter(x=>x!==s):[...st.pins,s];save();render()}
-  else if(a==='take')take(s);
   else if(a==='chart')window.openPositionChart(s);
   else if(a==='close'){const t=st.open.find(x=>x.id==s),px=t&&M[t.sym]&&M[t.sym].p;if(t&&px){const sg=t.dir==='long'?1:-1,g=(px-t.en)*sg/Math.abs(t.en-t.stop0),r1=(t.tp1-t.en)*sg/Math.abs(t.en-t.stop0),net=t.tp1h?(t.targetMode==='extended'?0.5*r1+0.5*g:0.5+0.5*g):g;closeT(t,'Closed manually',px,net);render()}}
 });
