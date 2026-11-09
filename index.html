@@ -152,6 +152,57 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   <section><h2>Confirmed SHORT <small id="ns"></small></h2><div class="cards" id="cs"></div></section>
 </div>
 
+<section id="realBinancePanel" class="paper-panel" hidden style="border-color:#d76262;background:linear-gradient(120deg,#321b24,#1d2736)">
+ <div class="paper-heading">
+  <h2 style="color:#ffc1c1">Binance Futures — REAL Account</h2>
+  <b class="paper-only" style="background:#75232e;border-color:#e46666">REAL FUNDS · OFF UNTIL YOU ACTIVATE</b>
+ </div>
+ <p class="paper-note">Live Binance USDⓈ-M Futures. Your existing RSI, candle, volume and funding signal strategy is unchanged. Your laptop can place actual futures orders <b>only after you explicitly enable live trading</b>. Futures trading can cause rapid losses and liquidation.</p>
+ <div id="liveStatus" class="paper-status">Live trading DISABLED. The real account is not connected.</div>
+ <div id="liveBalance" class="paper-metrics"></div>
+ <details class="paper-details" id="liveCredentials">
+  <summary>1. Connect your real Binance Futures API credentials securely</summary>
+  <p class="paper-note">Create a Binance Futures API key with Futures trading permission, withdrawals disabled and IP restriction if available. Enter it here on your laptop only. Windows DPAPI encrypts credentials under your Windows account. Never share the secret in chat, GitHub or Render.</p>
+  <div class="paper-settings">
+   <label>Binance API key<input id="liveApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste on your laptop"/></label>
+   <label>Binance API secret<input id="liveApiSecret" type="password" autocomplete="off" spellcheck="false" placeholder="Paste on your laptop"/></label>
+  </div>
+  <button id="liveConnect" type="button">Verify and securely save account</button>
+  <button id="liveVerify" type="button">Verify saved account</button>
+  <button id="liveDisconnect" type="button">Disconnect saved API key</button>
+ </details>
+ <details class="paper-details" id="liveRiskSettings">
+  <summary>2. Independent REAL-money risk limits (separate from signal selection)</summary>
+  <div class="paper-settings">
+   <label>Real account risk per trade (%)<input data-live-setting="riskPerTradePct" type="number" min="0.01" max="1" step="0.01" value="0.2"/></label>
+   <label>Maximum real order notional (USDT)<input data-live-setting="maxNotionalUSDT" type="number" min="10" max="1000" step="5" value="75"/></label>
+   <label>Maximum leverage (×)<input data-live-setting="maxLeverage" type="number" min="1" max="5" step="1" value="2"/></label>
+   <label>Maximum real entries per day<input data-live-setting="maxOrdersPerDay" type="number" min="1" max="5" step="1" value="2"/></label>
+   <label>Daily wallet-loss cutoff (%)<input data-live-setting="maxDailyLossPct" type="number" min="0.1" max="3" step="0.1" value="0.75"/></label>
+   <label>Maximum price deviation from signal (%)<input data-live-setting="maxChasePct" type="number" min="0.01" max="1" step="0.01" value="0.2"/></label>
+   <label>Maximum real-order stop width (%)<input data-live-setting="maxStopPct" type="number" min="0.1" max="15" step="0.1" value="5"/></label>
+   <label>Minimum Binance order notional (USDT)<input data-live-setting="minNotionalUSDT" type="number" min="1" max="100" step="1" value="5"/></label>
+  </div>
+  <button id="liveSaveRisk" type="button">Save REAL-money risk settings</button>
+  <p class="paper-note">These limits can block real execution without suppressing a confirmed signal. Only Binance source signals can trigger live orders. One-Way position mode and an empty Futures account are required before activation.</p>
+ </details>
+ <div class="paper-status" style="background:#3d2631">
+  <strong>3. Live execution control</strong>
+  <p class="paper-note">Default is OFF on every Windows startup. Activation can place REAL Binance Futures orders automatically when future signals qualify. Exchange-side stop-loss and take-profit protection is requested immediately after a confirmed fill; failures disable new entries and may require urgent manual action.</p>
+  <label style="display:block;font-size:12px">Type exactly <b>ENABLE REAL BINANCE FUTURES AUTO TRADING</b>
+   <input id="liveArmPhrase" type="text" autocomplete="off" spellcheck="false" style="width:100%;padding:8px;border-radius:6px;background:#101e30;color:#fff;border:1px solid #b96875" placeholder="Activation phrase (never saved)"/>
+  </label>
+  <div class="paper-heading" style="margin-top:9px">
+   <button id="liveArm" type="button" style="background:#aa303d">Enable REAL automatic trading</button>
+   <button id="liveDisarm" type="button" style="background:#79402e">EMERGENCY PAUSE — No new orders</button>
+  </div>
+ </div>
+ <h3>Real Binance order audit <small id="liveOrderCount"></small></h3>
+ <div class="tw" id="liveOrders"></div>
+ <h3>Real-account safety events</h3><div class="tw" id="liveEvents"></div>
+ <p class="paper-note"><b>Important:</b> Emergency Pause blocks future entries; it does not close already-open Binance positions. Existing Binance-side protective orders stay on the exchange. Realized P&L must be verified from Binance account history. This desktop software is not a replacement for monitoring your exchange account.</p>
+</section>
+
 <section id="paperPanel" class="paper-panel">
   <div class="paper-heading"><h2>Binance Futures · Paper Trading</h2><b class="paper-only">SIMULATED ONLY · NO LIVE ORDERS</b></div>
   <p class="paper-note">Virtual Binance futures executions using public Binance prices. This paper account is separate from confirmed signals and simulated trade results. No Binance API key is required.</p>
@@ -585,5 +636,6 @@ begin();
 </script>
 <script src="trade-chart.js"></script>
 <script src="paper-dashboard.js"></script>
+<script src="binance-live-ui.js"></script>
 </body>
 </html>
