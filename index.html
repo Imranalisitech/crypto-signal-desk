@@ -131,7 +131,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   <section><h2>Confirmed SHORT <small id="ns"></small></h2><div class="cards" id="cs"></div></section>
 </div>
 
-<section><h2>Watchlist <small>click a coin name to open it in TradingView</small></h2><p class="mut" style="margin:0 0 8px;font-size:12.5px"><b>These are NOT confirmed trades.</b> Extended targets require historical 4-hour volatility and directional volume confirmation. Money-flow values estimate buying/selling pressure from futures turnover; they are not literal cash inflows or guaranteed predictions. They have a 15m trend and price is near the 5m value zone, but rules are still missing (last column). A coin is confirmed only after a prior 2h/4h low/high is swept, reclaimed and followed by a <b>closed 5-minute confirmation candle</b>; stop-loss is placed beyond that sweep wick. A coin becomes a trade only when it shows <b>CONFIRMED</b> with “Nothing” missing, and then it moves into the Confirmed LONG / SHORT boxes at the top. Closest to confirming is listed first.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
+<section><h2>Watchlist <small>click a coin name to open it in TradingView</small></h2><p class="mut" style="margin:0 0 8px;font-size:12.5px"><b>These are NOT confirmed trades.</b> Extended targets require historical 4-hour volatility and directional volume confirmation. Money-flow values estimate buying/selling pressure from futures turnover; they are not literal cash inflows or guaranteed predictions. They have a 15m trend and price is near the 5m value zone, but rules are still missing (last column). A coin can confirm after either <b>(1) a reclaimed liquidity sweep plus closed 5-minute confirmation</b> or <b>(2) strong 1h/3h money flow, expanding breakout volume and a subsequent closed 5-minute continuation candle</b>. Stops sit beyond the sweep wick or the breakout structure. A coin becomes a trade only when it shows <b>CONFIRMED</b> with “Nothing” missing, and then it moves into the Confirmed LONG / SHORT boxes at the top. Closest to confirming is listed first.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 <section id="sot"><h2>Open trades <small>tracked automatically against live mark price</small></h2><div class="tw" id="ot"></div></section>
 <section><h2>Trade result history <span><button id="clearHistory" type="button">Clear history</button> <button id="csv" type="button">Export CSV</button></span></h2>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
@@ -307,29 +307,81 @@ function detectLiquiditySweep(bars,dir){
   }
   return null;
 }
+// Alternative to a sweep: a CLOSED 5m break beyond a real prior range,
+// followed by another CLOSED confirming candle with expanding volume.
+// Directional higher-timeframe money flow is required in evalLive().
+function detectFlowBreakout(bars,dir,flow){
+  if(!Array.isArray(bars)||bars.length<75||!flow||!['long','short'].includes(dir))return null;
+  const sg=dir==='long'?1:-1;
+  const pressure=sg*flow.oneHour,trendPressure=sg*flow.threeHour;
+  if(pressure<.16||trendPressure<.07||flow.volumeRatio<1.25)return null;
+  if((dir==='long'&&flow.weakRally)||(dir==='short'&&flow.weakSelloff))return null;
+  const last=bars.length-1,atr=atr5m(bars);
+  if(!(atr>0))return null;
+  for(let j=last;j>=Math.max(25,last-1);j--){
+    const i=j-1,breakBar=bars[i],confirm=bars[j];
+    const base=bars.slice(i-20,i);
+    if(base.length!==20)continue;
+    const level=dir==='long'?Math.max(...base.map(x=>x.h)):Math.min(...base.map(x=>x.l));
+    const minBreak=Math.max(.12*atr,.00018*level);
+    const penetration=sg*(breakBar.c-level);
+    const body=sg*(breakBar.c-breakBar.o);
+    const barRange=breakBar.h-breakBar.l;
+    const nearEdge=barRange>0?(dir==='long'?(breakBar.c-breakBar.l)/barRange:(breakBar.h-breakBar.c)/barRange):0;
+    const avgVolume=base.reduce((sum,k)=>sum+k.v,0)/20;
+    const breakoutVolRatio=avgVolume>0?breakBar.v/avgVolume:0;
+    if(!(penetration>=minBreak&&body>=.55*atr&&nearEdge>=.68&&breakoutVolRatio>=1.40))continue;
+    const confirmBody=sg*(confirm.c-confirm.o);
+    const confirmRange=confirm.h-confirm.l;
+    const confirmEdge=confirmRange>0?(dir==='long'?(confirm.c-confirm.l)/confirmRange:(confirm.h-confirm.c)/confirmRange):0;
+    const closeHold=sg*(confirm.c-level)>.10*atr&&sg*(confirm.c-breakBar.c)>=-.12*atr;
+    if(!(confirmBody>0&&confirmEdge>=.55&&closeHold&&confirm.v>=avgVolume*.90))continue;
+    const after=bars.slice(j+1);
+    if(after.some(k=>sg*(k.c-level)<=0))continue;
+    const recent=bars.slice(i-12,i);
+    const extreme=dir==='long'?Math.min(...recent.map(k=>k.l),breakBar.l):Math.max(...recent.map(k=>k.h),breakBar.h);
+    if(!(Number.isFinite(extreme)&&sg*(confirm.c-extreme)>0))continue;
+    return{
+      level,extreme,atr,
+      breakoutTime:breakBar.t,confirmTime:confirm.t,confirmClose:confirm.c,
+      breakoutVolRatio,confirmedVolumeRatio:avgVolume>0?confirm.v/avgVolume:0,
+      windowHours:20/12
+    };
+  }
+  return null;
+}
 function evalLive(r,k5,px){
-  const G=[],add=(ok,t)=>G.push({ok,t}),dir=r.dir,sg=dir==='long'?1:-1,sweep=r.sweep;
-  add(!!sweep,'Waiting for a 2h/4h liquidity sweep and reclaim');
-  add(!!sweep&&sweep.confirmTime>sweep.sweepTime,'Waiting for closed 5m confirmation after sweep');
-  const sweepNearZone=!!sweep&&(dir==='long'
-    ?sweep.extreme<=r.zh*(1+n('tol')/100)&&sweep.confirmClose>=r.zl*(1-n('tol')/100)
-    :sweep.extreme>=r.zl*(1-n('tol')/100)&&sweep.confirmClose<=r.zh*(1+n('tol')/100));
-  add(sweepNearZone,'Liquidity sweep must interact with 5m value zone');
+  const G=[],add=(ok,reason)=>G.push({ok,t:reason});
+  const dir=r.dir,sg=dir==='long'?1:-1,sweep=r.sweep,momentum=r.momentum;
+  const setup=sweep||momentum,setupType=sweep?'Liquidity sweep':momentum?'Strong-flow breakout':null;
+  add(!!setup,'Waiting for a liquidity sweep or strong-flow breakout');
+  if(sweep){
+    add(sweep.confirmTime>sweep.sweepTime,'Waiting for closed 5m confirmation after sweep');
+    const zone=dir==='long'?
+      sweep.extreme<=r.zh*(1+n('tol')/100)&&sweep.confirmClose>=r.zl*(1-n('tol')/100):
+      sweep.extreme>=r.zl*(1-n('tol')/100)&&sweep.confirmClose<=r.zh*(1+n('tol')/100);
+    add(zone,'Liquidity sweep must interact with 5m value zone');
+  }else{
+    add(!!momentum&&momentum.confirmTime>momentum.breakoutTime,'Waiting for closed 5m breakout confirmation');
+    add(!!momentum&&momentum.breakoutVolRatio>=1.4,'Breakout volume below 1.4x baseline');
+  }
   const flow=r.flow;
-  add(!!flow&&sg*flow.oneHour>=.05,'1h money-flow pressure against trade');
-  add(!!flow&&sg*flow.threeHour>=.012,'3h money-flow pressure against trade');
-  add(!!flow&&flow.volumeRatio>=.75,'Quote turnover falling too sharply');
+  add(!!flow&&sg*flow.oneHour>=(sweep?.05:.16),'1h buying/selling pressure below requirement');
+  add(!!flow&&sg*flow.threeHour>=(sweep?.012:.07),'3h directional pressure below requirement');
+  add(!!flow&&flow.volumeRatio>=(sweep?.75:1.25),'Quote turnover not expanding enough');
   add(!!flow&&(dir==='long'?!flow.weakRally:!flow.weakSelloff),'Possible fake breakout / flow-price divergence');
   const fr=M[r.sym]&&M[r.sym].fr,fl=n('fundlim');
   add(Number.isFinite(fr)&&(dir==='short'?fr>-fl:fr<fl),'Funding extreme against you');
-  const confClose=sweep?sweep.confirmClose:0;
-  const maxChase=sweep?Math.max(sweep.atr*.80,confClose*.003):0;
-  add(!!sweep&&sg*(px-confClose)>=-sweep.atr*.40&&sg*(px-confClose)<=maxChase,
-    'Price already too far from confirmed sweep entry');
-  const stop=sweep?(sweep.extreme-sg*Math.max(sweep.atr*.12,px*.00035)):NaN;
+  const confClose=setup?setup.confirmClose:0;
+  const maxChase=setup?Math.max(setup.atr*(sweep?.8:.70),confClose*.003):0;
+  add(!!setup&&sg*(px-confClose)>=-setup.atr*.40&&sg*(px-confClose)<=maxChase,
+    'Price too far from confirmed entry or reversed');
+  // The stop uses the actual sweep wick, or the actual preceding 5m consolidation low/high.
+  // An ATR buffer is placed beyond that level: never force a stop closer than structure.
+  const stop=setup?setup.extreme-sg*Math.max(setup.atr*.12,px*.00035):NaN;
   const risk=Math.abs(px-stop),sp=Number.isFinite(risk)&&px>0?risk/px*100:NaN;
-  add(!!sweep&&sg*(px-stop)>0&&Number.isFinite(sp)&&sp>0&&sp<=n('maxstop'),
-    'Stop beyond liquidity wick exceeds maximum risk');
+  add(!!setup&&sg*(px-stop)>0&&Number.isFinite(sp)&&sp>0&&sp<=n('maxstop'),
+    'Structure-based stop exceeds maximum risk');
   const targetPct=Math.min(15,Math.max(1,n('mintp')||2.8));
   add((r.move4h||0)>=targetPct,'Historical 4h movement below '+f(targetPct,1)+'%');
   add(Number.isFinite(sp)&&sp>0&&targetPct/sp>=3,'Target risk/reward below 3R');
@@ -339,15 +391,12 @@ function evalLive(r,k5,px){
   const leverage=notional/n('acct');
   add(Number.isFinite(notional)&&leverage<=n('maxlev'),'Leverage above cap');
   const tp1=px*(1+sg*targetPct/200),tp2=px*(1+sg*targetPct/100);
-  return {
-    G,ok:G.every(g=>g.ok),
-    plan:{
-      en:px,stop,tp1,tp2,sp,r$:riskCash,nt:notional,lev:leverage,
-      ck:sweep?sweep.confirmTime:0,
-      tp1pct:targetPct/2,tp2pct:targetPct,
-      rr:sp>0?targetPct/sp:0,move4h:r.move4h||0
-    }
-  };
+  return {G,ok:G.every(x=>x.ok),setupType,plan:{
+    en:px,stop,tp1,tp2,sp,r$:riskCash,nt:notional,lev:leverage,
+    ck:setup?setup.confirmTime:0,
+    setupType,structureLevel:setup?setup.level:NaN,structureExtreme:setup?setup.extreme:NaN,
+    tp1pct:targetPct/2,tp2pct:targetPct,rr:sp>0?targetPct/sp:0,move4h:r.move4h||0
+  }};
 }
 
 let lim=false,dur=0,scanTotal=0,scanDone=0,scanFailures=0;
@@ -400,7 +449,8 @@ async function scan(){
       r.move4h=historical4hMovePct(k5);r.flow=assessMoneyFlow(k5);r.zl=Math.min(e9,e21,v5);r.zh=Math.max(e9,e21,v5);
       const px=M[s].p;r.dist=px<r.zl?(r.zl-px)/px*100:px>r.zh?(px-r.zh)/px*100:0;
       r.sweep=detectLiquiditySweep(k5,r.dir);
-      if(r.dist>0.4&&!r.sweep)return;
+      r.momentum=r.sweep?null:detectFlowBreakout(k5,r.dir,r.flow);
+      if(r.dist>0.4&&!r.sweep&&!r.momentum)return;
       r.status='watch';
       Object.assign(r,evalLive(r,k5,px));
       if(r.ok)r.status='confirm';
@@ -467,7 +517,7 @@ const star=s=>`<button class="ic" data-a="pin" data-s="${s}" title="Pin to watch
 const tbl=(h,rows,e)=>rows.length?`<table><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr>${rows.join('')}</table>`:`<div class="empty">${e}</div>`;
 function card(r,bl){const p=r.plan,t=st.open.some(x=>x.sym===r.sym);
   return`<div class="card ${r.dir}" data-a="chart" data-s="${r.sym}" role="button" tabindex="0" aria-label="Open ${r.sym} confirmed trade chart with entry, stop and targets"><div class="ch"><button type="button" class="coin-chart" data-a="chart" data-s="${r.sym}" title="Open confirmed entry/TP/SL chart">${nm(r.sym)}</button>${star(r.sym)}<span class="m">${fp(M[r.sym].p)}</span></div>
-  <table class="kv">${[['Entry',fp(p.en)],['Stop',fp(p.stop)],['TP1 ('+f(p.tp1pct,1)+'%)',fp(p.tp1)],['Final TP ('+f(p.tp2pct,1)+'%)',fp(p.tp2)],['Target R:R','1 : '+f(p.rr,1)],['Historical 4h P80',f(p.move4h,2)+'%'],['Flow 1h',r.flow?flowPct(r.flow.oneHour):'—'],['Flow 3h',r.flow?flowPct(r.flow.threeHour):'—'],['Volume activity',r.flow?f(r.flow.volumeRatio,2)+'x':'—'],['Flow status',flowTrend(r)],['Liquidity level',r.sweep?fp(r.sweep.level):'—'],['Sweep wick',r.sweep?fp(r.sweep.extreme):'—'],['5m confirmation',r.sweep?new Date(r.sweep.confirmTime).toLocaleTimeString():'—'],['Size',' $'+f(p.nt,0)],['Leverage',f(p.lev,2)+'x']].map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td></tr>`).join('')}</table>
+  <table class="kv">${[['Entry',fp(p.en)],['Stop',fp(p.stop)],['TP1 ('+f(p.tp1pct,1)+'%)',fp(p.tp1)],['Final TP ('+f(p.tp2pct,1)+'%)',fp(p.tp2)],['Target R:R','1 : '+f(p.rr,1)],['Historical 4h P80',f(p.move4h,2)+'%'],['Flow 1h',r.flow?flowPct(r.flow.oneHour):'—'],['Flow 3h',r.flow?flowPct(r.flow.threeHour):'—'],['Volume activity',r.flow?f(r.flow.volumeRatio,2)+'x':'—'],['Flow status',flowTrend(r)],['Setup type',r.setupType||'—'],['Key level',r.sweep?fp(r.sweep.level):r.momentum?fp(r.momentum.level):'—'],['Stop structure',r.sweep?fp(r.sweep.extreme):r.momentum?fp(r.momentum.extreme):'—'],['5m confirmation',r.plan?.ck?new Date(r.plan.ck).toLocaleTimeString():'—'],['Size',' $'+f(p.nt,0)],['Leverage',f(p.lev,2)+'x']].map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td></tr>`).join('')}</table>
   <button class="p" data-a="take" data-s="${r.sym}" ${bl||t?'disabled':''}>${t?'Tracking':'Track this trade'}</button><button class="p" type="button" data-a="chart" data-s="${r.sym}" style="margin-top:7px">View chart with Entry / TP / SL</button></div>`}
 function render(){
   const watchScroll=$('wl').scrollTop,longScroll=$('cl').scrollTop,shortScroll=$('cs').scrollTop,feedScroll=$('scanRecent').scrollTop;
