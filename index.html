@@ -130,6 +130,10 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 .scan-metrics{display:flex;gap:9px;flex-wrap:wrap;margin:9px 0}
 .scan-metrics span{font-size:12px;padding:6px 9px;border:1px solid #344b63;border-radius:7px;background:#152437}
 .scan-issues{font-size:12px;color:#ffce8f;margin:8px 0;overflow-wrap:anywhere}
+.scan-past-errors{margin-top:7px;color:var(--mut);font-size:12px}
+.scan-past-errors summary{cursor:pointer;opacity:.82;font-weight:500!important}
+.scan-past-errors>div{padding:7px 10px;border:1px solid var(--line);border-radius:7px;max-height:130px;overflow:auto}
+.scan-past-errors>div>div{padding:3px 0}
 .scan-health details{margin:12px 0 0;border-top:1px solid #36506b;padding-top:11px}
 .scan-health summary{font-weight:700;cursor:pointer}
 .scan-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0 7px}
@@ -525,15 +529,30 @@ function renderScanInspector(){
   ];
   $('scanCounters').innerHTML=data.map(x=>'<span>'+x[0]+': <b>'+x[1]+'</b></span>').join('');
   const safe=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const errors=Array.isArray(meta.errors)?meta.errors.slice(-3).reverse():[];
-  let notes=errors.map(x=>safe(x.message)).join(' · ');
+  // The laptop retains older diagnostic events for audit. Do not present
+  // these as ACTIVE failures when the current scan is running normally.
+  const allErrors=Array.isArray(meta.errors)?meta.errors:[];
+  const scanStart=Number(meta.scanStartedAt)||0;
+  const currentErrors=allErrors.filter(x=>{
+    const time=Number(x?.time)||0;
+    // Older laptop builds may omit scanStartedAt; respect active status/count.
+    return scanStart>0?time>=scanStart:
+      (phase==='ERROR'||phase==='RATE_LIMITED'||failures>0);
+  });
+  const oldErrors=allErrors.filter(x=>!currentErrors.includes(x));
+  let notes=currentErrors.slice(-3).reverse().map(x=>safe(x.message)).join(' · ');
   if(phase==='RATE_LIMITED'&&meta.scanRateLimitedUntil)
-    notes+=' · Exchange cooldown until '+new Date(meta.scanRateLimitedUntil).toLocaleTimeString();
+    notes+=(notes?' · ':'')+'Exchange cooldown until '+new Date(meta.scanRateLimitedUntil).toLocaleTimeString();
   if(remoteMode&&!remoteOnline)
     notes+=(notes?' · ':'')+'Laptop server unavailable; previous data only';
   else if(remoteMode&&!remoteMarketFresh)
     notes+=(notes?' · ':'')+'Laptop server is running, but exchange price data is stale. Trade monitoring cannot update from stale marks.';
-  $('scanIssues').innerHTML=notes?'<b>Diagnostics:</b> '+notes:'';
+  const past=oldErrors.length?
+    '<details class="scan-past-errors"><summary>Previous scanner warnings ('+oldErrors.length+')</summary>'+
+    '<div>'+oldErrors.slice(-8).reverse().map(x=>
+      '<div>'+((Number(x.time)>0)?safe(new Date(x.time).toLocaleString())+' — ':'')+
+      safe(x.message)+'</div>').join('')+'</div></details>':'';
+  $('scanIssues').innerHTML=(notes?'<b>Current diagnostics:</b> '+notes:'')+past;
   const list=results.filter(r=>(scanFilter==='all'||r.status===scanFilter)&&
     String(r.sym||'').toLowerCase().includes(scanQuery));
   const order={confirm:0,watch:1,none:2,insufficient:3,error:4};
