@@ -119,7 +119,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
     <label class="c"><input type="checkbox" id="news"> Major news window (block)</label>
     <label class="c"><input type="checkbox" id="sess" checked> Enforce 08–21 UTC</label>
     <label class="c"><input type="checkbox" id="showot"> Show Open trades panel</label>
-    <label class="c"><input type="checkbox" id="showmk"> Show Market scan table</label>
+    <label class="c" style="display:none"><input type="checkbox" id="showmk"> Show Market scan table</label>
   </div>
 </details>
 <div id="ban"></div>
@@ -131,12 +131,12 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   <section><h2>Confirmed SHORT <small id="ns"></small></h2><div class="cards" id="cs"></div></section>
 </div>
 
-<section><h2>Watchlist <small>click a coin name to open it in TradingView</small></h2><p class="mut" style="margin:0 0 8px;font-size:12.5px"><b>These are NOT confirmed trades.</b> Extended targets require enough historical 4-hour volatility; a target is not a guaranteed move. They have a 15m trend and price is near the 5m value zone, but rules are still missing (last column). A coin becomes a trade only when it shows <b>CONFIRMED</b> with “Nothing” missing, and then it moves into the Confirmed LONG / SHORT boxes at the top. Closest to confirming is listed first.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
+<section><h2>Watchlist <small>click a coin name to open it in TradingView</small></h2><p class="mut" style="margin:0 0 8px;font-size:12.5px"><b>These are NOT confirmed trades.</b> Extended targets require historical 4-hour volatility and directional volume confirmation. Money-flow values estimate buying/selling pressure from futures turnover; they are not literal cash inflows or guaranteed predictions. They have a 15m trend and price is near the 5m value zone, but rules are still missing (last column). A coin becomes a trade only when it shows <b>CONFIRMED</b> with “Nothing” missing, and then it moves into the Confirmed LONG / SHORT boxes at the top. Closest to confirming is listed first.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 <section id="sot"><h2>Open trades <small>tracked automatically against live mark price</small></h2><div class="tw" id="ot"></div></section>
 <section><h2>Trade result history <span><button id="clearHistory" type="button">Clear history</button> <button id="csv" type="button">Export CSV</button></span></h2>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
-<section id="smk"><h2>Market scan <small id="mkn"></small></h2><div class="tw" id="mk"></div></section>
-<p class="mut" style="font-size:12px">Targets are planned levels, not guaranteed outcomes. The historical 4h P80 move is a screening statistic, not a forecast. Signals and tracked trades are simulated: the dashboard never places orders. Results use mark-price polling and include your fee setting, so real fills can differ. Educational tool, not financial advice.</p>
+<section id="smk" style="display:none!important"><h2>Market scan <small id="mkn"></small></h2><div class="tw" id="mk"></div></section>
+<p class="mut" style="font-size:12px">Targets are planned levels, not guaranteed outcomes. The historical 4h P80 move and directional money-flow pressure are screening statistics, not forecasts. Signals and tracked trades are simulated: the dashboard never places orders. Results use mark-price polling and include your fee setting, so real fills can differ. Educational tool, not financial advice.</p>
 </main>
 <div id="tradeChartModal" class="trade-chart-modal" hidden>
   <div id="tradeChartDialog" class="trade-chart-dialog" role="dialog" aria-modal="true" aria-labelledby="tradeChartTitle" tabindex="-1">
@@ -175,8 +175,8 @@ const J=async(u,w=1)=>{
   if(r.status===418||r.status===429||r.status===403){let t='';try{t=await r.text()}catch(e){}const m=/banned until (\d+)/.exec(t);setBan(m?+m[1]:Date.now()+(r.status===429?90000:EX()==='bybit'?600000:300000));throw new Error('HTTP '+r.status)}
   if(!r.ok)throw new Error('HTTP '+r.status);return r.json()};
 const K=async(s,iv,l)=>{
-  if(EX()==='bybit'){const j=await J(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${s}&interval=${BIV[iv]}&limit=${l}`);return j.result.list.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]})).reverse()}
-  return(await J(`${B}klines?symbol=${s}&interval=${iv}&limit=${l}`,l<100?1:2)).map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}))};
+  if(EX()==='bybit'){const j=await J(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${s}&interval=${BIV[iv]}&limit=${l}`);return j.result.list.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5],q:+k[6],buyq:null})).reverse()}
+  return(await J(`${B}klines?symbol=${s}&interval=${iv}&limit=${l}`,l<100?1:2)).map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5],q:+k[7],buyq:+k[10]}))};
 async function getTickers(){
   if(EX()==='bybit'){const j=await J('https://api.bybit.com/v5/market/tickers?category=linear');
     return j.result.list.map(x=>{M[x.symbol]={p:+x.markPrice||+x.lastPrice,fr:+x.fundingRate*100};return{symbol:x.symbol,chg:+x.price24hPcnt*100,vol:+x.turnover24h}})}
@@ -211,12 +211,62 @@ function historical4hMovePct(bars){
   values.sort((a,b)=>a-b);
   return values[Math.floor((values.length-1)*0.8)];
 }
+// Futures volume pressure is not literal exchange inflow or outflow.
+// Binance provides taker-buy quote volume; Bybit pressure is estimated from
+// candle closing position times quote turnover. No new API calls are needed.
+function assessMoneyFlow(closed5m){
+  if(!Array.isArray(closed5m)||closed5m.length<72)return null;
+  const bars=closed5m.slice(-72);
+  function candlePressure(k){
+    const quote=Number.isFinite(k.q)&&k.q>0?k.q:k.v*((k.h+k.l+k.c)/3);
+    if(!(quote>0))return {quote:0,signed:0,hasTaker:false};
+    const range=k.h-k.l;
+    const closeLocation=range>0?Math.max(-1,Math.min(1,(2*k.c-k.h-k.l)/range)):0;
+    const hasTaker=Number.isFinite(k.buyq)&&k.buyq>=0&&k.buyq<=quote*1.01;
+    const takerPressure=hasTaker?Math.max(-1,Math.min(1,2*k.buyq/quote-1)):closeLocation;
+    const weighted=hasTaker?0.75*takerPressure+0.25*closeLocation:closeLocation;
+    return {quote,signed:quote*weighted,hasTaker};
+  }
+  function aggregate(part){
+    let volume=0,net=0,takerCandles=0;
+    for(const k of part){
+      const r=candlePressure(k);volume+=r.quote;net+=r.signed;
+      if(r.hasTaker)takerCandles++;
+    }
+    return {volume,net,imbalance:volume>0?net/volume:0,takerCandles};
+  }
+  const lastHour=aggregate(bars.slice(-12));
+  const previousTwo=aggregate(bars.slice(-36,-12));
+  const lastThree=aggregate(bars.slice(-36));
+  const volumeRatio=previousTwo.volume>0?(lastHour.volume/12)/(previousTwo.volume/24):0;
+  const oneHour=lastHour.imbalance,threeHour=lastThree.imbalance;
+  const hourPriceMove=(bars[71].c/bars[59].c-1)*100;
+  const weakRally=hourPriceMove>0.30&&oneHour< -0.045;
+  const weakSelloff=hourPriceMove< -0.30&&oneHour>0.045;
+  return {oneHour,threeHour,volumeRatio,hourPriceMove,weakRally,weakSelloff,
+    source:lastThree.takerCandles>=30?'Taker volume + price':'Volume/price proxy'};
+}
+function flowPct(x){return Number.isFinite(x)?(x>0?'+':'')+f(x*100,1)+'%':'—'}
+function flowTrend(r){
+  if(!r.flow)return 'Unavailable';
+  const dir=r.dir==='short'?-1:1,m=r.flow;
+  if((dir===1&&m.weakRally)||(dir===-1&&m.weakSelloff))return 'Potential fake breakout';
+  if(dir*m.oneHour<0.05||dir*m.threeHour<0.012)return 'Weak directional pressure';
+  if(m.volumeRatio<0.75)return 'Low participation';
+  return 'Pressure aligned';
+}
+
 function evalLive(r,k1,px){
   const G=[],add=(ok,t)=>G.push({ok,t}),dir=r.dir,m=k1.length,C=k1[m-2],Rj=k1[m-3],P=k1[m-4],tol=n('tol')/100;
   add(Rj.l<=r.zh*(1+tol)&&Rj.h>=r.zl*(1-tol),'Pullback touched value zone');
   add(rej(Rj,P,dir),'Rejection candle');
   add(dir==='long'?C.c>C.o&&C.c>Rj.c:C.c<C.o&&C.c<Rj.c,'Confirm candle in trend direction');
   const av=k1.slice(m-23,m-3).reduce((s,c)=>s+c.v,0)/20;add(C.v>av,'Volume above average');
+  const flow=r.flow,sgn=dir==='long'?1:-1;
+  add(!!flow&&sgn*flow.oneHour>=0.05,'1h money-flow pressure against trade');
+  add(!!flow&&sgn*flow.threeHour>=0.012,'3h money-flow pressure against trade');
+  add(!!flow&&flow.volumeRatio>=0.75,'5m quote turnover falling too sharply');
+  add(!!flow&&(dir==='long'?!flow.weakRally:!flow.weakSelloff),'Possible fake breakout / flow-price divergence');
   const fr=M[r.sym].fr,fl=n('fundlim');add(dir==='short'?fr>-fl:fr<fl,'Funding extreme against you');
   const sl=k1.slice(m-12,m-1),buf=.0003;
   const stop=dir==='long'?Math.min(...sl.map(c=>c.l))*(1-buf):Math.max(...sl.map(c=>c.h))*(1+buf);
@@ -279,7 +329,7 @@ async function scan(){
     await pool(list,async x=>{
       const s=x.symbol,r=res[s],k15=await K(s,'15m',99);if(k15.length<25)return;r.dir=bias(k15.slice(0,-1));if(!r.dir)return;r.status='trend';
       const k5raw=await K(s,'5m',300);if(k5raw.length<25)return;const k5=k5raw.slice(0,-1),e9=ema(k5,9),e21=ema(k5,21),v5=vwap(k5);if(v5==null)return;
-      r.move4h=historical4hMovePct(k5);r.zl=Math.min(e9,e21,v5);r.zh=Math.max(e9,e21,v5);
+      r.move4h=historical4hMovePct(k5);r.flow=assessMoneyFlow(k5);r.zl=Math.min(e9,e21,v5);r.zh=Math.max(e9,e21,v5);
       const px=M[s].p;r.dist=px<r.zl?(r.zl-px)/px*100:px>r.zh?(px-r.zh)/px*100:0;
       if(r.dist>0.4)return;r.status='watch';
       const k1=await K(s,'1m',40);if(k1.length<25)return;Object.assign(r,evalLive(r,k1,px));if(r.ok)r.status='confirm';
@@ -346,7 +396,7 @@ const star=s=>`<button class="ic" data-a="pin" data-s="${s}" title="Pin to watch
 const tbl=(h,rows,e)=>rows.length?`<table><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr>${rows.join('')}</table>`:`<div class="empty">${e}</div>`;
 function card(r,bl){const p=r.plan,t=st.open.some(x=>x.sym===r.sym);
   return`<div class="card ${r.dir}" data-a="chart" data-s="${r.sym}" role="button" tabindex="0" aria-label="Open ${r.sym} confirmed trade chart with entry, stop and targets"><div class="ch"><button type="button" class="coin-chart" data-a="chart" data-s="${r.sym}" title="Open confirmed entry/TP/SL chart">${nm(r.sym)}</button>${star(r.sym)}<span class="m">${fp(M[r.sym].p)}</span></div>
-  <table class="kv">${[['Entry',fp(p.en)],['Stop',fp(p.stop)],['TP1 ('+f(p.tp1pct,1)+'%)',fp(p.tp1)],['Final TP ('+f(p.tp2pct,1)+'%)',fp(p.tp2)],['Target R:R','1 : '+f(p.rr,1)],['Historical 4h P80',f(p.move4h,2)+'%'],['Size',' $'+f(p.nt,0)],['Leverage',f(p.lev,2)+'x']].map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td></tr>`).join('')}</table>
+  <table class="kv">${[['Entry',fp(p.en)],['Stop',fp(p.stop)],['TP1 ('+f(p.tp1pct,1)+'%)',fp(p.tp1)],['Final TP ('+f(p.tp2pct,1)+'%)',fp(p.tp2)],['Target R:R','1 : '+f(p.rr,1)],['Historical 4h P80',f(p.move4h,2)+'%'],['Flow 1h',r.flow?flowPct(r.flow.oneHour):'—'],['Flow 3h',r.flow?flowPct(r.flow.threeHour):'—'],['Volume activity',r.flow?f(r.flow.volumeRatio,2)+'x':'—'],['Flow status',flowTrend(r)],['Size',' $'+f(p.nt,0)],['Leverage',f(p.lev,2)+'x']].map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td></tr>`).join('')}</table>
   <button class="p" data-a="take" data-s="${r.sym}" ${bl||t?'disabled':''}>${t?'Tracking':'Track this trade'}</button><button class="p" type="button" data-a="chart" data-s="${r.sym}" style="margin-top:7px">View chart with Entry / TP / SL</button></div>`}
 function render(){
   const watchScroll=$('wl').scrollTop,longScroll=$('cl').scrollTop,shortScroll=$('cs').scrollTop,feedScroll=$('scanRecent').scrollTop;
@@ -363,9 +413,9 @@ function render(){
   const wlAll=L.filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).sort((a,b)=>{const m=r=>r.G?r.G.filter(g=>!g.ok).length:9;return m(a)-m(b)||(a.dist??9)-(b.dist??9)});
 const wl=wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).slice(0,watchLimit);
 $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).length+' coins · scroll for more';
-  $('wl').innerHTML=tbl(['','Coin','Side','Price','24h vol','4h move P80','Target','Zone distance','Status','Still missing'],wl.map(r=>{
+  $('wl').innerHTML=tbl(['','Coin','Side','Price','24h vol','1h flow','3h flow','Vol trend','Flow status','4h move P80','Target','Zone distance','Status','Still missing'],wl.map(r=>{
     const miss=r.G?r.G.filter(g=>!g.ok).map(g=>g.t):[];
-    return`<tr><td>${star(r.sym)}</td><td>${tv(r.sym)}</td><td>${r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'<span class="mut">none</span>'}</td><td>${fp(M[r.sym].p)}</td><td>${f(r.vol/1e6,0)}M</td><td>${r.move4h?f(r.move4h,2)+'%':'–'}</td><td>${r.plan?f(r.plan.tp2pct,2)+'%':'–'}</td><td>${r.dist!=null?f(r.dist,2)+'%':'–'}</td><td>${r.status==='confirm'?pill(r.dir==='long'?'pl':'ps','CONFIRMED'):r.status==='watch'?pill('pw','In zone'):r.status==='trend'?pill('pn','Trend only'):pill('pn','No bias')}</td><td class="mut">${r.status==='confirm'?'Nothing':miss.length?miss.join(', '):r.status==='trend'?'Waiting for pullback to zone':'–'}</td></tr>`}),'Nothing in the zone yet. Pin coins with the star to follow them.');
+    return`<tr><td>${star(r.sym)}</td><td>${tv(r.sym)}</td><td>${r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'<span class="mut">none</span>'}</td><td>${fp(M[r.sym].p)}</td><td>${f(r.vol/1e6,0)}M</td><td>${r.flow?flowPct(r.flow.oneHour):'–'}</td><td>${r.flow?flowPct(r.flow.threeHour):'–'}</td><td>${r.flow?f(r.flow.volumeRatio,2)+'x':'–'}</td><td>${r.flow?flowTrend(r):'–'}</td><td>${r.move4h?f(r.move4h,2)+'%':'–'}</td><td>${r.plan?f(r.plan.tp2pct,2)+'%':'–'}</td><td>${r.dist!=null?f(r.dist,2)+'%':'–'}</td><td>${r.status==='confirm'?pill(r.dir==='long'?'pl':'ps','CONFIRMED'):r.status==='watch'?pill('pw','In zone'):r.status==='trend'?pill('pn','Trend only'):pill('pn','No bias')}</td><td class="mut">${r.status==='confirm'?'Nothing':miss.length?miss.join(', '):r.status==='trend'?'Waiting for pullback to zone':'–'}</td></tr>`}),'Nothing in the zone yet. Pin coins with the star to follow them.');
   $('wl').scrollTop=watchScroll;
   $('ot').innerHTML=tbl(['Coin','Side','Entry','Now','Stop','TP1','TP2','Live R','Age',''],st.open.map(o=>{const px=M[o.sym]&&M[o.sym].p,sg=o.dir==='long'?1:-1,rn=px?(px-o.en)*sg/Math.abs(o.en-o.stop0):null;
     return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp1)}${o.tp1h?' ✓':''}</td><td>${fp(o.tp2)}</td><td class="${rn>=0?'long-t':'short-t'}">${f(rn)} R</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td><button data-a="close" data-s="${o.id}">Close</button></td></tr>`}),'No open trades. Use “Track this trade” on a confirmed signal.');
