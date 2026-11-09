@@ -85,7 +85,7 @@ async function glassnodeSnapshot(asset){
   try{
     const [net,oi]=await Promise.all([
       queryGlassnode('transactions/transfers_volume_exchanges_net',asset,since),
-      queryGlassnode('derivatives/futures_open_interest_sum_all',asset,since)
+      queryGlassnode('derivatives/futures_open_interest_sum',asset,since)
     ]);
     const last=net.at(-1),earlier=net.slice(-7,-1);
     const baseline=earlier.length?
