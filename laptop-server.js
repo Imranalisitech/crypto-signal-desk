@@ -56,7 +56,13 @@ const state={
   lastScanAt:loaded.lastScanAt||null,lastPriceAt:null,
   lastScanDurationSec:loaded.lastScanDurationSec||null,
   scanning:false,scanned:0,scanTotal:0,scanFailures:0,
-  errors:[],connection:'Starting laptop scanner',lastSyncAt:null,
+  scanAnalyzed:0,scanInsufficient:0,scanStartedAt:null,
+  scanPhase:'IDLE',scanMessage:'Starting laptop scanner',
+  scanRecent:[],scanRateLimitedUntil:null,
+  lastScanCount:loaded.lastScanCount||Object.keys(loaded.results||{}).length,
+  lastScanAnalyzed:loaded.lastScanAnalyzed||0,
+  errors:Array.isArray(loaded.errors)?loaded.errors.slice(-25):[],
+  connection:'Starting laptop scanner',lastSyncAt:null,
   nextScanAt:0
 };
 // Backfill keys from previous tracked trades so historical signals remain deduplicated.
@@ -246,59 +252,128 @@ function compactResult(r){
 let scanning=false;
 async function scan(){
   if(scanning)return;
-  scanning=true;state.scanning=true;state.scanFailures=0;state.scanned=0;
+  scanning=true;
+  state.scanning=true;
+  state.scanPhase='RUNNING';
+  state.scanMessage='Preparing exchange coin universe';
+  state.scanStartedAt=Date.now();
+  state.scanFailures=0;
+  state.scanAnalyzed=0;
+  state.scanInsufficient=0;
+  state.scanned=0;
+  state.scanRecent=[];
+  state.scanTotal=0;
+  state.scanRateLimitedUntil=null;
   state.nextScanAt=Date.now()+300_000;
-  const start=Date.now();
+  const started=Date.now();
+  // Keep the last completed scan visible. In-progress results are published
+  // separately through progress and recently scanned coin diagnostics.
+  // Never erase a working scanner result set just because the next scan starts.
+  const nextResults={};
+  let scanUniverse=[];
   try{
     const tickers=await refreshTickers();
-    const list=tickers.filter(x=>x.symbol?.endsWith('USDT')&&!/[_-]/.test(x.symbol)&&
+    scanUniverse=tickers.filter(x=>x.symbol?.endsWith('USDT')&&!/[_-]/.test(x.symbol)&&
       x.vol>=config.minTurnoverMillions*1e6&&x.price>0)
       .sort((a,b)=>b.vol-a.vol).slice(0,config.scanMax);
-    state.scanTotal=list.length;state.results={};
+    state.scanTotal=scanUniverse.length;
+    state.scanMessage=scanUniverse.length?
+      'Analyzing '+scanUniverse.length+' '+config.exchange.toUpperCase()+' perpetual markets':
+      'The exchange supplied no matching perpetual futures markets';
+    if(!scanUniverse.length)throw Error('No matching futures markets returned; check exchange and minimum volume settings');
     let index=0;
     async function worker(){
-      while(index<list.length){
+      while(index<scanUniverse.length){
         if(Date.now()<cooldownUntil)break;
-        const item=list[index++];
+        const item=scanUniverse[index++],sym=item.symbol;
+        let record={sym,chg:item.change,vol:item.vol,dir:null,status:'none',
+          score:0,reason:'No qualifying signal',fundingPct:item.fundingPct,
+          analyzedAt:Date.now()};
         try{
           const [raw15,raw5]=await Promise.all([
-            candles(item.symbol,'15m',99),candles(item.symbol,'5m',220)]);
+            candles(sym,'15m',99),candles(sym,'5m',220)]);
           const bars15=closed(raw15,15),bars5=closed(raw5,5);
-          if(bars15.length<64||bars5.length<40)continue;
-          const px=state.markets[item.symbol]?.p||item.price;
-          const decision=strategy.evaluate({
-            bars15,bars5,mark:px,fundingPct:item.fundingPct,
-            maxFunding:config.fundingLimitPct,account:config.account,risk:config.riskPct
-          });
-          const result={...decision,sym:item.symbol,dir:decision.side,
-            chg:item.change,vol:item.vol,G:decision.checks||[]};
-          state.results[item.symbol]=compactResult(result);
-          if(result.status==='confirm'){
-            register(result); // Existing simulated trade results are unchanged.
-            // Live orders stay disabled until explicitly activated locally.
-            // The Binance scanner already provides actual futures mark prices.
-            if(liveBroker.state.armed&&config.exchange==='binance'){
-              const bmark=state.markets[item.symbol];
-              if(bmark&&Number.isFinite(bmark.p)&&Date.now()-bmark.at<30000)
-                liveBroker.onSignal(result,'binance',bmark);
+          if(bars15.length<64||bars5.length<40){
+            record.status='insufficient';
+            record.reason='Insufficient closed candles (15m '+bars15.length+
+              ', 5m '+bars5.length+')';
+            state.scanInsufficient++;
+          }else{
+            const mark=state.markets[sym]?.p||item.price;
+            const decision=strategy.evaluate({
+              bars15,bars5,mark,fundingPct:item.fundingPct,
+              maxFunding:config.fundingLimitPct,account:config.account,risk:config.riskPct
+            });
+            const result={...decision,sym,dir:decision.side,
+              chg:item.change,vol:item.vol,G:decision.checks||[]};
+            record=compactResult(result);
+            record.analyzedAt=Date.now();
+            state.scanAnalyzed++;
+            if(result.status==='confirm'){
+              register(result); // Existing simulated results are unchanged.
+              // Real trading remains off until the user explicitly arms it.
+              if(liveBroker.state.armed&&config.exchange==='binance'){
+                const bmark=state.markets[sym];
+                if(bmark&&Number.isFinite(bmark.p)&&Date.now()-bmark.at<30000)
+                  liveBroker.onSignal(result,'binance',bmark);
+              }
             }
           }
-        }catch(e){state.scanFailures++;
-          if(state.scanFailures<=4)fault(item.symbol+': '+e.message)}
-        finally{state.scanned++}
+        }catch(e){
+          state.scanFailures++;
+          record.status='error';record.reason=String(e.message).slice(0,180);
+          if(state.scanFailures<=4)fault(sym+': '+record.reason);
+        }finally{
+          nextResults[sym]=record;
+          state.scanned++;
+          state.scanRecent.unshift({sym,status:record.status,
+            dir:record.dir||null,reason:record.reason||null,at:Date.now()});
+          if(state.scanRecent.length>40)state.scanRecent.length=40;
+        }
       }
     }
-    await Promise.all(Array.from({length:Math.min(8,list.length)},worker));
-    state.lastScanAt=Date.now();state.lastScanDurationSec=Math.round((Date.now()-start)/1000);
-    state.connection=state.scanFailures?'Scan complete with '+state.scanFailures+' data errors':
-      'Scan complete';
+    await Promise.all(Array.from({length:Math.min(8,scanUniverse.length)},()=>worker()));
+    const interrupted=state.scanned<state.scanTotal;
+    const completedRows=Object.values(nextResults);
+    // Publish only complete successful scan results, or a useful partial
+    // result when no prior scan exists. Preserve previous scan on rate limits.
+    if((!interrupted&&state.scanAnalyzed>0)||
+       (Object.keys(state.results).length===0&&state.scanAnalyzed>0)){
+      state.results=nextResults;
+      state.lastScanAt=Date.now();
+      state.lastScanCount=completedRows.length;
+      state.lastScanAnalyzed=state.scanAnalyzed;
+      state.lastScanDurationSec=Math.round((Date.now()-started)/1000);
+    }
+    const rateLimited=Date.now()<cooldownUntil;
+    state.scanRateLimitedUntil=rateLimited?cooldownUntil:null;
+    state.scanPhase=rateLimited?'RATE_LIMITED':
+      interrupted?'PARTIAL':state.scanAnalyzed===0?'NO_DATA':
+      state.scanFailures?'COMPLETE_WITH_ERRORS':'COMPLETE';
+    state.scanMessage=rateLimited?
+      'Exchange rate limited the scanner; retaining last available coin results':
+      interrupted?'Scan stopped before the entire universe completed; last results retained':
+      state.scanAnalyzed===0?'No market could be fully evaluated; previous results retained':
+      'Scan completed: '+state.scanAnalyzed+' evaluated, '+
+        state.scanFailures+' errors, '+state.scanInsufficient+' insufficient histories';
+    state.connection=state.scanMessage;
     persist();
-    log('Scan: '+state.scanned+'/'+state.scanTotal+', confirmed='+
-      Object.values(state.results).filter(x=>x.status==='confirm').length+
-      ', errors='+state.scanFailures);
-  }catch(e){fault('SCAN '+e.message)}
-  finally{state.scanning=false;scanning=false;state.nextScanAt=
-    Math.max(Date.now()+20_000,start+300_000,cooldownUntil);persist()}
+    log('Scan '+state.scanPhase+': '+state.scanned+'/'+state.scanTotal+
+      ' processed, '+state.scanAnalyzed+' evaluated, errors='+state.scanFailures+
+      ', insufficient='+state.scanInsufficient+
+      ', stored='+Object.keys(state.results).length);
+  }catch(e){
+    state.scanPhase='ERROR';
+    state.scanMessage='Scan error: '+String(e.message).slice(0,160)+
+      '. Previous coin data has been retained.';
+    fault(state.scanMessage);
+  }finally{
+    state.scanning=false;
+    scanning=false;
+    state.scanRateLimitedUntil=Date.now()<cooldownUntil?cooldownUntil:null;
+    state.nextScanAt=Math.max(Date.now()+20_000,started+300_000,cooldownUntil);
+    persist();
+  }
 }
 function snapshot(fullHistory=false){
   const active=new Set([...Object.keys(state.results),...state.open.map(x=>x.sym)]);
@@ -312,8 +387,13 @@ function snapshot(fullHistory=false){
     generatedAt:Date.now(),exchange:config.exchange,
     createdAt:state.createdAt,scanning:state.scanning,
     scanned:state.scanned,scanTotal:state.scanTotal,
-    scanFailures:state.scanFailures,lastScanAt:state.lastScanAt,
-    lastPriceAt:state.lastPriceAt,errors:state.errors.slice(-5),
+    scanFailures:state.scanFailures,scanAnalyzed:state.scanAnalyzed,
+    scanInsufficient:state.scanInsufficient,scanPhase:state.scanPhase,
+    scanMessage:state.scanMessage,scanStartedAt:state.scanStartedAt,
+    scanRecent:state.scanRecent,scanRateLimitedUntil:state.scanRateLimitedUntil,
+    lastScanCount:state.lastScanCount,lastScanAnalyzed:state.lastScanAnalyzed,
+    lastScanAt:state.lastScanAt,lastScanDurationSec:state.lastScanDurationSec,
+    lastPriceAt:state.lastPriceAt,errors:state.errors.slice(-8),
     connection:state.connection,nextScanAt:state.nextScanAt,
     markets,results:Object.values(state.results),
     open:state.open,history,historyTotal:totalHistory,
