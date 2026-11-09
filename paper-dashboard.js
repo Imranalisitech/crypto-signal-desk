@@ -25,7 +25,7 @@
     const open=Array.isArray(p?.open)?p.open:[];
     const history=Array.isArray(p?.history)?p.history:[];
     const rejects=Array.isArray(p?.rejections)?p.rejections:[];
-    const writable=!!info?.mode&&info?.source==='local'&&info?.online&&!!p;
+    const writable=!!info?.mode&&info?.source==='local'&&!!p;
     $('paperPause').disabled=!writable;
     $('paperSave').disabled=!writable;
     $('paperPause').textContent=c.paused?'Resume new paper entries':'Pause new paper entries';
@@ -83,7 +83,7 @@
     );
   };
   async function save(data){
-    if(!current||current.source!=='local'||!current.online||!current.data)return;
+    if(!current||current.source!=='local'||!current.data)return;
     $('paperSave').disabled=true;$('paperPause').disabled=true;
     try{
       const r=await fetch('/api/config',{
