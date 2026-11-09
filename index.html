@@ -98,6 +98,10 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 .server-mode{border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:0 0 12px;background:var(--card);font-size:13px;color:var(--mut)}
 .server-mode strong{color:var(--long)}
 .server-mode.offline{border-color:var(--short);color:var(--short)}
+
+.trade-view-chart{white-space:nowrap!important;width:auto!important;min-width:0;padding:6px 11px;font-size:12px;font-weight:650;background:linear-gradient(110deg,#367cc1,#7158cb);color:#fff;border:0;border-radius:6px;cursor:pointer}
+.trade-view-chart:hover{filter:brightness(1.12)}
+.trade-view-chart:focus-visible{outline:2px solid #8acbff;outline-offset:2px}
 </style>
 </head>
 <body>
@@ -340,6 +344,11 @@ const tv=s=>`<a class="tvl" href="https://www.tradingview.com/chart/?symbol=${EX
 const pill=(c,t)=>`<span class="pill ${c}">${t}</span>`;
 const star=s=>`<button class="ic" data-a="pin" data-s="${s}" title="Pin to watchlist">${st.pins.includes(s)?'★':'☆'}</button>`;
 const tbl=(h,rows,e)=>rows.length?`<table><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr>${rows.join('')}</table>`:`<div class="empty">${e}</div>`;
+const trackedChartButton=(trade,kind)=>{
+  const tradeId=String(trade.id).replace(/[&<>"']/g,'');
+  return '<button type="button" class="trade-view-chart" data-a="tracked-chart" data-kind="'+kind+
+    '" data-id="'+tradeId+'" title="Show saved Entry, Stop Loss and Take Profit on a 5-minute chart">View Entry / SL / TP chart</button>';
+};
 function card(r){
  const p=r.plan,key=signalKey(r);
  const tracking=st.open.some(x=>x.signalKey===key);
@@ -406,14 +415,14 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
    '</td><td class="mut">'+(r.status==='confirm'?'Nothing missing':miss.join(', ')||'—')+'</td></tr>';
  }), 'No candidates yet.');
     $('wl').scrollTop=watchScroll;
-  $('ot').innerHTML=tbl(['Coin','Side','Entry','Now','Stop','Final TP','Live R','Age',''],st.open.map(o=>{const px=M[o.sym]&&M[o.sym].p,sg=o.dir==='long'?1:-1,rn=px?(px-o.en)*sg/Math.abs(o.en-o.stop0):null;
-    return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp2)}</td><td class="${rn>=0?'long-t':'short-t'}">${f(rn)} R</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td>${remoteMode?'Auto':'<button data-a="close" data-s="'+o.id+'">Close</button>'}</td></tr>`}),'No open trades yet. Every new confirmed signal is enrolled automatically while this dashboard is running.');
+  $('ot').innerHTML=tbl(['Coin','Side','Entry','Now','Stop','Final TP','Live R','Age','View trade chart',''],st.open.map(o=>{const px=M[o.sym]&&M[o.sym].p,sg=o.dir==='long'?1:-1,rn=px?(px-o.en)*sg/Math.abs(o.en-o.stop0):null;
+    return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp2)}</td><td class="${rn>=0?'long-t':'short-t'}">${f(rn)} R</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td>${trackedChartButton(o,'open')}</td><td>${remoteMode?'Auto':'<button data-a="close" data-s="'+o.id+'">Close</button>'}</td></tr>`}),'No open trades yet. Every new confirmed signal is enrolled automatically while this dashboard is running.');
   const H=st.hist,w=H.filter(x=>x.r>0),lo=H.filter(x=>x.r<=0),tr=H.reduce((a,x)=>a+x.r,0),gl=Math.abs(lo.reduce((a,x)=>a+x.r,0));
   $('stats').innerHTML=[['Total registered',Object.keys(st.trackedKeys).length],['Closed results',H.length],['Auto-tracked open',st.open.length],['Win rate',H.length?f(w.length/H.length*100,0)+'%':'–'],['Total R',f(tr)],['Total P&L','$'+f(H.reduce((a,x)=>a+x.pnl,0))],['Avg R',H.length?f(tr/H.length):'–'],['Profit factor',gl?f(w.reduce((a,x)=>a+x.r,0)/gl):'–']].map(x=>`<span>${x[0]}: <b>${x[1]}</b></span>`).join('');
   $('allResults').hidden=H.length<=100;
   $('allResults').textContent=showAllHistory?'Show latest 100':'Show all '+H.length+' results';
-  $('hs').innerHTML=tbl(['Closed','Coin','Side','Entry','Stop','TP (3R)','Exit','Result','P&L','Reason'],
-    (showAllHistory?[...H].reverse():[...H].reverse().slice(0,100)).map(x=>`<tr><td>${new Date(x.close).toLocaleString()}</td><td>${tv(x.sym)}</td><td>${pill(x.dir==='long'?'pl':'ps',x.dir.toUpperCase())}</td><td>${fp(x.en)}</td><td>${fp(x.stop)}</td><td>${fp(x.tp)}</td><td>${fp(x.ex)}</td><td class="${x.r>0?'long-t':'short-t'}">${f(x.r)} R</td><td class="${x.pnl>0?'long-t':'short-t'}">$${f(x.pnl)}</td><td class="mut">${x.why}</td></tr>`),'No closed trades yet.');
+  $('hs').innerHTML=tbl(['Closed','Coin','Side','Entry','Stop','TP (3R)','Exit','Result','P&L','Reason','View trade chart'],
+    (showAllHistory?[...H].reverse():[...H].reverse().slice(0,100)).map(x=>`<tr><td>${new Date(x.close).toLocaleString()}</td><td>${tv(x.sym)}</td><td>${pill(x.dir==='long'?'pl':'ps',x.dir.toUpperCase())}</td><td>${fp(x.en)}</td><td>${fp(x.stop)}</td><td>${fp(x.tp)}</td><td>${fp(x.ex)}</td><td class="${x.r>0?'long-t':'short-t'}">${f(x.r)} R</td><td class="${x.pnl>0?'long-t':'short-t'}">$${f(x.pnl)}</td><td class="mut">${x.why}</td><td>${trackedChartButton(x,'history')}</td></tr>`),'No closed trades yet.');
   eq();
 }
 function eq(){
@@ -426,6 +435,7 @@ function eq(){
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,s=b.dataset.s;
   if(a==='pin'){st.pins=st.pins.includes(s)?st.pins.filter(x=>x!==s):[...st.pins,s];save();render()}
   else if(a==='chart')window.openPositionChart(s);
+  else if(a==='tracked-chart')window.openTrackedTradeChart(b.dataset.kind,b.dataset.id);
   else if(a==='close'&&!remoteMode){const t=st.open.find(x=>x.id==s),px=t&&M[t.sym]&&M[t.sym].p;if(t&&px){const sg=t.dir==='long'?1:-1,g=(px-t.en)*sg/Math.abs(t.en-t.stop0),r1=(t.tp1-t.en)*sg/Math.abs(t.en-t.stop0),net=t.tp1h?(t.targetMode==='extended'?0.5*r1+0.5*g:0.5+0.5*g):g;closeT(t,'Closed manually',px,net);render()}}
 });
 $('watchSearch').addEventListener('input',()=>{watchQuery=$('watchSearch').value.trim().toLowerCase();watchLimit=50;$('wl').scrollTop=0;render()});
