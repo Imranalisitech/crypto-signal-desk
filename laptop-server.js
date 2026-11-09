@@ -6,6 +6,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
 const {BinancePaperBroker,normalizePaperConfig}=require('./binance-paper.js');
+const {BinanceLiveBroker,liveConfig}=require('./binance-live.js');
 
 if(typeof fetch!=='function')throw Error('Node.js 20 or newer required.');
 const BASE=__dirname,STATE_FILE=path.join(BASE,'laptop-state.json'),
@@ -30,6 +31,7 @@ function normalizedConfig(raw){
 }
 config=normalizedConfig(config);
 config.paper=normalizePaperConfig(config.paper);
+config.live=liveConfig(config.live);
 const ctx={window:{}};
 vm.runInNewContext(fs.readFileSync(path.join(BASE,'unified-strategy.js'),'utf8'),ctx);
 const strategy=ctx.window.UnifiedStrategy;
@@ -41,6 +43,7 @@ const state={
   createdAt:loaded.createdAt||Date.now(),
   results:loaded.results&&typeof loaded.results==='object'?loaded.results:{},
   paper:loaded.paper&&typeof loaded.paper==='object'?loaded.paper:null,
+  live:loaded.live&&typeof loaded.live==='object'?loaded.live:null,
   markets:{},open:Array.isArray(loaded.open)?loaded.open:[],
   history:Array.isArray(loaded.history)?loaded.history:[],
   trackedKeys:loaded.trackedKeys&&typeof loaded.trackedKeys==='object'?loaded.trackedKeys:{},
@@ -74,6 +77,11 @@ function log(message){
 }
 const paperBroker=new BinancePaperBroker({config:config.paper,state:state.paper,persist,log});
 state.paper=paperBroker.state;
+const liveBroker=new BinanceLiveBroker({
+  dir:BASE,config:config.live,state:state.live,persist,log
+});
+state.live=liveBroker.state;
+config.live=liveBroker.config;
 config.paper=paperBroker.config;
 function fault(message){
   state.errors.push({time:Date.now(),message:String(message).slice(0,220)});
@@ -275,6 +283,12 @@ async function scan(){
           if(result.status==='confirm'){
             register(result); // Existing simulated trade results are unchanged.
             paperBroker.onSignal(result,config.exchange); // Separate, risk-capped paper ledger.
+            // This can send REAL orders only after local credential verification
+            // and explicit user activation. Disabled by default on every boot.
+            if(liveBroker.state.armed&&config.exchange==='binance'){
+              const bmark=paperBroker.marks[item.symbol];
+              liveBroker.onSignal(result,'binance',bmark);
+            }
           }
         }catch(e){state.scanFailures++;
           if(state.scanFailures<=4)fault(item.symbol+': '+e.message)}
@@ -380,10 +394,62 @@ const server=http.createServer((req,res)=>{
           paperBroker.setConfig(data.paper);
         }
         config.paper=paperBroker.config;
+        if(was!==config.exchange&&liveBroker.state.armed)
+          liveBroker.disarm('Market exchange changed');
         fs.writeFileSync(CONFIG_FILE,JSON.stringify(config,null,2));
         if(was!==config.exchange){state.results={};state.markets={};lastTickers=[]}
         respond(res,200,{ok:true});
       }catch(e){respond(res,400,{error:e.message})}
+    });
+    return;
+  }
+  if(url.pathname.startsWith('/api/binance-live/')){
+    // All real-account operations are strictly localhost. These routes are
+    // NOT part of Render relay snapshots and accept NO cross-origin access.
+    const remote=(req.socket.remoteAddress||'').replace(/^::ffff:/,'');
+    const origin=req.headers.origin;
+    const expectedPort=config.port;
+    const safeOrigin=!origin||origin==='http://127.0.0.1:'+expectedPort||
+      origin==='http://localhost:'+expectedPort;
+    const safeHost=['127.0.0.1:'+expectedPort,'localhost:'+expectedPort].includes(req.headers.host);
+    if(!['127.0.0.1','::1'].includes(remote)||!safeOrigin||!safeHost)
+      return respond(res,403,{error:'Real Binance account controls are available only on the local desktop'});
+    const action=url.pathname.slice('/api/binance-live/'.length);
+    if(action==='status'&&req.method==='GET')
+      return respond(res,200,liveBroker.status());
+    if(req.method!=='POST')return respond(res,405,{error:'POST required'});
+    if(!String(req.headers['content-type']||'').startsWith('application/json'))
+      return respond(res,415,{error:'JSON only'});
+    let input='',bytes=0;
+    req.on('data',chunk=>{bytes+=chunk.length;
+      if(bytes<=6000)input+=chunk;else req.destroy()});
+    req.on('end',async()=>{
+      try{
+        const data=JSON.parse(input||'{}');
+        let answer;
+        if(action==='connect'){
+          if(typeof data.apiKey!=='string'||typeof data.apiSecret!=='string')
+            throw Error('Enter the Binance API key and secret on this laptop');
+          answer=await liveBroker.connect(data.apiKey,data.apiSecret);
+        }else if(action==='verify'){
+          await liveBroker.verify();answer=liveBroker.status();
+        }else if(action==='arm'){
+          if(config.exchange!=='binance')
+            throw Error('Select Binance in the scanner settings before activating live trading');
+          answer=await liveBroker.arm(data.phrase);
+        }else if(action==='disarm'){
+          liveBroker.disarm('Paused from local desktop');answer=liveBroker.status();
+        }else if(action==='settings'){
+          config.live=liveBroker.changeConfig(data);
+          fs.writeFileSync(CONFIG_FILE,JSON.stringify(config,null,2));
+          answer=liveBroker.status();
+        }else if(action==='disconnect'){
+          if(liveBroker.state.orders.some(x=>['ACTIVE','PENDING','UNKNOWN','UNPROTECTED'].includes(x.status)))
+            throw Error('Resolve existing real Binance orders and positions before removing the API connection');
+          liveBroker.removeCredentials();answer=liveBroker.status();
+        }else return respond(res,404,{error:'Unknown live-account action'});
+        respond(res,200,answer);
+      }catch(e){respond(res,400,{error:String(e.message).slice(0,210)})}
     });
     return;
   }
@@ -393,7 +459,8 @@ const server=http.createServer((req,res)=>{
       lastSyncAt:state.lastSyncAt});
   const name=url.pathname==='/'?'/index.html':url.pathname;
   const fileAllowed={'/index.html':'index.html','/trade-chart.js':'trade-chart.js',
-    '/unified-strategy.js':'unified-strategy.js','/paper-dashboard.js':'paper-dashboard.js'};
+    '/unified-strategy.js':'unified-strategy.js','/paper-dashboard.js':'paper-dashboard.js',
+    '/binance-live-ui.js':'binance-live-ui.js'};
   if(req.method!=='GET'||!fileAllowed[name])return respond(res,404,{error:'Not found'});
   try{
     let contents=fs.readFileSync(path.join(BASE,fileAllowed[name]),'utf8');
@@ -408,6 +475,13 @@ server.listen(config.port,'127.0.0.1',()=>log('Laptop server ready at http://127
 async function polling(){
   try{await refreshTickers();monitor()}catch(e){fault('TICKERS '+e.message)}
   try{await refreshPaperMarks()}catch(e){fault('BINANCE PAPER '+e.message)}
+  // Positions are protected by Binance-side conditional SL and TP orders.
+  // Reconciliation here updates the local record, never replaces protection.
+  if(liveBroker.state.orders.some(x=>x.status==='ACTIVE')&&!liveBroker.busy){
+    liveBroker.busy=true;
+    liveBroker.reconcile().catch(e=>fault('BINANCE LIVE STATUS '+e.message))
+      .finally(()=>{liveBroker.busy=false});
+  }
   setTimeout(polling,10_000);
 }
 async function scheduleScan(){
