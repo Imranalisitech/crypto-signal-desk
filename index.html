@@ -419,15 +419,8 @@ function card(r){
   '<button class="p" data-a="chart" data-s="'+r.sym+'" style="margin-top:7px">View Entry / SL / TP chart</button></div>';
 }
 function renderBinancePaper(){
- const p=paperSnapshot, cfg=p?.config||{}, sm=p?.summary||{};
- const opens=Array.isArray(p?.open)?p.open:[];
- const closed=Array.isArray(p?.history)?p.history:[];
- const rejected=Array.isArray(p?.rejections)?p.rejections:[];
- const writable=remoteMode&&remoteSource==='local'&&remoteOnline&&!!p;
- $('paperPause').disabled=!writable;
- $('paperSave').disabled=!writable;
- $('paperPause').textContent=cfg.paused?'Resume paper entries':'Pause new paper entries';
- $('paperStatus').textContent=!p?'Desktop paper engine not connected':'Binance local paper only — no live orders';
+ if(typeof window.drawBinancePaper==='function')
+   window.drawBinancePaper({data:paperSnapshot,mode:remoteMode,source:remoteSource,online:remoteOnline});
 }
 function render(){
   const watchScroll=$('wl').scrollTop,longScroll=$('cl').scrollTop,shortScroll=$('cs').scrollTop;
@@ -591,5 +584,6 @@ async function begin(){
 begin();
 </script>
 <script src="trade-chart.js"></script>
+<script src="paper-dashboard.js"></script>
 </body>
 </html>
