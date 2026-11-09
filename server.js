@@ -83,10 +83,15 @@ async function glassnodeSnapshot(asset){
   const since=Math.floor((now-12*3600000)/1000);
   let result;
   try{
-    const [net,oi]=await Promise.all([
+    // Subscription packages may permit netflow while excluding derivatives.
+    // In that case retain genuine netflow rather than discarding all data.
+    const responses=await Promise.allSettled([
       queryGlassnode('transactions/transfers_volume_exchanges_net',asset,since),
       queryGlassnode('derivatives/futures_open_interest_sum',asset,since)
     ]);
+    if(responses[0].status!=='fulfilled')throw responses[0].reason;
+    const net=responses[0].value;
+    const oi=responses[1].status==='fulfilled'?responses[1].value:[];
     const last=net.at(-1),earlier=net.slice(-7,-1);
     const baseline=earlier.length?
       earlier.reduce((sum,x)=>sum+Math.abs(x.v),0)/earlier.length:0;
@@ -99,7 +104,7 @@ async function glassnodeSnapshot(asset){
       result={status:'available',source:'Glassnode',asset,netflow:last.v,
         netflowBaseline:baseline,oiChangePct:oiDelta,ageMinutes,
         metricTime:last.t*1000,updatedAt:now,
-        metrics:['exchange netflow','futures open interest']};
+        metrics:oi.length?['exchange netflow','futures open interest']:['exchange netflow']};
     }
   }catch(e){
     result={status:'unavailable',source:'Glassnode',reason:String(e.message).slice(0,140)};
