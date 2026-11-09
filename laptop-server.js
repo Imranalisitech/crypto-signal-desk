@@ -365,7 +365,16 @@ const server=http.createServer((req,res)=>{
     req.on('end',()=>{
       try{
         const data=JSON.parse(buf);
-        if(!data||typeof data!=='object')throw Error('Invalid config');
+        if(!data||typeof data!=='object'||Array.isArray(data))throw Error('Invalid config');
+        // This app has no authenticated Binance trading route. Reject unknown
+        // fields and secrets rather than ever writing exchange keys to disk.
+        const allowed=new Set(['exchange','scanMax','minTurnoverMillions',
+          'account','riskPct','fundingLimitPct','feePct','paper']);
+        for(const key of Object.keys(data)){
+          if(!allowed.has(key))throw Error('Unrecognized setting; Binance trading credentials are not accepted in paper mode');
+        }
+        if(data.paper&&(!data.paper||typeof data.paper!=='object'||Array.isArray(data.paper)))
+          throw Error('Paper controls must be an object');
         const was=config.exchange;config=normalizedConfig({...config,...data});
         if(data.paper&&typeof data.paper==='object'){
           paperBroker.setConfig(data.paper);
