@@ -69,8 +69,28 @@
     }
     return [...unique.values()].sort((a,b)=>a.time-b.time);
   }
-  async function update(symbol,session){
-    const rows=await K(symbol,'5m',180);
+  async function chartMarketBars(symbol,source,trade){
+    // For completed trades fetch candles near the actual entry/exit instead
+    // of showing only today's candles with stale price levels.
+    const completed=trade?.tradeKind==='history';
+    const ended=completed?Math.min(Date.now(),Math.max(Number(trade.closedAt)||0,Number(trade.openedAt)||0)+3600000):null;
+    const activeSource=source==='binance'?'binance':'bybit';
+    if(!ended&&activeSource===EX())return K(symbol,'5m',180);
+    if(activeSource==='bybit'){
+      const query='https://api.bybit.com/v5/market/kline?category=linear&symbol='+encodeURIComponent(symbol)+
+        '&interval=5&limit=220'+(ended?'&end='+Math.floor(ended):'');
+      const response=await J(query);
+      if(!Array.isArray(response?.result?.list))throw new Error('Bybit 5-minute candles unavailable');
+      return response.result.list.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]})).reverse();
+    }
+    const query='https://fapi.binance.com/fapi/v1/klines?symbol='+encodeURIComponent(symbol)+
+      '&interval=5m&limit=220'+(ended?'&endTime='+Math.floor(ended):'');
+    const response=await J(query,2);
+    if(!Array.isArray(response))throw new Error('Binance 5-minute candles unavailable');
+    return response.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}));
+  }
+  async function update(symbol,session,source,result){
+    const rows=await chartMarketBars(symbol,source,result);
     if(session!==activeSession||!candles)return;
     const bars=cleanBars(rows);
     if(bars.length<20)throw new Error('Not enough 5-minute market candles');
@@ -80,13 +100,36 @@
       const value=fixed[i];
       anchorSeries[i].setData([{time:bars[0].time,value},{time:bars[bars.length-1].time,value}]);
     }
-    byId('tradeChartStatus').textContent=EX().toUpperCase()+' 5m market candles · updated '+new Date().toLocaleTimeString()+' · refreshes every 30 seconds';
+    byId('tradeChartStatus').textContent=source.toUpperCase()+' 5m market candles · '+(result.tradeKind==='history'?
+      'historical chart around saved trade':'updated '+new Date().toLocaleTimeString()+' · refreshes every 30 seconds');
     requestAnimationFrame(drawZones);
   }
-  window.openPositionChart=async function(symbol){
+  // Charts opened from stored trades must use that exact trade's saved plan,
+  // not whichever new signal happens to be displayed for the same coin.
+  window.openTrackedTradeChart=function(kind,id){
+    if(kind!=='open'&&kind!=='history')return;
+    const records=kind==='open'?st.open:st.hist;
+    const trade=records.find(x=>String(x.id)===String(id));
+    if(!trade||!trade.sym||!['long','short'].includes(trade.dir))return;
+    const en=Number(trade.en),stop=Number(trade.stop0??trade.stop);
+    const tp=Number(trade.tp2??trade.tp);
+    if(![en,stop,tp].every(x=>Number.isFinite(x)&&x>0))return;
+    const risk=Math.abs(en-stop),rr=risk?Math.abs(tp-en)/risk:0;
+    if(!(risk>0))return;
+    const record={
+      status:'confirm',dir:trade.dir,source:trade.source||EX(),tradeKind:kind,
+      openedAt:trade.open,closedAt:trade.close,
+      outcome:trade.why||null,exitPrice:Number(trade.ex),
+      plan:{en,stop,tp2:tp,sp:risk/en*100,rr,structureExtreme:null},
+      pattern:{name:'Saved trade'}
+    };
+    return window.openPositionChart(trade.sym,record);
+  };
+  window.openPositionChart=async function(symbol,selectedRecord=null){
     if(!/^[A-Z0-9]{3,30}$/.test(symbol))return;
-    const result=R[symbol];
+    const result=selectedRecord||R[symbol];
     if(!result||result.status!=='confirm'||!result.plan)return;
+    const source=result.source==='bybit'||result.source==='binance'?result.source:EX();
     const setup={...result.plan};
     const structure=Number.isFinite(setup.structureExtreme)?setup.structureExtreme:null;
     const pattern=result.pattern?.name||'Confirmed candle';
@@ -95,16 +138,26 @@
     const session=++activeSession;
     byId('tradeChartModal').hidden=false;
     document.body.style.overflow='hidden';
-    byId('tradeChartTitle').textContent=symbol+' · '+result.dir.toUpperCase()+' · Unified confluence · 5-minute chart';
-    byId('tradeChartTV').href='https://www.tradingview.com/chart/?symbol='+encodeURIComponent((EX()==='bybit'?'BYBIT':'BINANCE')+':'+symbol+'.P');
+    const title=result.tradeKind==='history'?'Completed trade result':
+      result.tradeKind==='open'?'Automatically tracked trade':'Confirmed trade';
+    byId('tradeChartTitle').textContent=symbol+' · '+result.dir.toUpperCase()+' · '+title+' · 5-minute chart';
+    byId('tradeChartTV').href='https://www.tradingview.com/chart/?symbol='+encodeURIComponent((source==='bybit'?'BYBIT':'BINANCE')+':'+symbol+'.P');
     byId('tradeChartLevels').replaceChildren();
     const rr=setup.sp>0?Math.abs(setup.tp2-setup.en)/Math.abs(setup.en-setup.stop):0;
     const levels=[
       ['Entry ',setup.en,'entry'],['Stop ',setup.stop,'bad'],
       ['Final TP (3R) ',setup.tp2,'good'],
-      ['R:R 1 : ',rr,''],['Pattern ',pattern,'entry'],
-      ['Funding ',(Number(result.fundingPct)||0).toFixed(4)+'%','']
+      ['R:R 1 : ',rr,''],['Pattern ',pattern,'entry']
     ];
+    if(Number.isFinite(result.fundingPct))
+      levels.push(['Funding ',result.fundingPct.toFixed(4)+'%','']);
+    if(result.tradeKind==='open')
+      levels.push(['Status ','Automatically tracking','good']);
+    if(result.tradeKind==='history'){
+      if(result.outcome)levels.push(['Result ',result.outcome,'good']);
+      if(Number.isFinite(result.exitPrice)&&result.exitPrice>0)
+        levels.push(['Recorded exit ',result.exitPrice,'entry']);
+    }
     if(structure!==null)levels.push(['Candle structure ',structure,'bad']);
     for(const item of levels){
       const element=document.createElement('span');
@@ -113,7 +166,7 @@
         (item[0]==='R:R 1 : '?item[1].toFixed(2):fmtPrice(item[1])):item[1]);
       byId('tradeChartLevels').appendChild(element);
     }
-    byId('tradeChartStatus').textContent='Loading '+EX().toUpperCase()+' 5-minute market candles…';
+    byId('tradeChartStatus').textContent='Loading '+source.toUpperCase()+' 5-minute market candles…';
     byId('tradeChartGain').style.display='none';byId('tradeChartLoss').style.display='none';
     byId('tradeChartCanvas').replaceChildren();
     byId('tradeChartDialog').focus();
@@ -141,6 +194,9 @@
       if(structure!==null)lines.push({
         price:structure,color:'#f4ab64',width:1,title:'CANDLE STRUCTURE'
       });
+      if(result.tradeKind==='history'&&Number.isFinite(result.exitPrice)&&result.exitPrice>0){
+        lines.push({price:result.exitPrice,color:'#efc36d',width:1,title:'RECORDED EXIT'});
+      }
       for(const level of lines){
         candles.createPriceLine({price:level.price,color:level.color,lineWidth:level.width,lineStyle:0,axisLabelVisible:true,title:level.title});
       }
@@ -151,7 +207,7 @@
         });
         anchorSeries.push(anchor);
       }
-      await update(symbol,session);
+      await update(symbol,session,source,result);
       if(session!==activeSession)return;
       chart.timeScale().setVisibleLogicalRange({from:Math.max(0,data.length-92),to:data.length+25});
       requestAnimationFrame(drawZones);
@@ -162,9 +218,9 @@
         });
         resizeObserver.observe(container);
       }
-      refreshTimer=setInterval(async()=>{
+      if(result.tradeKind!=='history')refreshTimer=setInterval(async()=>{
         if(session!==activeSession)return;
-        try{await update(symbol,session)}
+        try{await update(symbol,session,source,result)}
         catch(e){if(session===activeSession)byId('tradeChartStatus').textContent='Refresh paused: '+e.message}
       },30000);
     }catch(e){
