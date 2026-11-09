@@ -88,6 +88,8 @@
     const result=R[symbol];
     if(!result||result.status!=='confirm'||!result.plan)return;
     const setup={...result.plan};
+    const liquidity=result.sweep&&Number.isFinite(result.sweep.level)&&Number.isFinite(result.sweep.extreme)
+      ?{...result.sweep}:null;
     if(![setup.en,setup.stop,setup.tp1,setup.tp2].every(v=>Number.isFinite(v)&&v>0))return;
     close();
     const session=++activeSession;
@@ -97,7 +99,12 @@
     byId('tradeChartTV').href='https://www.tradingview.com/chart/?symbol='+encodeURIComponent((EX()==='bybit'?'BYBIT':'BINANCE')+':'+symbol+'.P');
     byId('tradeChartLevels').replaceChildren();
     const rr=setup.sp>0?Math.abs(setup.tp2-setup.en)/Math.abs(setup.en-setup.stop):0;
-    for(const item of [['Entry ',setup.en,'entry'],['Stop ',setup.stop,'bad'],['TP1 ',setup.tp1,'good'],['Final TP ',setup.tp2,'good'],['R:R 1 : ',rr,'']]){
+    const levels=[['Entry ',setup.en,'entry'],['Stop ',setup.stop,'bad'],['TP1 ',setup.tp1,'good'],['Final TP ',setup.tp2,'good'],['R:R 1 : ',rr,'']];
+    if(liquidity){
+      levels.push(['Swept '+liquidity.windowHours+'h '+(result.dir==='long'?'LOW ':'HIGH '),liquidity.level,'entry']);
+      levels.push(['Sweep wick ',liquidity.extreme,'bad']);
+    }
+    for(const item of levels){
       const element=document.createElement('span');
       element.className=item[2];
       element.textContent=item[0]+(item[0]==='R:R 1 : '?Number(item[1]).toFixed(2):fmtPrice(item[1]));
@@ -123,12 +130,17 @@
         priceFormat:{type:'price',precision,minMove:Math.pow(10,-precision)}
       });
       plan=setup;
-      for(const level of [
+      const lines=[
         {price:setup.en,color:'#70adff',width:2,title:'ENTRY'},
         {price:setup.stop,color:'#fa687a',width:2,title:'STOP LOSS'},
         {price:setup.tp1,color:'#51dbaa',width:1,title:'TP1'},
         {price:setup.tp2,color:'#24d6a3',width:2,title:'FINAL TP'}
-      ]){
+      ];
+      if(liquidity){
+        lines.push({price:liquidity.level,color:'#e1a5fc',width:1,title:'SWEPT '+(result.dir==='long'?'LOW':'HIGH')});
+        lines.push({price:liquidity.extreme,color:'#f4ab64',width:1,title:'SWEEP WICK'});
+      }
+      for(const level of lines){
         candles.createPriceLine({price:level.price,color:level.color,lineWidth:level.width,lineStyle:0,axisLabelVisible:true,title:level.title});
       }
       for(const price of [setup.stop,setup.tp2]){
