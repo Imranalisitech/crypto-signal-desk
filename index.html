@@ -102,6 +102,25 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 .trade-view-chart{white-space:nowrap!important;width:auto!important;min-width:0;padding:6px 11px;font-size:12px;font-weight:650;background:linear-gradient(110deg,#367cc1,#7158cb);color:#fff;border:0;border-radius:6px;cursor:pointer}
 .trade-view-chart:hover{filter:brightness(1.12)}
 .trade-view-chart:focus-visible{outline:2px solid #8acbff;outline-offset:2px}
+
+.paper-panel{padding:16px;margin:16px 0;border:1px solid #c08a40;border-radius:12px;background:#182739;color:#e8f1fb}
+.paper-panel h2{font-size:19px;color:#f0cb8a;margin:0}
+.paper-panel h3{font-size:15px;color:#e8eff8;margin:16px 0 8px}
+.paper-heading{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
+.paper-only{background:#65471e;color:#fff0c5;border:1px solid #c08a40;border-radius:6px;padding:5px 8px;font-size:12px}
+.paper-note{color:#b3c5d8;font-size:12px;margin:8px 0}
+.paper-status{background:#243b50;padding:8px 10px;border-radius:6px;font-size:13px;margin:8px 0}
+.paper-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:12px 0}
+.paper-metrics>div{padding:8px 10px;background:#142133;border:1px solid #36516a;border-radius:8px}
+.paper-metrics small{display:block;color:#abbfce}.paper-metrics b{display:block;color:#f3f7fe;font-size:16px}
+.paper-panel button{background:#2f715f;color:white;border:0;border-radius:7px;padding:8px 12px;cursor:pointer}
+.paper-panel button:disabled{opacity:.45;cursor:not-allowed}
+.paper-panel #paperPause{background:#aa6038}
+.paper-panel .tw{max-height:310px;overflow:auto}
+.paper-details{margin:12px 0}.paper-details summary{cursor:pointer;font-weight:700;color:#e3edfa}
+.paper-settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:12px 0}
+.paper-settings label{font-size:12px;color:#bfd2e3;display:flex;flex-direction:column;gap:4px}
+.paper-settings input{background:#101b2c;color:white;padding:7px;border:1px solid #4a6785;border-radius:6px;width:100%}
 </style>
 </head>
 <body>
@@ -133,6 +152,34 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   <section><h2>Confirmed SHORT <small id="ns"></small></h2><div class="cards" id="cs"></div></section>
 </div>
 
+<section id="paperPanel" class="paper-panel">
+  <div class="paper-heading"><h2>Binance Futures · Paper Trading</h2><b class="paper-only">SIMULATED ONLY · NO LIVE ORDERS</b></div>
+  <p class="paper-note">Virtual Binance futures executions using public Binance prices. This paper account is separate from confirmed signals and simulated trade results. No Binance API key is required.</p>
+  <div id="paperStatus" class="paper-status">Laptop paper broker not connected.</div>
+  <div id="paperMetrics" class="paper-metrics"></div>
+  <button id="paperPause" type="button" disabled>Pause new paper entries</button>
+  <details class="paper-details"><summary>Paper-account risk controls</summary>
+    <div class="paper-settings">
+      <label>Starting virtual balance (USDT)<input data-paper-setting="startingBalance" type="number" min="100" step="100" value="10000"/></label>
+      <label>Risk per paper trade (%)<input data-paper-setting="riskPerTradePct" type="number" min="0.01" max="5" step="0.1" value="0.5"/></label>
+      <label>Maximum simultaneous positions<input data-paper-setting="maxOpenPositions" type="number" min="1" max="30" step="1" value="3"/></label>
+      <label>Max position notional (USDT)<input data-paper-setting="maxPositionNotional" type="number" min="20" step="100" value="3000"/></label>
+      <label>Max total exposure (USDT)<input data-paper-setting="maxTotalNotional" type="number" min="50" step="100" value="10000"/></label>
+      <label>Max gross leverage (×)<input data-paper-setting="maxGrossLeverage" type="number" min="1" max="20" step="0.5" value="3"/></label>
+      <label>Daily equity loss protection (%)<input data-paper-setting="dailyLossLimitPct" type="number" min="0.1" max="20" step="0.5" value="2"/></label>
+      <label>Estimated fee per side (%)<input data-paper-setting="feePerSidePct" type="number" min="0" max="1" step="0.01" value="0.04"/></label>
+      <label>Estimated slippage (%)<input data-paper-setting="slippagePct" type="number" min="0" max="1" step="0.01" value="0.02"/></label>
+      <label>Max Binance/signal price difference (%)<input data-paper-setting="maxMarkDeviationPct" type="number" min="0.01" max="5" step="0.1" value="0.5"/></label>
+      <label>Minimum paper notional (USDT)<input data-paper-setting="minPositionNotional" type="number" min="1" step="10" value="20"/></label>
+    </div>
+    <button id="paperSave" type="button" disabled>Save paper risk controls</button>
+    <p class="paper-note">Controls affect paper orders only, never the confirmation of trading signals. Starting balance cannot be changed after positions are recorded.</p>
+  </details>
+  <h3>Open paper positions <small id="paperOpenCount"></small></h3><div class="tw" id="paperOpen"></div>
+  <h3>Completed paper results <small id="paperClosedCount"></small></h3><div class="tw" id="paperHistory"></div>
+  <details class="paper-details"><summary>Rejected paper entries <small id="paperRejectCount"></small></summary><div class="tw" id="paperRejects"></div></details>
+  <p class="paper-note">Paper fills are modeled from public Binance mark prices, estimated fees and slippage. This does not place any order on Binance or use real funds. Account connections and API credentials are not needed in this mode.</p>
+</section>
 
 <section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins are not confirmed trades. Only active exchange-derived indicators contribute to signals. Final TP is three times the actual stop distance (1:3 R:R); targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 <section id="sot"><h2>Automatically tracked trades <small>every new confirmed signal is recorded without clicking</small></h2><div class="tw" id="ot"></div></section>
