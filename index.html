@@ -128,7 +128,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 
 <section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins are not confirmed trades. Only active exchange-derived indicators contribute to signals. Final TP is three times the actual stop distance (1:3 R:R); targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 <section id="sot"><h2>Automatically tracked trades <small>every new confirmed signal is recorded without clicking</small></h2><div class="tw" id="ot"></div></section>
-<section><h2>All automatic trade results <span><button id="clearHistory" type="button">Clear history</button> <button id="csv" type="button">Export CSV</button></span></h2>
+<section><h2>All automatic trade results <span><button id="allResults" type="button" hidden>Show all results</button> <button id="clearHistory" type="button">Clear history</button> <button id="csv" type="button">Export all CSV</button></span></h2>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
 
 <p class="mut" style="font-size:12px">Trades are registered automatically while the dashboard is open. Tracking is saved in this browser; when it is closed, no new signals can be detected and intraperiod price movements may be missed. Targets are planned levels, not guaranteed outcomes. RSI, candlesticks, trading volume and exchange funding are screening inputs, not forecasts. Signals and tracked trades are simulated: the dashboard never places orders. Results use mark-price polling and include your fee setting, so real fills can differ. Educational tool, not financial advice.</p>
@@ -192,7 +192,7 @@ try{banUntil=+localStorage.getItem('ban_'+EX())||0}catch(e){}
 // Auto-tracked trades are visible by default after this upgrade.
 if(!st.set.autoTrackV){st.set.showot=true;st.set.autoTrackV=1;save()}
 $('showot').checked=st.set.showot!==false;
-let R={},M={},audio=null,notif=false,busy=false,lastScan=null,err='',prog='';let watchLimit=50,watchQuery='';
+let R={},M={},audio=null,notif=false,busy=false,lastScan=null,err='',prog='';let watchLimit=50,watchQuery='',showAllHistory=false;
 let lim=false,dur=0,scanFailures=0,liveRenderTimer=null;
 function queueLiveRender(){
   if(liveRenderTimer!==null)return;
@@ -381,8 +381,11 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
   $('ot').innerHTML=tbl(['Coin','Side','Entry','Now','Stop','Final TP','Live R','Age',''],st.open.map(o=>{const px=M[o.sym]&&M[o.sym].p,sg=o.dir==='long'?1:-1,rn=px?(px-o.en)*sg/Math.abs(o.en-o.stop0):null;
     return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp2)}</td><td class="${rn>=0?'long-t':'short-t'}">${f(rn)} R</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td><button data-a="close" data-s="${o.id}">Close</button></td></tr>`}),'No open trades yet. Every new confirmed signal is enrolled automatically while this dashboard is running.');
   const H=st.hist,w=H.filter(x=>x.r>0),lo=H.filter(x=>x.r<=0),tr=H.reduce((a,x)=>a+x.r,0),gl=Math.abs(lo.reduce((a,x)=>a+x.r,0));
-  $('stats').innerHTML=[['Closed results',H.length],['Auto-tracked open',st.open.length],['Win rate',H.length?f(w.length/H.length*100,0)+'%':'–'],['Total R',f(tr)],['Total P&L','$'+f(H.reduce((a,x)=>a+x.pnl,0))],['Avg R',H.length?f(tr/H.length):'–'],['Profit factor',gl?f(w.reduce((a,x)=>a+x.r,0)/gl):'–']].map(x=>`<span>${x[0]}: <b>${x[1]}</b></span>`).join('');
-  $('hs').innerHTML=tbl(['Closed','Coin','Side','Entry','Exit','Result','P&L','Reason'],[...H].reverse().slice(0,100).map(x=>`<tr><td>${new Date(x.close).toLocaleString()}</td><td>${tv(x.sym)}</td><td>${pill(x.dir==='long'?'pl':'ps',x.dir.toUpperCase())}</td><td>${fp(x.en)}</td><td>${fp(x.ex)}</td><td class="${x.r>0?'long-t':'short-t'}">${f(x.r)} R</td><td class="${x.pnl>0?'long-t':'short-t'}">$${f(x.pnl)}</td><td class="mut">${x.why}</td></tr>`),'No closed trades yet.');
+  $('stats').innerHTML=[['Total registered',Object.keys(st.trackedKeys).length],['Closed results',H.length],['Auto-tracked open',st.open.length],['Win rate',H.length?f(w.length/H.length*100,0)+'%':'–'],['Total R',f(tr)],['Total P&L','$'+f(H.reduce((a,x)=>a+x.pnl,0))],['Avg R',H.length?f(tr/H.length):'–'],['Profit factor',gl?f(w.reduce((a,x)=>a+x.r,0)/gl):'–']].map(x=>`<span>${x[0]}: <b>${x[1]}</b></span>`).join('');
+  $('allResults').hidden=H.length<=100;
+  $('allResults').textContent=showAllHistory?'Show latest 100':'Show all '+H.length+' results';
+  $('hs').innerHTML=tbl(['Closed','Coin','Side','Entry','Stop','TP (3R)','Exit','Result','P&L','Reason'],
+    (showAllHistory?[...H].reverse():[...H].reverse().slice(0,100)).map(x=>`<tr><td>${new Date(x.close).toLocaleString()}</td><td>${tv(x.sym)}</td><td>${pill(x.dir==='long'?'pl':'ps',x.dir.toUpperCase())}</td><td>${fp(x.en)}</td><td>${fp(x.stop)}</td><td>${fp(x.tp)}</td><td>${fp(x.ex)}</td><td class="${x.r>0?'long-t':'short-t'}">${f(x.r)} R</td><td class="${x.pnl>0?'long-t':'short-t'}">$${f(x.pnl)}</td><td class="mut">${x.why}</td></tr>`),'No closed trades yet.');
   eq();
 }
 function eq(){
@@ -399,10 +402,14 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b
 });
 $('watchSearch').addEventListener('input',()=>{watchQuery=$('watchSearch').value.trim().toLowerCase();watchLimit=50;$('wl').scrollTop=0;render()});
 $('wl').addEventListener('scroll',()=>{const el=$('wl');if(el.scrollTop+el.clientHeight>=el.scrollHeight-90){const all=Object.values(R).filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).filter(r=>r.sym.toLowerCase().includes(watchQuery));if(watchLimit<all.length){const pos=el.scrollTop;watchLimit+=50;render();el.scrollTop=pos}}});
+$('allResults').addEventListener('click',()=>{showAllHistory=!showAllHistory;render()});
 $('clearHistory').addEventListener('click',()=>{if(!confirm('Permanently clear all saved trade result history? Open tracked trades will be kept.'))return;st.hist=[];save();render()});
 document.addEventListener('input',()=>{IDS.forEach(i=>st.set[i]=$(i).value);st.set.showot=$('showot').checked;save();render()});
 $('alert').onclick=async()=>{audio=audio||new(window.AudioContext||window.webkitAudioContext)();if('Notification'in window)notif=(await Notification.requestPermission())==='granted';$('alert').textContent='Alerts on'};
-$('csv').onclick=()=>{const rows=[['closed','coin','side','entry','exit','R','pnl_usd','reason'],...st.hist.map(x=>[new Date(x.close).toISOString(),x.sym,x.dir,x.en,x.ex,x.r.toFixed(3),x.pnl.toFixed(2),x.why])];
+$('csv').onclick=()=>{const rows=[['closed','coin','side','signal_candle','entry','stop','target_tp','exit','R','pnl_usd','reason'],
+    ...st.hist.map(x=>[new Date(x.close).toISOString(),x.sym,x.dir,
+    x.signalCandle?new Date(x.signalCandle).toISOString():'',x.en,x.stop??'',x.tp??'',x.ex,
+    x.r.toFixed(3),x.pnl.toFixed(2),x.why])];
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([rows.map(r=>r.join(',')).join('\n')],{type:'text/csv'}));a.download='trade-history.csv';a.click()};
 $('ex').onchange=()=>{st.set.ex=$('ex').value;save();location.reload()};
 render();scan();
