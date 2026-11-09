@@ -88,39 +88,30 @@
     const result=R[symbol];
     if(!result||result.status!=='confirm'||!result.plan)return;
     const setup={...result.plan};
-    const liquidity=result.sweep&&Number.isFinite(result.sweep.level)&&Number.isFinite(result.sweep.extreme)
-      ?{...result.sweep}:null;
-    const breakout=!liquidity&&result.momentum&&Number.isFinite(result.momentum.level)&&Number.isFinite(result.momentum.extreme)
-      ?{...result.momentum}:null;
-    const institutional=!liquidity&&!breakout&&result.large&&Number.isFinite(result.large.level)&&Number.isFinite(result.large.extreme)
-      ?{...result.large}:null;
-    const rsiSetup=!liquidity&&!breakout&&!institutional&&result.rsiSetup&&Number.isFinite(result.rsiSetup.level)&&Number.isFinite(result.rsiSetup.extreme)
-      ?{...result.rsiSetup}:null;
-    const structure=breakout||institutional||rsiSetup;
+    const structure=Number.isFinite(setup.structureExtreme)?setup.structureExtreme:null;
+    const pattern=result.pattern?.name||'Confirmed candle';
     if(![setup.en,setup.stop,setup.tp1,setup.tp2].every(v=>Number.isFinite(v)&&v>0))return;
     close();
     const session=++activeSession;
     byId('tradeChartModal').hidden=false;
     document.body.style.overflow='hidden';
-    byId('tradeChartTitle').textContent=symbol+' · '+result.dir.toUpperCase()+' · '+(result.setupType||'Confirmed')+' · 5-minute chart';
+    byId('tradeChartTitle').textContent=symbol+' · '+result.dir.toUpperCase()+' · Unified confluence · 5-minute chart';
     byId('tradeChartTV').href='https://www.tradingview.com/chart/?symbol='+encodeURIComponent((EX()==='bybit'?'BYBIT':'BINANCE')+':'+symbol+'.P');
     byId('tradeChartLevels').replaceChildren();
     const rr=setup.sp>0?Math.abs(setup.tp2-setup.en)/Math.abs(setup.en-setup.stop):0;
-    const levels=[['Entry ',setup.en,'entry'],['Stop ',setup.stop,'bad'],['TP1 ',setup.tp1,'good'],['Final TP ',setup.tp2,'good'],['R:R 1 : ',rr,'']];
-    if(liquidity){
-      levels.push(['Swept '+liquidity.windowHours+'h '+(result.dir==='long'?'LOW ':'HIGH '),liquidity.level,'entry']);
-      levels.push(['Sweep wick ',liquidity.extreme,'bad']);
-    }else if(structure){
-      levels.push([rsiSetup?'RSI reversal level ':'Breakout level ',structure.level,'entry']);
-      levels.push(['Structural stop base ',structure.extreme,'bad']);
-      if(Number.isFinite(structure.breakoutVolRatio))levels.push(['Volume activity ',structure.breakoutVolRatio.toFixed(2)+'x','good']);
-      if(institutional&&Number.isFinite(institutional.oiChangePct))levels.push(['OI change 1h ',institutional.oiChangePct.toFixed(2)+'%','good']);
-      if(rsiSetup&&Number.isFinite(rsiSetup.rsi5))levels.push(['RSI 5m ',rsiSetup.rsi5.toFixed(1),'good']);
-    }
+    const levels=[
+      ['Entry ',setup.en,'entry'],['Stop ',setup.stop,'bad'],
+      ['TP1 ',setup.tp1,'good'],['Final TP ',setup.tp2,'good'],
+      ['R:R 1 : ',rr,''],['Pattern ',pattern,'entry'],
+      ['Funding ',(Number(result.fundingPct)||0).toFixed(4)+'%',''],
+      ['Glassnode ',result.glassnodeBasis||'Exchange data only','']
+    ];
+    if(structure!==null)levels.push(['Candle structure ',structure,'bad']);
     for(const item of levels){
       const element=document.createElement('span');
       element.className=item[2];
-      element.textContent=item[0]+(item[0]==='R:R 1 : '?Number(item[1]).toFixed(2):fmtPrice(item[1]));
+      element.textContent=item[0]+(typeof item[1]==='number'?
+        (item[0]==='R:R 1 : '?item[1].toFixed(2):fmtPrice(item[1])):item[1]);
       byId('tradeChartLevels').appendChild(element);
     }
     byId('tradeChartStatus').textContent='Loading '+EX().toUpperCase()+' 5-minute market candles…';
@@ -149,13 +140,9 @@
         {price:setup.tp1,color:'#51dbaa',width:1,title:'TP1'},
         {price:setup.tp2,color:'#24d6a3',width:2,title:'FINAL TP'}
       ];
-      if(liquidity){
-        lines.push({price:liquidity.level,color:'#e1a5fc',width:1,title:'SWEPT '+(result.dir==='long'?'LOW':'HIGH')});
-        lines.push({price:liquidity.extreme,color:'#f4ab64',width:1,title:'SWEEP WICK'});
-      }else if(structure){
-        lines.push({price:structure.level,color:'#e1a5fc',width:1,title:rsiSetup?'RSI REVERSAL':'BREAKOUT LEVEL'});
-        lines.push({price:structure.extreme,color:'#f4ab64',width:1,title:'STRUCTURE BASE'});
-      }
+      if(structure!==null)lines.push({
+        price:structure,color:'#f4ab64',width:1,title:'CANDLE STRUCTURE'
+      });
       for(const level of lines){
         candles.createPriceLine({price:level.price,color:level.color,lineWidth:level.width,lineStyle:0,axisLabelVisible:true,title:level.title});
       }
