@@ -120,6 +120,25 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 .paper-settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:12px 0}
 .paper-settings label{font-size:12px;color:#bfd2e3;display:flex;flex-direction:column;gap:4px}
 .paper-settings input{background:#101b2c;color:white;padding:7px;border:1px solid #4a6785;border-radius:6px;width:100%}
+
+.scan-health{padding:14px 15px;border:1px solid #365572;border-radius:12px;background:linear-gradient(125deg,#1a2d40,#142435);margin:14px 0}
+.scan-top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.scan-top h2{font-size:17px;margin:0}
+.scan-tag{font-size:12px;color:#bce0fd;border:1px solid #446584;border-radius:8px;padding:5px 9px;font-weight:650}
+.scan-detail{font-size:12px;color:#adbed1;margin:9px 0;line-height:1.5}
+.scan-health progress{display:block;width:100%;height:10px;margin:10px 0;accent-color:#38ac99}
+.scan-metrics{display:flex;gap:9px;flex-wrap:wrap;margin:9px 0}
+.scan-metrics span{font-size:12px;padding:6px 9px;border:1px solid #344b63;border-radius:7px;background:#152437}
+.scan-issues{font-size:12px;color:#ffce8f;margin:8px 0;overflow-wrap:anywhere}
+.scan-health details{margin:12px 0 0;border-top:1px solid #36506b;padding-top:11px}
+.scan-health summary{font-weight:700;cursor:pointer}
+.scan-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0 7px}
+.scan-controls input,.scan-controls select{border:1px solid #44617c;background:#142336;border-radius:7px;color:#dbe9f6;padding:8px 10px;min-width:140px}
+.scan-controls input{flex:1;max-width:380px}
+.scan-table{max-height:410px;overflow:auto}
+.scan-table th{position:sticky;top:0;background:#183049;z-index:1}
+.scan-controls button{border:1px solid #4f77a1;border-radius:6px;color:#d9edff;background:#244767;padding:7px 12px}
+.scan-subtext{font-size:11px;color:#b6c7d5;margin-top:9px}
 </style>
 </head>
 <body>
@@ -144,6 +163,28 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 </details>
 <div id="ban"></div>
 <div class="kpi" id="kpi"></div>
+<section id="scanInspector" class="scan-health">
+ <div class="scan-top"><h2>Live market scanning & data</h2><span id="scanPhase" class="scan-tag">Loading scanner status</span></div>
+ <div id="scanDescription" class="scan-detail">Checking your laptop scanner...</div>
+ <progress id="scanBar" max="1" value="0"></progress>
+ <div class="scan-metrics" id="scanCounters"></div>
+ <div class="scan-issues" id="scanIssues"></div>
+ <details id="scanAllResults" open>
+  <summary>All scanned coins and analysis results <small id="scanListCount"></small></summary>
+  <div class="scan-controls">
+   <input id="scanSearch" type="search" placeholder="Search all scanned coins (BTC, ETH, XRP...)"/>
+   <select id="scanFilter" aria-label="Filter scanned coin status">
+    <option value="all">All scan results</option>
+    <option value="confirm">Confirmed</option><option value="watch">Watchlist</option>
+    <option value="none">Not confirmed</option><option value="error">Data errors</option>
+    <option value="insufficient">Insufficient candle data</option>
+   </select>
+   <button id="scanMore" type="button" hidden>Show more</button>
+  </div>
+  <div class="scan-table" id="scanCoinTable"></div>
+  <div id="scanHelp" class="scan-subtext">Scanned coins are not automatically trades. Only confirmed signals enter the trade tracker.</div>
+ </details>
+</section>
 
 
 <div class="two">
@@ -272,7 +313,8 @@ try{banUntil=+localStorage.getItem('ban_'+EX())||0}catch(e){}
 // Auto-tracked trades are visible by default after this upgrade.
 if(!st.set.autoTrackV){st.set.showot=true;st.set.autoTrackV=1;save()}
 $('showot').checked=st.set.showot!==false;
-let R={},M={},audio=null,notif=false,busy=false,lastScan=null,err='',prog='';let watchLimit=50,watchQuery='',showAllHistory=false;
+let R={},M={},audio=null,notif=false,busy=false,lastScan=null,err='',prog='';
+let watchLimit=50,watchQuery='',showAllHistory=false,scanMeta=null,scanQuery='',scanFilter='all',scanLimit=80;
 let lim=false,dur=0,scanFailures=0,liveRenderTimer=null;
 function queueLiveRender(){
   if(liveRenderTimer!==null)return;
@@ -441,6 +483,7 @@ function card(r){
 function render(){
   const watchScroll=$('wl').scrollTop,longScroll=$('cl').scrollTop,shortScroll=$('cs').scrollTop;
   $('sot').hidden=!$('showot').checked;
+  renderScanInspector();
   const L=Object.values(R),cf=L.filter(r=>r.status==='confirm'),cl=cf.filter(r=>r.dir==='long'),cs=cf.filter(r=>r.dir==='short'),t=today(),dr=t.reduce((a,x)=>a+x.r,0);
   $('dot').className='dot '+(err?'bad':lastScan?'ok':'');
   if(remoteMode){
@@ -450,8 +493,8 @@ function render(){
     $('serverMode').hidden=false;
     $('serverMode').className='server-mode'+(remoteOnline?'':' offline');
     $('serverMode').innerHTML='<strong>'+origin+'</strong> · '+
-      (remoteOnline?'Background scanner active — the browser may be closed':
-      'Laptop disconnected or sleeping — no new trades monitored')+
+      (remoteOnline?(scanMeta?.scanning?'Scanner currently processing markets':'Laptop connected; waiting for next scan'):
+      'Laptop disconnected or sleeping — live scanning unavailable')+
       (remoteLastSeen?' · last report '+new Date(remoteLastSeen).toLocaleString():'')+
       (remoteHistoryTruncated?' · online view shows recent history; full record stays on laptop':'');
     $('settingsPanel').hidden=remoteSource==='cloud';
@@ -507,6 +550,9 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b
   else if(a==='close'&&!remoteMode){const t=st.open.find(x=>x.id==s),px=t&&M[t.sym]&&M[t.sym].p;if(t&&px){const sg=t.dir==='long'?1:-1,g=(px-t.en)*sg/Math.abs(t.en-t.stop0),r1=(t.tp1-t.en)*sg/Math.abs(t.en-t.stop0),net=t.tp1h?(t.targetMode==='extended'?0.5*r1+0.5*g:0.5+0.5*g):g;closeT(t,'Closed manually',px,net);render()}}
 });
 $('watchSearch').addEventListener('input',()=>{watchQuery=$('watchSearch').value.trim().toLowerCase();watchLimit=50;$('wl').scrollTop=0;render()});
+$('scanSearch').addEventListener('input',()=>{scanQuery=$('scanSearch').value.trim().toLowerCase();scanLimit=80;renderScanInspector()});
+$('scanFilter').addEventListener('change',()=>{scanFilter=$('scanFilter').value;scanLimit=80;renderScanInspector()});
+$('scanMore').addEventListener('click',()=>{scanLimit+=100;renderScanInspector()});
 $('wl').addEventListener('scroll',()=>{const el=$('wl');if(el.scrollTop+el.clientHeight>=el.scrollHeight-90){const all=Object.values(R).filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).filter(r=>r.sym.toLowerCase().includes(watchQuery));if(watchLimit<all.length){const pos=el.scrollTop;watchLimit+=50;render();el.scrollTop=pos}}});
 $('allResults').addEventListener('click',()=>{showAllHistory=!showAllHistory;render()});
 $('clearHistory').addEventListener('click',()=>{if(remoteMode)return;if(!confirm('Permanently clear all saved trade result history? Open tracked trades will be kept.'))return;st.hist=[];save();render()});
@@ -544,6 +590,7 @@ function adoptLaptop(snapshot,source,online,lastSeen){
  remoteMode=true;remoteSource=source;remoteOnline=online;remoteLastSeen=lastSeen;
  if(source==='cloud')try{localStorage.setItem('cryptoLaptopActivated','1')}catch(_){};
  remoteHistoryTruncated=!!snapshot.historyTruncated;
+ scanMeta=snapshot;
  if(['bybit','binance'].includes(snapshot.exchange))$('ex').value=snapshot.exchange;
  R=Object.fromEntries(snapshot.results.filter(x=>x&&x.sym).map(x=>[x.sym,x]));
  M=snapshot.markets||{};
