@@ -238,6 +238,7 @@ async function getTickers(){
 let remoteMode=!!window.CRYPTO_LOCAL_SERVER||localStorage.getItem('cryptoLaptopActivated')==='1',
     remoteSource=window.CRYPTO_LOCAL_SERVER?'local':remoteMode?'cloud':'browser',
     remoteOnline=false,remoteLastSeen=null,remoteHistoryTruncated=false;
+let paperSnapshot=null,paperSaveNotice='';
 let st={hist:[],open:[],pins:[],trackedKeys:{},set:{}};
 try{st=Object.assign(st,JSON.parse(localStorage.getItem('scan1')||'{}'))}catch(e){}
 if(!Array.isArray(st.open))st.open=[];
@@ -417,9 +418,21 @@ function card(r){
     recorded?'✓ Result recorded automatically':'✓ Signal registered for automatic tracking')+'</div>'+
   '<button class="p" data-a="chart" data-s="'+r.sym+'" style="margin-top:7px">View Entry / SL / TP chart</button></div>';
 }
+function renderBinancePaper(){
+ const p=paperSnapshot, cfg=p?.config||{}, sm=p?.summary||{};
+ const opens=Array.isArray(p?.open)?p.open:[];
+ const closed=Array.isArray(p?.history)?p.history:[];
+ const rejected=Array.isArray(p?.rejections)?p.rejections:[];
+ const writable=remoteMode&&remoteSource==='local'&&remoteOnline&&!!p;
+ $('paperPause').disabled=!writable;
+ $('paperSave').disabled=!writable;
+ $('paperPause').textContent=cfg.paused?'Resume paper entries':'Pause new paper entries';
+ $('paperStatus').textContent=!p?'Desktop paper engine not connected':'Binance local paper only — no live orders';
+}
 function render(){
   const watchScroll=$('wl').scrollTop,longScroll=$('cl').scrollTop,shortScroll=$('cs').scrollTop;
   $('sot').hidden=!$('showot').checked;
+  renderBinancePaper();
   const L=Object.values(R),cf=L.filter(r=>r.status==='confirm'),cl=cf.filter(r=>r.dir==='long'),cs=cf.filter(r=>r.dir==='short'),t=today(),dr=t.reduce((a,x)=>a+x.r,0);
   $('dot').className='dot '+(err?'bad':lastScan?'ok':'');
   if(remoteMode){
@@ -523,6 +536,7 @@ function adoptLaptop(snapshot,source,online,lastSeen){
  remoteMode=true;remoteSource=source;remoteOnline=online;remoteLastSeen=lastSeen;
  if(source==='cloud')try{localStorage.setItem('cryptoLaptopActivated','1')}catch(_){};
  remoteHistoryTruncated=!!snapshot.historyTruncated;
+ paperSnapshot=snapshot.paper||null;
  if(['bybit','binance'].includes(snapshot.exchange))$('ex').value=snapshot.exchange;
  R=Object.fromEntries(snapshot.results.filter(x=>x&&x.sym).map(x=>[x.sym,x]));
  M=snapshot.markets||{};
