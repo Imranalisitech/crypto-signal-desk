@@ -393,7 +393,7 @@ const server=http.createServer((req,res)=>{
       lastSyncAt:state.lastSyncAt});
   const name=url.pathname==='/'?'/index.html':url.pathname;
   const fileAllowed={'/index.html':'index.html','/trade-chart.js':'trade-chart.js',
-    '/unified-strategy.js':'unified-strategy.js'};
+    '/unified-strategy.js':'unified-strategy.js','/paper-dashboard.js':'paper-dashboard.js'};
   if(req.method!=='GET'||!fileAllowed[name])return respond(res,404,{error:'Not found'});
   try{
     let contents=fs.readFileSync(path.join(BASE,fileAllowed[name]),'utf8');
