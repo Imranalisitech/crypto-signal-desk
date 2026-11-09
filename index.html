@@ -125,9 +125,10 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
     <label>Data source<select id="ex"><option value="bybit">Bybit (recommended)</option><option value="binance">Binance</option></select></label>
     <label>Account ($)<input id="acct" type="number" value="2000"></label>
     <label>Risk % per trade<input id="risk" type="number" step="0.1" value="0.5"></label>
-    <label>Max leverage<input id="maxlev" type="number" value="5"></label>
-    <label>Max stop %<input id="maxstop" type="number" step="0.05" value="0.4"></label>
-    <label>Minimum target move (%)<input id="mintp" type="number" min="1" max="15" step="0.1" value="2.8"></label>
+    <span class="mut" style="font-size:12px">Stop-loss follows structure and final TP is 3R. Stop width and estimated leverage do not filter signals.</span>
+
+
+
     <label>Funding limit %<input id="fundlim" type="number" step="0.01" value="0.05"></label>
     <label>Zone tolerance %<input id="tol" type="number" step="0.01" value="0.05"></label>
     <label>Fees maker+taker %<input id="fee" type="number" step="0.005" value="0.075"></label>
@@ -157,7 +158,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 </div>
 <section id="rsiPanel"><h2>RSI Heatmap — Exchange Calculated <small id="rsiUpdated"></small></h2><p class="rsi-intro">RSI(14) from closed 5m, 15m and 1h candles supports the combined strategy; these heatmap readings are <b>not CoinGlass data</b>. <a href="https://www.coinglass.com/RsiHeatMap" target="_blank" rel="noopener noreferrer">Compare with CoinGlass</a>.</p><div class="rsi-grid"><div class="rsi-box"><h3>LONG RSI candidates <small id="rsiLongNum"></small></h3><div id="rsiLong" class="rsi-scroll"></div></div><div class="rsi-box"><h3>SHORT RSI candidates <small id="rsiShortNum"></small></h3><div id="rsiShort" class="rsi-scroll"></div></div></div></section>
 
-<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">One combined strategy: RSI heatmap alignment, closed candlestick confirmation, volume expansion, funding-rate limits and optional real Glassnode exchange-netflow context. If the licensed Glassnode API is unavailable, the label is <b>Exchange data only</b>. TP levels are objectives, not forecasts.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
+<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">One combined strategy: RSI heatmap alignment, closed candlestick confirmation, volume expansion, funding-rate limits and optional real Glassnode exchange-netflow context. If the licensed Glassnode API is unavailable, the label is <b>Exchange data only</b>. Final TP is 3 times the actual stop distance; targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 <section id="sot"><h2>Open trades <small>tracked automatically against live mark price</small></h2><div class="tw" id="ot"></div></section>
 <section><h2>Trade result history <span><button id="clearHistory" type="button">Clear history</button> <button id="csv" type="button">Export CSV</button></span></h2>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
@@ -213,7 +214,7 @@ async function getTickers(){
 let st={hist:[],open:[],pins:[],set:{}};
 try{st=Object.assign(st,JSON.parse(localStorage.getItem('scan1')||'{}'))}catch(e){}
 const save=()=>{try{localStorage.setItem('scan1',JSON.stringify(st))}catch(e){}};
-const IDS=['ex','acct','risk','maxlev','maxstop','mintp','fundlim','tol','fee','minvol','topn','every'];
+const IDS=['ex','acct','risk','fundlim','tol','fee','minvol','topn','every'];
 if(st.set.v!==4){st.set.v=4;st.set.topn=600;st.set.minvol=0;st.set.every=300;st.set.ex='bybit';save()}
 IDS.forEach(i=>{if(st.set[i]!=null)$(i).value=st.set[i]});
 try{banUntil=+localStorage.getItem('ban_'+EX())||0}catch(e){}
@@ -299,9 +300,8 @@ async function scan(){
  const settings={
   bars15:x15.slice(0,-1),bars5:x5.slice(0,-1),
   mark:M[s].p,fundingPct:M[s].fr,
-  maxFunding:n('fundlim'),maxStop:n('maxstop'),
-  targetPct:Math.min(15,Math.max(1,n('mintp')||2.8)),
-  account:n('acct'),risk:n('risk'),maxLev:n('maxlev'),fee:n('fee')
+  maxFunding:n('fundlim'),
+  account:n('acct'),risk:n('risk'),fee:n('fee')
  };
  let signal=UnifiedStrategy.evaluate(settings);
  if(signal.status==='confirm'&&gnReady&&gnQueries<GN_MAX_PER_SCAN&&GN_SUPPORTED.has(s.replace(/USDT$/,''))){
@@ -345,7 +345,7 @@ function blocked(){
 }
 function take(s){
   const r=R[s];if(!r||r.status!=='confirm'||blocked()||st.open.some(t=>t.sym===s))return;
-  const p=r.plan;st.open.push({id:Date.now(),sym:s,dir:r.dir,en:p.en,stop:p.stop,stop0:p.stop,tp1:p.tp1,tp2:p.tp2,sp:p.sp,r$:p.r$,open:Date.now(),tp1h:false,targetMode:'extended',horizonMs:4*3600000});save();render();
+  const p=r.plan;st.open.push({id:Date.now(),sym:s,dir:r.dir,en:p.en,stop:p.stop,stop0:p.stop,tp1:p.tp1,tp2:p.tp2,sp:p.sp,r$:p.r$,open:Date.now(),tp1h:false,targetMode:'fixed3r',horizonMs:4*3600000});save();render();
 }
 function closeT(t,why,px,gross){
   const net=gross-n('fee')/t.sp;
@@ -359,6 +359,12 @@ function monitor(){
     const dir=t.dir==='long'?1:-1,unit=Math.abs(t.en-t.stop0);
     if(!(unit>0))continue;
     const currentR=(px-t.en)*dir/unit,extended=t.targetMode==='extended';
+    if(t.targetMode==='fixed3r'){
+      if((px-t.stop)*dir<=0)closeT(t,'Stop loss (1R)',px,-1);
+      else if((px-t.tp2)*dir>=0)closeT(t,'Final target reached (3R)',px,3);
+      else if(Date.now()-t.open>(t.horizonMs||4*3600000))closeT(t,'Time stop (4 hours)',px,currentR);
+      continue;
+    }
     const firstR=(t.tp1-t.en)*dir/unit,lastR=(t.tp2-t.en)*dir/unit;
     const limit=extended?(t.horizonMs||4*3600000):15*60000;
     const partialR=t.tp1h?(extended?0.5*firstR+0.5*currentR:0.5+0.5*currentR):currentR;
@@ -377,8 +383,8 @@ const tbl=(h,rows,e)=>rows.length?`<table><tr>${h.map(x=>`<th>${x}</th>`).join('
 function card(r,bl){
  const p=r.plan,t=st.open.some(x=>x.sym===r.sym),rsi=r.rsi||{},pat=r.pattern||{};
  const checks=[
-  ['Entry',fp(p.en)],['Stop',fp(p.stop)],['TP1 ('+f(p.tp1pct,1)+'%)',fp(p.tp1)],
-  ['Final TP ('+f(p.tp2pct,1)+'%)',fp(p.tp2)],['Target R:R','1 : '+f(p.rr,1)],
+  ['Entry',fp(p.en)],['SL ('+f(p.sp,2)+'%)',fp(p.stop)],
+  ['Final TP (3R / '+f(p.tp2pct,2)+'%)',fp(p.tp2)],['Target R:R','1 : '+f(p.rr,1)],
   ['Candlestick',pat.name||'—'],['Volume',f(pat.volumeRatio,2)+'x'],
   ['RSI 5m/15m/1h',[rsi.r5,rsi.r15,rsi.r1h].map(x=>f(x,1)).join(' / ')],
   ['Funding',f(r.fundingPct,4)+'%'],
@@ -386,7 +392,7 @@ function card(r,bl){
   ['GN netflow / baseline',r.glassnode?.status==='Glassnode live'?f(r.glassnode.ratio,2)+'x':'Not available'],
   ['GN OI change',Number.isFinite(r.glassnode?.oiChangePct)?f(r.glassnode.oiChangePct,2)+'%':'Not available'],
   ['GN reading age',Number.isFinite(r.glassnode?.ageMinutes)?f(r.glassnode.ageMinutes,0)+' min':'Not available'],
-  ['Setup','Unified confluence'],['Size','$'+f(p.nt,0)],['Leverage',f(p.lev,2)+'x']
+  ['Setup','Unified confluence'],['Position value','$'+f(p.nt,0)],['Estimated leverage (not a signal filter)',f(p.lev,2)+'x']
  ];
  return '<div class="card '+r.dir+'" data-a="chart" data-s="'+r.sym+
   '" role="button" tabindex="0"><div class="ch"><button class="coin-chart" type="button" data-a="chart" data-s="'+r.sym+'">'+
@@ -443,8 +449,8 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
    '</td><td class="mut">'+(r.status==='confirm'?'Nothing missing':miss.join(', ')||'—')+'</td></tr>';
  }), 'No candidates yet.');
     $('wl').scrollTop=watchScroll;
-  $('ot').innerHTML=tbl(['Coin','Side','Entry','Now','Stop','TP1','TP2','Live R','Age',''],st.open.map(o=>{const px=M[o.sym]&&M[o.sym].p,sg=o.dir==='long'?1:-1,rn=px?(px-o.en)*sg/Math.abs(o.en-o.stop0):null;
-    return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp1)}${o.tp1h?' ✓':''}</td><td>${fp(o.tp2)}</td><td class="${rn>=0?'long-t':'short-t'}">${f(rn)} R</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td><button data-a="close" data-s="${o.id}">Close</button></td></tr>`}),'No open trades. Use “Track this trade” on a confirmed signal.');
+  $('ot').innerHTML=tbl(['Coin','Side','Entry','Now','Stop','Final TP','Live R','Age',''],st.open.map(o=>{const px=M[o.sym]&&M[o.sym].p,sg=o.dir==='long'?1:-1,rn=px?(px-o.en)*sg/Math.abs(o.en-o.stop0):null;
+    return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp2)}</td><td class="${rn>=0?'long-t':'short-t'}">${f(rn)} R</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td><button data-a="close" data-s="${o.id}">Close</button></td></tr>`}),'No open trades. Use “Track this trade” on a confirmed signal.');
   const H=st.hist,w=H.filter(x=>x.r>0),lo=H.filter(x=>x.r<=0),tr=H.reduce((a,x)=>a+x.r,0),gl=Math.abs(lo.reduce((a,x)=>a+x.r,0));
   $('stats').innerHTML=[['Trades',H.length],['Win rate',H.length?f(w.length/H.length*100,0)+'%':'–'],['Total R',f(tr)],['Total P&L','$'+f(H.reduce((a,x)=>a+x.pnl,0))],['Avg R',H.length?f(tr/H.length):'–'],['Profit factor',gl?f(w.reduce((a,x)=>a+x.r,0)/gl):'–']].map(x=>`<span>${x[0]}: <b>${x[1]}</b></span>`).join('');
   $('hs').innerHTML=tbl(['Closed','Coin','Side','Entry','Exit','Result','P&L','Reason'],[...H].reverse().slice(0,100).map(x=>`<tr><td>${new Date(x.close).toLocaleString()}</td><td>${tv(x.sym)}</td><td>${pill(x.dir==='long'?'pl':'ps',x.dir.toUpperCase())}</td><td>${fp(x.en)}</td><td>${fp(x.ex)}</td><td class="${x.r>0?'long-t':'short-t'}">${f(x.r)} R</td><td class="${x.pnl>0?'long-t':'short-t'}">$${f(x.pnl)}</td><td class="mut">${x.why}</td></tr>`),'No closed trades yet.');
