@@ -184,7 +184,8 @@ async function getTickers(){
   pi.forEach(x=>M[x.symbol]={p:+x.markPrice,fr:+x.lastFundingRate*100});
   return tk.map(x=>({symbol:x.symbol,chg:+x.priceChangePercent,vol:+x.quoteVolume}))}
 // Remote laptop snapshots replace browser-only tracking when available.
-let remoteMode=!!window.CRYPTO_LOCAL_SERVER,remoteSource=remoteMode?'local':'browser',
+let remoteMode=!!window.CRYPTO_LOCAL_SERVER||localStorage.getItem('cryptoLaptopActivated')==='1',
+    remoteSource=window.CRYPTO_LOCAL_SERVER?'local':remoteMode?'cloud':'browser',
     remoteOnline=false,remoteLastSeen=null,remoteHistoryTruncated=false;
 let st={hist:[],open:[],pins:[],trackedKeys:{},set:{}};
 try{st=Object.assign(st,JSON.parse(localStorage.getItem('scan1')||'{}'))}catch(e){}
@@ -463,6 +464,7 @@ $('ex').onchange=async()=>{
 function adoptLaptop(snapshot,source,online,lastSeen){
  if(!snapshot||!Array.isArray(snapshot.results)||!Array.isArray(snapshot.open)||!Array.isArray(snapshot.history))return false;
  remoteMode=true;remoteSource=source;remoteOnline=online;remoteLastSeen=lastSeen;
+ if(source==='cloud')try{localStorage.setItem('cryptoLaptopActivated','1')}catch(_){};
  remoteHistoryTruncated=!!snapshot.historyTruncated;
  if(['bybit','binance'].includes(snapshot.exchange))$('ex').value=snapshot.exchange;
  R=Object.fromEntries(snapshot.results.filter(x=>x&&x.sym).map(x=>[x.sym,x]));
@@ -495,7 +497,7 @@ async function remotePoll(){
   if(local){
     adoptLaptop(data,'local',!!data.lastPriceAt&&Date.now()-data.lastPriceAt<45000,
       data.lastPriceAt||data.lastScanAt);
-  }else if(data.snapshot&&(data.connected||remoteMode)){
+  }else if(data.snapshot){
     adoptLaptop(data.snapshot,'cloud',!!data.connected,data.lastSeen);
   }else if(remoteMode&&remoteSource==='cloud'){
     remoteOnline=false;render();
