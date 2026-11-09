@@ -90,7 +90,7 @@
     const setup={...result.plan};
     const structure=Number.isFinite(setup.structureExtreme)?setup.structureExtreme:null;
     const pattern=result.pattern?.name||'Confirmed candle';
-    if(![setup.en,setup.stop,setup.tp1,setup.tp2].every(v=>Number.isFinite(v)&&v>0))return;
+    if(![setup.en,setup.stop,setup.tp2].every(v=>Number.isFinite(v)&&v>0))return;
     close();
     const session=++activeSession;
     byId('tradeChartModal').hidden=false;
@@ -101,7 +101,7 @@
     const rr=setup.sp>0?Math.abs(setup.tp2-setup.en)/Math.abs(setup.en-setup.stop):0;
     const levels=[
       ['Entry ',setup.en,'entry'],['Stop ',setup.stop,'bad'],
-      ['TP1 ',setup.tp1,'good'],['Final TP ',setup.tp2,'good'],
+      ['Final TP (3R) ',setup.tp2,'good'],
       ['R:R 1 : ',rr,''],['Pattern ',pattern,'entry'],
       ['Funding ',(Number(result.fundingPct)||0).toFixed(4)+'%',''],
       ['Glassnode ',result.glassnodeBasis||'Exchange data only','']
@@ -137,8 +137,7 @@
       const lines=[
         {price:setup.en,color:'#70adff',width:2,title:'ENTRY'},
         {price:setup.stop,color:'#fa687a',width:2,title:'STOP LOSS'},
-        {price:setup.tp1,color:'#51dbaa',width:1,title:'TP1'},
-        {price:setup.tp2,color:'#24d6a3',width:2,title:'FINAL TP'}
+        {price:setup.tp2,color:'#24d6a3',width:2,title:'FINAL TP (3R)'}
       ];
       if(structure!==null)lines.push({
         price:structure,color:'#f4ab64',width:1,title:'CANDLE STRUCTURE'
