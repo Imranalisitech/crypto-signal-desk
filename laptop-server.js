@@ -5,7 +5,6 @@ const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
-const {BinancePaperBroker,normalizePaperConfig}=require('./binance-paper.js');
 const {BinanceLiveBroker,liveConfig}=require('./binance-live.js');
 
 if(typeof fetch!=='function')throw Error('Node.js 20 or newer required.');
@@ -30,7 +29,7 @@ function normalizedConfig(raw){
     port:Math.trunc(safeNumber(raw.port,17654,1024,65535))};
 }
 config=normalizedConfig(config);
-config.paper=normalizePaperConfig(config.paper);
+delete config.paper; // Obsolete demo setting from earlier versions.
 config.live=liveConfig(config.live);
 const ctx={window:{}};
 vm.runInNewContext(fs.readFileSync(path.join(BASE,'unified-strategy.js'),'utf8'),ctx);
@@ -38,11 +37,18 @@ const strategy=ctx.window.UnifiedStrategy;
 if(!strategy||typeof strategy.evaluate!=='function')throw Error('Missing unified-strategy.js');
 
 const loaded=readFile(STATE_FILE,{});
+// Keep old demo results in a local archive; no more paper orders run.
+if(loaded.paper&&typeof loaded.paper==='object'){
+  const archive=path.join(BASE,'binance-paper-archive.json');
+  if(!fs.existsSync(archive))fs.writeFileSync(archive,JSON.stringify({
+    archivedAt:new Date().toISOString(),label:'Previous Binance paper trading records',
+    paper:loaded.paper
+  },null,2),'utf8');
+}
 const state={
   version:1,
   createdAt:loaded.createdAt||Date.now(),
   results:loaded.results&&typeof loaded.results==='object'?loaded.results:{},
-  paper:loaded.paper&&typeof loaded.paper==='object'?loaded.paper:null,
   live:loaded.live&&typeof loaded.live==='object'?loaded.live:null,
   markets:{},open:Array.isArray(loaded.open)?loaded.open:[],
   history:Array.isArray(loaded.history)?loaded.history:[],
@@ -83,14 +89,11 @@ function log(message){
   console.log(line);
   try{fs.appendFileSync(path.join(BASE,'laptop-server.log'),line+'\n')}catch(_){}
 }
-const paperBroker=new BinancePaperBroker({config:config.paper,state:state.paper,persist,log});
-state.paper=paperBroker.state;
 const liveBroker=new BinanceLiveBroker({
   dir:BASE,config:config.live,state:state.live,persist:persistImmediate,log
 });
 state.live=liveBroker.state;
 config.live=liveBroker.config;
-config.paper=paperBroker.config;
 function fault(message){
   state.errors.push({time:Date.now(),message:String(message).slice(0,220)});
   if(state.errors.length>40)state.errors.shift();
@@ -180,25 +183,7 @@ async function refreshTickers(){
     return tickers;
   }finally{tickersBusy=false}
 }
-// Binance Futures public mark-price feed is used exclusively by the local
-// paper execution simulator. The scanner may still use Bybit or Binance data.
-let paperPricesBusy=false,paperLastErrorAt=0;
-async function refreshPaperMarks(){
-  if(paperPricesBusy||!paperBroker.config.enabled)return;
-  paperPricesBusy=true;
-  try{
-    const marks=await getJson('https://fapi.binance.com/fapi/v1/premiumIndex');
-    if(!Array.isArray(marks))throw Error('Binance public mark-price feed unavailable');
-    const count=paperBroker.setMarks(marks);
-    if(count<10)throw Error('Binance mark-price feed contains too few symbols');
-    paperBroker.monitor();
-  }catch(e){
-    paperBroker.state.feedError=String(e.message).slice(0,160);
-    if(Date.now()-paperLastErrorAt>120000){
-      paperLastErrorAt=Date.now();fault('PAPER BINANCE FEED '+e.message);
-    }
-  }finally{paperPricesBusy=false}
-}
+// Live orders now use the freshly updated Binance scanner mark price.
 function signalKey(r){
   const time=Number(r.plan?.ck);
   if(!r.sym||!['long','short'].includes(r.dir)||!(time>0))return null;
@@ -290,12 +275,12 @@ async function scan(){
           state.results[item.symbol]=compactResult(result);
           if(result.status==='confirm'){
             register(result); // Existing simulated trade results are unchanged.
-            paperBroker.onSignal(result,config.exchange); // Separate, risk-capped paper ledger.
-            // This can send REAL orders only after local credential verification
-            // and explicit user activation. Disabled by default on every boot.
+            // Live orders stay disabled until explicitly activated locally.
+            // The Binance scanner already provides actual futures mark prices.
             if(liveBroker.state.armed&&config.exchange==='binance'){
-              const bmark=paperBroker.marks[item.symbol];
-              liveBroker.onSignal(result,'binance',bmark);
+              const bmark=state.markets[item.symbol];
+              if(bmark&&Number.isFinite(bmark.p)&&Date.now()-bmark.at<30000)
+                liveBroker.onSignal(result,'binance',bmark);
             }
           }
         }catch(e){state.scanFailures++;
@@ -332,19 +317,10 @@ function snapshot(fullHistory=false){
     connection:state.connection,nextScanAt:state.nextScanAt,
     markets,results:Object.values(state.results),
     open:state.open,history,historyTotal:totalHistory,
-    trackedKeys:state.trackedKeys,paper:paperBroker.snapshot(fullHistory)};
+    trackedKeys:state.trackedKeys};
   while(!fullHistory&&Buffer.byteLength(JSON.stringify(out))>1_900_000&&history.length>100){
     history=history.slice(Math.ceil(history.length/4));
     out.history=history;
-  }
-  // Bound the public read-only Render snapshot without ever trimming local
-  // full histories stored in laptop-state.json.
-  while(!fullHistory&&Buffer.byteLength(JSON.stringify(out))>1_900_000&&out.paper.history.length>40){
-    out.paper.history=out.paper.history.slice(Math.ceil(out.paper.history.length/4));
-    out.paper.historyTruncated=true;
-  }
-  while(!fullHistory&&Buffer.byteLength(JSON.stringify(out))>1_900_000&&out.paper.rejections.length>20){
-    out.paper.rejections=out.paper.rejections.slice(Math.ceil(out.paper.rejections.length/4));
   }
   out.historyTruncated=history.length<totalHistory;
   return out;
@@ -373,8 +349,8 @@ const server=http.createServer((req,res)=>{
     return respond(res,200,{...snapshot(true),config:{exchange:config.exchange,
       scanMax:config.scanMax,account:config.account,riskPct:config.riskPct,
       fundingLimitPct:config.fundingLimitPct,feePct:config.feePct,
-      minTurnoverMillions:config.minTurnoverMillions,paper:paperBroker.config},
-      lastSyncAt:state.lastSyncAt,paper:paperBroker.summary()});
+      minTurnoverMillions:config.minTurnoverMillions},
+      lastSyncAt:state.lastSyncAt});
   if(url.pathname==='/api/config'&&req.method==='POST'){
     // Reject cross-site browser requests that try to alter laptop settings.
     const allowedOrigins=new Set(['http://127.0.0.1:'+config.port,'http://localhost:'+config.port]);
@@ -388,20 +364,15 @@ const server=http.createServer((req,res)=>{
       try{
         const data=JSON.parse(buf);
         if(!data||typeof data!=='object'||Array.isArray(data))throw Error('Invalid config');
-        // This app has no authenticated Binance trading route. Reject unknown
-        // fields and secrets rather than ever writing exchange keys to disk.
+        // Real credentials are accepted only by the separate, local secure
+        // Binance live-account connection, never scanner settings.
         const allowed=new Set(['exchange','scanMax','minTurnoverMillions',
-          'account','riskPct','fundingLimitPct','feePct','paper']);
+          'account','riskPct','fundingLimitPct','feePct']);
         for(const key of Object.keys(data)){
-          if(!allowed.has(key))throw Error('Unrecognized setting; Binance trading credentials are not accepted in paper mode');
+          if(!allowed.has(key))throw Error('Unrecognized setting. Enter real Binance credentials through the local live-account panel');
         }
-        if(data.paper&&(!data.paper||typeof data.paper!=='object'||Array.isArray(data.paper)))
-          throw Error('Paper controls must be an object');
         const was=config.exchange;config=normalizedConfig({...config,...data});
-        if(data.paper&&typeof data.paper==='object'){
-          paperBroker.setConfig(data.paper);
-        }
-        config.paper=paperBroker.config;
+        delete config.paper;
         if(was!==config.exchange&&liveBroker.state.armed)
           liveBroker.disarm('Market exchange changed');
         fs.writeFileSync(CONFIG_FILE,JSON.stringify(config,null,2));
@@ -467,7 +438,7 @@ const server=http.createServer((req,res)=>{
       lastSyncAt:state.lastSyncAt});
   const name=url.pathname==='/'?'/index.html':url.pathname;
   const fileAllowed={'/index.html':'index.html','/trade-chart.js':'trade-chart.js',
-    '/unified-strategy.js':'unified-strategy.js','/paper-dashboard.js':'paper-dashboard.js',
+    '/unified-strategy.js':'unified-strategy.js',
     '/binance-live-ui.js':'binance-live-ui.js'};
   if(req.method!=='GET'||!fileAllowed[name])return respond(res,404,{error:'Not found'});
   try{
@@ -482,7 +453,6 @@ const server=http.createServer((req,res)=>{
 server.listen(config.port,'127.0.0.1',()=>log('Laptop server ready at http://127.0.0.1:'+config.port));
 async function polling(){
   try{await refreshTickers();monitor()}catch(e){fault('TICKERS '+e.message)}
-  try{await refreshPaperMarks()}catch(e){fault('BINANCE PAPER '+e.message)}
   // Positions are protected by Binance-side conditional SL and TP orders.
   // Reconciliation here updates the local record, never replaces protection.
   if(liveBroker.state.orders.some(x=>x.status==='ACTIVE')&&!liveBroker.busy){
