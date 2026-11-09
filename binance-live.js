@@ -278,7 +278,7 @@ class BinanceLiveBroker{
   const balance=await this.verify();
   if(balance.walletBalance<=0||balance.availableBalance<10)
     return {accepted:false,reason:'Insufficient USDT Futures available margin'};
-  if(balance.walletBalance<this.state.dayStartWallet*(1-this.config.maxDailyLossPct/100)){
+  if(balance.walletBalance+balance.unrealizedProfit<this.state.dayStartWallet*(1-this.config.maxDailyLossPct/100)){
     this.disarm('Daily account loss protection');return {accepted:false,reason:'Daily-loss lock'};
   }
   const dual=await this.api.call('GET','/fapi/v1/positionSide/dual');
@@ -389,6 +389,30 @@ class BinanceLiveBroker{
           }
         }
         this.record('POSITION_CLOSED',{sym:t.sym});
+      }else if(Date.now()-t.createdAt>=4*3600000){
+        // The original signal system has a four-hour exit. Binance-side
+        // protective SL/TP remains in place even if the laptop sleeps.
+        const amount=Math.abs(Number(found.positionAmt));
+        if(Math.abs(amount-Number(t.filledQty))>Math.max(0.00000001,Number(t.filledQty)*.001)){
+          this.disarm('Binance position size changed outside this app; check the account manually');
+          continue;
+        }
+        if(!t.timeExitRequestedAt){
+          t.timeExitRequestedAt=Date.now();this.persist();
+          try{
+            const exit=t.dir==='long'?'SELL':'BUY';
+            await this.api.call('POST','/fapi/v1/order',{
+              symbol:t.sym,side:exit,positionSide:'BOTH',type:'MARKET',
+              quantity:amount,reduceOnly:'true',
+              newClientOrderId:t.clientId.slice(0,24)+'TIME'
+            });
+            this.record('FOUR_HOUR_TIME_EXIT_SENT',{sym:t.sym});
+          }catch(error){
+            this.disarm('4h reduce-only close failed: '+String(error.message).slice(0,100));
+          }
+        }else if(Date.now()-t.timeExitRequestedAt>60000){
+          this.disarm('Four-hour time exit not yet confirmed; verify Binance position');
+        }
       }
     }
     this.state.lastCheck=Date.now();
