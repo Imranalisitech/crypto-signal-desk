@@ -207,7 +207,8 @@ function renderScanProgress(){
 }
 async function pool(items,fn,c=10,onDone=()=>{}){
   let i=0,d=0;
-  await Promise.all(Array(Math.min(c,items.length)).fill(0).map(async()=>{
+  const workers=Number.isSafeInteger(c)&&c>0?Math.min(c,items.length):Math.min(10,items.length);
+  await Promise.all(Array.from({length:workers},async()=>{
     while(i<items.length){
       const it=items[i++];let failure=null;
       activeScanCoins.add(it.symbol);queueLiveRender();
@@ -239,7 +240,7 @@ async function scan(){
       const px=M[s].p;r.dist=px<r.zl?(r.zl-px)/px*100:px>r.zh?(px-r.zh)/px*100:0;
       if(r.dist>0.4)return;r.status='watch';
       const k1=await K(s,'1m',40);if(k1.length<25)return;Object.assign(r,evalLive(r,k1,px));if(r.ok)r.status='confirm';
-    },(x,failure)=>{
+    },10,(x,failure)=>{
       const r=res[x.symbol];
       if(failure){r.status='error';scanFailures++}
       R[x.symbol]={...r};
