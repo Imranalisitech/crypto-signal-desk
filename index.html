@@ -108,9 +108,6 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
     <label>Account ($)<input id="acct" type="number" value="2000"></label>
     <label>Risk % per trade<input id="risk" type="number" step="0.1" value="0.5"></label>
     <span class="mut" style="font-size:12px">Stop-loss follows structure and final TP is 3R. Stop width and estimated leverage do not filter signals.</span>
-
-
-
     <label>Funding limit %<input id="fundlim" type="number" step="0.01" value="0.05"></label>
     <label>Fees maker+taker %<input id="fee" type="number" step="0.005" value="0.075"></label>
     <label>Min 24h volume ($M)<input id="minvol" type="number" value="0"></label>
@@ -189,8 +186,8 @@ if(st.set.v!==4){st.set.v=4;st.set.topn=600;st.set.minvol=0;st.set.ex='bybit';sa
 IDS.forEach(i=>{if(st.set[i]!=null)$(i).value=st.set[i]});
 try{banUntil=+localStorage.getItem('ban_'+EX())||0}catch(e){}
 $('showot').checked=!!st.set.showot;
-let R={},M={},seen=new Set(),audio=null,notif=false,busy=false,lastScan=null,err='',prog='';let watchLimit=50,watchQuery='',watchKey='';
-let lim=false,dur=0,scanTotal=0,scanDone=0,scanFailures=0,liveRenderTimer=null;
+let R={},M={},seen=new Set(),audio=null,notif=false,busy=false,lastScan=null,err='',prog='';let watchLimit=50,watchQuery='';
+let lim=false,dur=0,scanFailures=0,liveRenderTimer=null;
 function queueLiveRender(){
   if(liveRenderTimer!==null)return;
   liveRenderTimer=setTimeout(()=>{liveRenderTimer=null;render()},650);
@@ -220,7 +217,7 @@ async function scan(){
     const tk=await getTickers();
     const list=tk.filter(x=>x.symbol.endsWith('USDT')&&!/[_-]/.test(x.symbol)&&x.vol>=n('minvol')*1e6&&M[x.symbol]&&M[x.symbol].p>0).sort((a,b)=>b.vol-a.vol).slice(0,n('topn'));
     const res={};list.forEach(x=>res[x.symbol]={sym:x.symbol,chg:x.chg,vol:x.vol,status:'none'});
-    R={};scanTotal=list.length;scanDone=0;scanFailures=0;render();
+    R={};scanFailures=0;render();
     await pool(list,async x=>{
  const s=x.symbol,r=res[s];
  const x15=await K(s,'15m',99);
@@ -231,7 +228,7 @@ async function scan(){
   bars15:x15.slice(0,-1),bars5:x5.slice(0,-1),
   mark:M[s].p,fundingPct:M[s].fr,
   maxFunding:n('fundlim'),
-  account:n('acct'),risk:n('risk'),fee:n('fee')
+  account:n('acct'),risk:n('risk')
  };
  const signal=UnifiedStrategy.evaluate(settings);
  Object.assign(r,signal);
@@ -241,7 +238,6 @@ async function scan(){
       const r=res[x.symbol];
       if(failure){r.status='error';scanFailures++}
       R[x.symbol]={...r};
-      scanDone++;
     });
     if(Date.now()<banUntil){lim=false;wait=(banUntil-Date.now())/1000+5;err=banMsg()}
     else{lastScan=new Date();err='';dur=Math.round((Date.now()-t0)/1000);if(lim){lim=false;wait=90;err=XN()+' rate limit reached, so the scanner is slowing down. Reduce the scan universe or the minimum trading volume threshold.'}}
@@ -322,7 +318,7 @@ function render(){
   $('sot').hidden=!$('showot').checked;
   const bl=blocked(),L=Object.values(R),cf=L.filter(r=>r.status==='confirm'),cl=cf.filter(r=>r.dir==='long'),cs=cf.filter(r=>r.dir==='short'),t=today(),dr=t.reduce((a,x)=>a+x.r,0);
   $('dot').className='dot '+(err?'bad':lastScan?'ok':'');
-  if(!busy)$('stat').textContent=lastScan?XN()+' futures · last scan '+lastScan.toLocaleTimeString()+' · '+L.length+' coins · took '+dur+'s':'Starting…';
+  if(!busy)$('stat').textContent=lastScan?XN()+' futures · last scan '+lastScan.toLocaleTimeString()+' · '+L.length+' coins · took '+dur+'s'+(scanFailures?' · '+scanFailures+' data errors':''):'Starting…';
   $('ban').innerHTML=err?`<div class="ban err">${err}</div>`:bl?`<div class="ban">Signals paused: ${bl}</div>`:'';
   $('kpi').innerHTML=[['Long signals',cl.length],['Short signals',cs.length],['Watching',L.filter(r=>r.status==='watch').length],['Open trades',st.open.length],['Today',t.length+' trades'],['Today result',f(dr)+' R']].map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join('');
   $('cl').innerHTML=cl.length?cl.map(r=>card(r,bl)).join(''):'<div class="empty">No confirmed long setups right now.</div>';
@@ -335,7 +331,7 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
   $('wl').innerHTML=tbl(
  ['','Coin','Side','Price','Candle','Volume x','Funding %','Score','Status','Still missing'],
  wl.map(r=>{
-  const p=r.rsi||{},c=r.pattern||{},miss=r.G?r.G.filter(x=>!x.ok).map(x=>x.t):[];
+  const c=r.pattern||{},miss=r.G?r.G.filter(x=>!x.ok).map(x=>x.t):[];
   return '<tr><td>'+star(r.sym)+'</td><td>'+tv(r.sym)+'</td><td>'+
    (r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'—')+'</td><td>'+fp(M[r.sym].p)+
    '</td><td>'+(c.name||'—')+'</td><td>'+f(c.volumeRatio,2)+'</td><td>'+f(r.fundingPct,4)+
