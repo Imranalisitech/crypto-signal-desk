@@ -103,8 +103,7 @@
       ['Entry ',setup.en,'entry'],['Stop ',setup.stop,'bad'],
       ['Final TP (3R) ',setup.tp2,'good'],
       ['R:R 1 : ',rr,''],['Pattern ',pattern,'entry'],
-      ['Funding ',(Number(result.fundingPct)||0).toFixed(4)+'%',''],
-      ['Glassnode ',result.glassnodeBasis||'Exchange data only','']
+      ['Funding ',(Number(result.fundingPct)||0).toFixed(4)+'%','']
     ];
     if(structure!==null)levels.push(['Candle structure ',structure,'bad']);
     for(const item of levels){
