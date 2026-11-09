@@ -70,6 +70,14 @@ function persist(){
     }catch(e){log('SAVE ERROR '+e.message)}
   },250);
 }
+// Real-money order identities must reach disk synchronously BEFORE an entry
+// is submitted, so a sudden crash cannot create an unremembered duplicate.
+function persistImmediate(){
+  const tmp=STATE_FILE+'.live-tmp';
+  const disk={...state,markets:{},scanning:false,errors:state.errors.slice(-30)};
+  fs.writeFileSync(tmp,JSON.stringify(disk),{encoding:'utf8',flush:true});
+  fs.renameSync(tmp,STATE_FILE);
+}
 function log(message){
   const line=new Date().toISOString()+' '+message;
   console.log(line);
@@ -78,7 +86,7 @@ function log(message){
 const paperBroker=new BinancePaperBroker({config:config.paper,state:state.paper,persist,log});
 state.paper=paperBroker.state;
 const liveBroker=new BinanceLiveBroker({
-  dir:BASE,config:config.live,state:state.live,persist,log
+  dir:BASE,config:config.live,state:state.live,persist:persistImmediate,log
 });
 state.live=liveBroker.state;
 config.live=liveBroker.config;
