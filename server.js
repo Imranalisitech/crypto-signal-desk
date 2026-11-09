@@ -47,6 +47,67 @@ async function upstream(url) {
     const next = queue.shift(); if (next) next();
   }
 }
+// Glassnode licensed API integration. The API key MUST stay in the Render
+// backend environment; never send it in the browser or a GitHub file.
+const GLASSNODE_KEY = process.env.GLASSNODE_API_KEY || '';
+const GLASSNODE_ASSETS = new Set(['BTC','ETH','SOL','XRP','ADA','DOGE','BNB','LTC','LINK','AVAX','DOT','TRX']);
+const glassnodeCache = new Map();
+let glassnodeBudgetDate = '', glassnodeDailyCalls = 0;
+const MAX_GLASSNODE_CALLS_PER_DAY = 36; // maximum *upstream* HTTP requests, not coins
+function metricSamples(data){
+  if (!Array.isArray(data)) return [];
+  return data.map(x=>({t:Number(x.t),v:Number(x.v)}))
+    .filter(x=>Number.isFinite(x.t)&&Number.isFinite(x.v))
+    .sort((a,b)=>a.t-b.t);
+}
+async function queryGlassnode(path,asset,since){
+  const date = new Date().toISOString().slice(0,10);
+  if(glassnodeBudgetDate!==date){glassnodeBudgetDate=date;glassnodeDailyCalls=0}
+  if(glassnodeDailyCalls>=MAX_GLASSNODE_CALLS_PER_DAY)throw new Error('Glassnode daily request budget reached');
+  glassnodeDailyCalls++;
+  const query=new URLSearchParams({a:asset,i:'1h',s:String(since),f:'json'});
+  const url='https://api.glassnode.com/v1/metrics/'+path+'?'+query.toString();
+  const resp=await fetch(url,{
+    headers:{'X-Api-Key':GLASSNODE_KEY,'Accept':'application/json'},
+    redirect:'manual',
+    signal:AbortSignal.timeout(14000)
+  });
+  if(!resp.ok)throw new Error(resp.status===401||resp.status===403?'Access or subscription does not include Glassnode metric':'Glassnode HTTP '+resp.status);
+  return metricSamples(await resp.json());
+}
+async function glassnodeSnapshot(asset){
+  if(!GLASSNODE_KEY)return {status:'unconfigured',source:'Glassnode',reason:'Glassnode API key not configured'};
+  if(!GLASSNODE_ASSETS.has(asset))return {status:'unsupported',source:'Glassnode',reason:'Asset not in verified integration allowlist'};
+  const now=Date.now(),old=glassnodeCache.get(asset);
+  if(old&&now-old.time<60*60000)return old.data;
+  const since=Math.floor((now-12*3600000)/1000);
+  let result;
+  try{
+    const [net,oi]=await Promise.all([
+      queryGlassnode('transactions/transfers_volume_exchanges_net',asset,since),
+      queryGlassnode('derivatives/futures_open_interest_sum_all',asset,since)
+    ]);
+    const last=net.at(-1),earlier=net.slice(-7,-1);
+    const baseline=earlier.length?
+      earlier.reduce((sum,x)=>sum+Math.abs(x.v),0)/earlier.length:0;
+    const newestOI=oi.at(-1),oldOI=oi.at(-5) || oi[0];
+    const oiDelta=newestOI&&oldOI&&oldOI.v>0?(newestOI.v/oldOI.v-1)*100:null;
+    const ageMinutes=last?(now-last.t*1000)/60000:null;
+    if(!last||!Number.isFinite(ageMinutes)||ageMinutes< -10||ageMinutes>240||!(baseline>0)){
+      result={status:'unavailable',source:'Glassnode',reason:'Metrics missing or stale'};
+    }else{
+      result={status:'available',source:'Glassnode',asset,netflow:last.v,
+        netflowBaseline:baseline,oiChangePct:oiDelta,ageMinutes,
+        metricTime:last.t*1000,updatedAt:now,
+        metrics:['exchange netflow','futures open interest']};
+    }
+  }catch(e){
+    result={status:'unavailable',source:'Glassnode',reason:String(e.message).slice(0,140)};
+  }
+  // A failing paid query is throttled too; do not retry on every browser refresh.
+  glassnodeCache.set(asset,{time:now,data:result});
+  return result;
+}
 const server = http.createServer(async (req,res) => {
   const origin = req.headers.origin || '';
   if (origin === ALLOWED_ORIGIN) res.setHeader('Access-Control-Allow-Origin', origin);
@@ -59,6 +120,20 @@ const server = http.createServer(async (req,res) => {
   const u = new URL(req.url, 'http://localhost');
   if (u.pathname === '/health') {
     res.writeHead(200); return res.end(JSON.stringify({ok:true,cacheEntries:cache.size,upstreamCooldownSeconds:Math.max(0,Math.ceil((bannedUntil-Date.now())/1000))}));
+  }
+  if (u.pathname === '/glassnode/status') {
+    res.writeHead(200);return res.end(JSON.stringify({
+      provider:'Glassnode',configured:!!GLASSNODE_KEY,
+      note:GLASSNODE_KEY?'Licensed Glassnode API enabled':'No licensed API key configured; no Glassnode metric claims',
+      supportedAssets:[...GLASSNODE_ASSETS]
+    }));
+  }
+  if (u.pathname === '/glassnode/metrics') {
+    const asset=String(u.searchParams.get('a')||'').toUpperCase();
+    if(!/^[A-Z0-9]{2,10}$/.test(asset)){res.writeHead(400);return res.end(JSON.stringify({status:'invalid',reason:'Invalid asset symbol'}))}
+    const data=await glassnodeSnapshot(asset);
+    res.setHeader('Cache-Control','public, max-age=600');
+    res.writeHead(200);return res.end(JSON.stringify(data));
   }
   if (!u.pathname.startsWith('/fapi/v1/') && !u.pathname.startsWith('/futures/data/')) {
     res.writeHead(404); return res.end(JSON.stringify({error:'Endpoint not allowed'}));
