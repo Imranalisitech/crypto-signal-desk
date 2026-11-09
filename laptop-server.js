@@ -290,6 +290,7 @@ function monitor(){
 }
 function compactResult(r){
   return {sym:r.sym,status:r.status,dir:r.dir,side:r.dir,
+    price:r.price,analyzedAt:r.analyzedAt,
     score:r.score,chg:r.chg,vol:r.vol,G:r.G||r.checks||[],
     rsi:r.rsi,pattern:r.pattern,reason:r.reason,fundingPct:r.fundingPct,
     plan:r.plan,ok:r.ok};
@@ -331,7 +332,7 @@ async function scan(){
       while(index<scanUniverse.length){
         if(Date.now()<cooldownUntil)break;
         const item=scanUniverse[index++],sym=item.symbol;
-        let record={sym,chg:item.change,vol:item.vol,dir:null,status:'none',
+        let record={sym,price:item.price,chg:item.change,vol:item.vol,dir:null,status:'none',
           score:0,reason:'No qualifying signal',fundingPct:item.fundingPct,
           analyzedAt:Date.now()};
         try{
@@ -349,7 +350,7 @@ async function scan(){
               bars15,bars5,mark,fundingPct:item.fundingPct,
               maxFunding:config.fundingLimitPct,account:config.account,risk:config.riskPct
             });
-            const result={...decision,sym,dir:decision.side,
+            const result={...decision,sym,price:mark,dir:decision.side,
               chg:item.change,vol:item.vol,G:decision.checks||[]};
             record=compactResult(result);
             record.analyzedAt=Date.now();
