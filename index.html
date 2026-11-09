@@ -69,9 +69,7 @@ input,select{background:#122030;color:var(--ink);border-color:#40556c}
 .watch-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
 .watch-tools input{max-width:330px}
 .watch-tools small{color:var(--mut)}
-.rsi-link{display:inline-flex;align-items:center;padding:7px 13px;border-radius:7px;color:#fff;text-decoration:none;font-weight:700;background:linear-gradient(110deg,#137f8e,#4657ac)}
 @media(max-width:850px){header>div:last-child{position:static;justify-content:center;flex-wrap:wrap}}
-.scan-feed{margin-bottom:12px}.scan-feed-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.scan-feed-head small{color:var(--mut)}.scan-now{margin:5px 0 10px;color:var(--mut);font-size:12.5px;overflow-wrap:anywhere}.scan-recent{max-height:240px;overflow-y:auto;scrollbar-color:#6883a3 #172535}.scan-recent td{white-space:nowrap}.scan-stage{font-weight:700}
 
 .trade-chart-modal[hidden]{display:none!important}
 .trade-chart-modal{position:fixed;inset:0;z-index:500;background:rgba(3,8,15,.88);display:flex;align-items:center;justify-content:center;padding:14px}
@@ -95,30 +93,14 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 .card[data-a="chart"]{cursor:pointer}
 .card[data-a="chart"]:focus-visible{outline:2px solid #7db8ff;outline-offset:3px}
 
-.rsi-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-.rsi-box{padding:10px;border:1px solid var(--line);background:#132538;border-radius:9px;min-width:0}
-.rsi-box h3{font-size:14px;margin:0 0 9px}
-.rsi-scroll{max-height:350px;overflow:auto;scrollbar-color:#6883a3 #172535}
-.rsi-scroll table{width:100%}
-.rsi-scroll th{position:sticky;top:0;z-index:1;background:#132538}
-.rsi-score{border-radius:5px;padding:3px 5px;font-weight:700;display:inline-block;min-width:42px;text-align:center}
-.rsi-score.hot-long{background:rgba(20,180,122,.25);color:#7ff5ca}
-.rsi-score.hot-short{background:rgba(235,73,85,.25);color:#ffadb4}
-.rsi-intro{font-size:12.5px;color:var(--mut);margin:0 0 12px}
-@media(max-width:800px){.rsi-grid{grid-template-columns:1fr}}
 
-.market-sources{margin:4px 0 12px;padding:10px 12px;border:1px solid #35516b;border-radius:9px;background:linear-gradient(135deg,#192b3d,#132335);color:#afc5d7}
-.market-sources summary{cursor:pointer;font-weight:700;color:#d8e6f3}
-.market-sources p{font-size:12px;margin:9px 0;line-height:1.45}
-.market-sources a{color:#a3dcff}
-.market-sources .data-status{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;padding:8px 0}
 </style>
 </head>
 <body>
 <main>
 <header>
   <div><h1>Crypto Signal Desk — Futures Scalp Scanner</h1><div class="st"><span class="dot" id="dot"></span><span id="stat">Starting…</span></div></div>
-  <div><a class="rsi-link" href="https://www.coinglass.com/RsiHeatMap" target="_blank" rel="noopener noreferrer">CoinGlass RSI Heatmap ↗</a><a class="rsi-link" href="https://glassnode.com/" target="_blank" rel="noopener noreferrer" style="background:linear-gradient(105deg,#41576d,#166b75)">Glassnode ↗</a><button id="alert" type="button">Enable sound + notifications</button></div>
+  <div><button id="alert" type="button">Enable sound + notifications</button></div>
 </header>
 <details style="margin-bottom:12px"><summary style="cursor:pointer;font-weight:600">Settings</summary>
   <div class="ctl">
@@ -130,40 +112,28 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 
 
     <label>Funding limit %<input id="fundlim" type="number" step="0.01" value="0.05"></label>
-    <label>Zone tolerance %<input id="tol" type="number" step="0.01" value="0.05"></label>
     <label>Fees maker+taker %<input id="fee" type="number" step="0.005" value="0.075"></label>
     <label>Min 24h volume ($M)<input id="minvol" type="number" value="0"></label>
     <label>Max coins to scan<input id="topn" type="number" value="600"></label>
-    <label>Scan every (sec)<input id="every" type="number" value="300" disabled></label>
-    <label class="c"><input type="checkbox" id="news"> Major news window (block)</label>
-    <label class="c"><input type="checkbox" id="sess" checked> Enforce 08–21 UTC</label>
     <label class="c"><input type="checkbox" id="showot"> Show Open trades panel</label>
-    <label class="c" style="display:none"><input type="checkbox" id="showmk"> Show Market scan table</label>
   </div>
-</details>
-<div id="gnStatus" class="mut" style="text-align:center;font-size:12px;margin-bottom:8px">Checking Glassnode access…</div>
-<details class="market-sources"><summary>Market intelligence data sources <small id="gnUsage">Glassnode data checks: pending</small></summary>
-<div class="data-status"><span id="gnActive">Live Glassnode signals: 0</span><span id="gnRejected">Netflow conflicts: 0</span></div>
-<p><b>Glassnode Studio:</b> <a href="https://studio.glassnode.com/" target="_blank" rel="noopener noreferrer">View Studio metrics</a>. The scanner can use genuine exchange-netflow and futures open-interest data when the licensed API is connected and measurements are fresh. Studio's web page alone does not provide unrestricted live data access.</p>
-<p><b>Glassnode Prediction Markets Latency:</b> <a href="https://latency.glassnode.com/prediction-markets" target="_blank" rel="noopener noreferrer">Open network-latency monitor</a>. This measures connectivity to prediction-market exchanges (Polymarket/Kalshi), <b>not market probabilities or bullish/bearish coin signals</b>. It is for infrastructure reference only and never changes the LONG/SHORT direction.</p>
-<p id="gnDetails">A fresh on-chain exchange netflow strongly opposing the signal can prevent confirmation; open-interest growth is participation context, not proof of institutional buying. If no licensed metric is available, signals use exchange candles, RSI, volume and funding only.</p>
 </details>
 <div id="ban"></div>
 <div class="kpi" id="kpi"></div>
 
-<section class="scan-feed" hidden style="display:none!important"><h2 class="scan-feed-head">Live scanning results <small id="scanProgress">Waiting for the first scan</small></h2><div class="scan-now" id="scanNow">Coins being scanned will appear here.</div><div class="tw scan-recent" id="scanRecent"><div class="empty">No scanned coins yet.</div></div></section>
+
 <div class="two">
   <section><h2>Confirmed LONG <small id="nl"></small></h2><div class="cards" id="cl"></div></section>
   <section><h2>Confirmed SHORT <small id="ns"></small></h2><div class="cards" id="cs"></div></section>
 </div>
-<section id="rsiPanel"><h2>RSI Heatmap — Exchange Calculated <small id="rsiUpdated"></small></h2><p class="rsi-intro">RSI(14) from closed 5m, 15m and 1h candles supports the combined strategy; these heatmap readings are <b>not CoinGlass data</b>. <a href="https://www.coinglass.com/RsiHeatMap" target="_blank" rel="noopener noreferrer">Compare with CoinGlass</a>.</p><div class="rsi-grid"><div class="rsi-box"><h3>LONG RSI candidates <small id="rsiLongNum"></small></h3><div id="rsiLong" class="rsi-scroll"></div></div><div class="rsi-box"><h3>SHORT RSI candidates <small id="rsiShortNum"></small></h3><div id="rsiShort" class="rsi-scroll"></div></div></div></section>
 
-<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">One combined strategy: RSI heatmap alignment, closed candlestick confirmation, volume expansion, funding-rate limits and optional real Glassnode exchange-netflow context. If the licensed Glassnode API is unavailable, the label is <b>Exchange data only</b>. Final TP is 3 times the actual stop distance; targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
+
+<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins are not confirmed trades. Only active exchange-derived indicators contribute to signals. Final TP is three times the actual stop distance (1:3 R:R); targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 <section id="sot"><h2>Open trades <small>tracked automatically against live mark price</small></h2><div class="tw" id="ot"></div></section>
 <section><h2>Trade result history <span><button id="clearHistory" type="button">Clear history</button> <button id="csv" type="button">Export CSV</button></span></h2>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
-<section id="smk" style="display:none!important"><h2>Market scan <small id="mkn"></small></h2><div class="tw" id="mk"></div></section>
-<p class="mut" style="font-size:12px">Targets are planned levels, not guaranteed outcomes. RSI, candlesticks, volume, funding and optional licensed Glassnode netflow are screening inputs, not forecasts; OI changes do not identify actual whales or institutions. Signals and tracked trades are simulated: the dashboard never places orders. Results use mark-price polling and include your fee setting, so real fills can differ. Educational tool, not financial advice.</p>
+
+<p class="mut" style="font-size:12px">Targets are planned levels, not guaranteed outcomes. RSI, candlesticks, trading volume and exchange funding are screening inputs, not forecasts. Signals and tracked trades are simulated: the dashboard never places orders. Results use mark-price polling and include your fee setting, so real fills can differ. Educational tool, not financial advice.</p>
 </main>
 <div id="tradeChartModal" class="trade-chart-modal" hidden>
   <div id="tradeChartDialog" class="trade-chart-dialog" role="dialog" aria-modal="true" aria-labelledby="tradeChartTitle" tabindex="-1">
@@ -214,53 +184,16 @@ async function getTickers(){
 let st={hist:[],open:[],pins:[],set:{}};
 try{st=Object.assign(st,JSON.parse(localStorage.getItem('scan1')||'{}'))}catch(e){}
 const save=()=>{try{localStorage.setItem('scan1',JSON.stringify(st))}catch(e){}};
-const IDS=['ex','acct','risk','fundlim','tol','fee','minvol','topn','every'];
-if(st.set.v!==4){st.set.v=4;st.set.topn=600;st.set.minvol=0;st.set.every=300;st.set.ex='bybit';save()}
+const IDS=['ex','acct','risk','fundlim','fee','minvol','topn'];
+if(st.set.v!==4){st.set.v=4;st.set.topn=600;st.set.minvol=0;st.set.ex='bybit';save()}
 IDS.forEach(i=>{if(st.set[i]!=null)$(i).value=st.set[i]});
 try{banUntil=+localStorage.getItem('ban_'+EX())||0}catch(e){}
-$('showot').checked=!!st.set.showot;$('showmk').checked=!!st.set.showmk;
+$('showot').checked=!!st.set.showot;
 let R={},M={},seen=new Set(),audio=null,notif=false,busy=false,lastScan=null,err='',prog='';let watchLimit=50,watchQuery='',watchKey='';
-// Unified RSI, closed-candle, volume and funding confluence; licensed Glassnode
-// netflow is optional context, never fabricated when unavailable.
-const GN_PROXY='https://crypto-signal-desk-market-data.onrender.com';
-const GN_SUPPORTED=new Set(['BTC','ETH','SOL','XRP','ADA','DOGE','BNB','LTC','LINK','AVAX','DOT','TRX']);
-const GN_MAX_PER_SCAN=4;
-let gnReady=false,gnNote='Glassnode not connected',gnQueries=0;
-async function glassnodeStatus(){
- const c=new AbortController(),tm=setTimeout(()=>c.abort(),7500);
- try{
-  const r=await fetch(GN_PROXY+'/glassnode/status',{signal:c.signal});
-  if(!r.ok)throw Error('Unavailable');
-  const x=await r.json();gnReady=x.configured===true;
-  gnNote=gnReady?'Glassnode key configured — metric availability checked for selected coins':'Glassnode API not configured — exchange-only signals';
- }catch(e){gnReady=false;gnNote='Glassnode service unavailable — exchange-only signals'}
- finally{clearTimeout(tm)}
- $('gnStatus').textContent=gnNote;
-}
-async function glassnodeMetric(symbol){
- const asset=symbol.replace(/USDT$/,'');
- if(!gnReady||!GN_SUPPORTED.has(asset))return null;
- const c=new AbortController(),tm=setTimeout(()=>c.abort(),14000);
- try{
-  const r=await fetch(GN_PROXY+'/glassnode/metrics?a='+encodeURIComponent(asset),{signal:c.signal});
-  return r.ok?await r.json():null;
- }catch(e){return null}finally{clearTimeout(tm)}
-}
-let lim=false,dur=0,scanTotal=0,scanDone=0,scanFailures=0;
-let activeScanCoins=new Set(),recentScans=[],liveRenderTimer=null;
+let lim=false,dur=0,scanTotal=0,scanDone=0,scanFailures=0,liveRenderTimer=null;
 function queueLiveRender(){
   if(liveRenderTimer!==null)return;
   liveRenderTimer=setTimeout(()=>{liveRenderTimer=null;render()},650);
-}
-function renderScanProgress(){
-  const c=Object.values(R),conf=c.filter(r=>r.status==='confirm').length,watch=c.filter(r=>r.status==='watch').length;
-  $('scanProgress').textContent=scanTotal?scanDone+' / '+scanTotal+' scanned · '+conf+' confirmed · '+watch+' watchlist'+(scanFailures?' · '+scanFailures+' failed':''):'Waiting for the first scan';
-  $('scanNow').textContent=busy?(activeScanCoins.size?'Currently scanning: '+[...activeScanCoins].slice(0,12).join(' · '):'Loading market data and preparing coin scans…'):(lastScan?'Scan complete · results remain visible until the next scan':'Waiting for the first scan');
-  const statusText={confirm:'CONFIRMED',watch:'In zone',trend:'Trend only',none:'No bias',error:'Data error'};
-  $('scanRecent').innerHTML=tbl(['Coin','Side','Price','Result'],recentScans.slice(0,40).map(r=>{
-    const p=M[r.sym]&&M[r.sym].p;
-    return '<tr><td>'+tv(r.sym)+'</td><td>'+(r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'—')+'</td><td>'+fp(p)+'</td><td class="scan-stage">'+(statusText[r.status]||'Scanned')+'</td></tr>';
-  }),'No completed coin scans yet.');
 }
 async function pool(items,fn,c=10,onDone=()=>{}){
   let i=0,d=0;
@@ -268,10 +201,8 @@ async function pool(items,fn,c=10,onDone=()=>{}){
   await Promise.all(Array.from({length:workers},async()=>{
     while(i<items.length){
       const it=items[i++];let failure=null;
-      activeScanCoins.add(it.symbol);queueLiveRender();
       try{await fn(it)}catch(e){failure=e;if(/429|418|403/.test(e.message))lim=true}
       finally{
-        activeScanCoins.delete(it.symbol);
         prog=(++d)+'/'+items.length;
         onDone(it,failure);
         $('stat').textContent='Scanning '+prog+' · '+it.symbol+' completed';
@@ -285,12 +216,11 @@ async function scan(){
   if(busy)return;
   if(Date.now()<banUntil){err=banMsg();render();setTimeout(scan,banUntil-Date.now()+5000);return}
   busy=true;const t0=Date.now();let wait=300;
-  await glassnodeStatus();
   try{
     const tk=await getTickers();
     const list=tk.filter(x=>x.symbol.endsWith('USDT')&&!/[_-]/.test(x.symbol)&&x.vol>=n('minvol')*1e6&&M[x.symbol]&&M[x.symbol].p>0).sort((a,b)=>b.vol-a.vol).slice(0,n('topn'));
     const res={};list.forEach(x=>res[x.symbol]={sym:x.symbol,chg:x.chg,vol:x.vol,status:'none'});
-    R={};scanTotal=list.length;scanDone=0;scanFailures=0;gnQueries=0;recentScans=[];activeScanCoins.clear();render();
+    R={};scanTotal=list.length;scanDone=0;scanFailures=0;render();
     await pool(list,async x=>{
  const s=x.symbol,r=res[s];
  const x15=await K(s,'15m',99);
@@ -303,26 +233,18 @@ async function scan(){
   maxFunding:n('fundlim'),
   account:n('acct'),risk:n('risk'),fee:n('fee')
  };
- let signal=UnifiedStrategy.evaluate(settings);
- if(signal.status==='confirm'&&gnReady&&gnQueries<GN_MAX_PER_SCAN&&GN_SUPPORTED.has(s.replace(/USDT$/,''))){
-  gnQueries++;
-  const data=await glassnodeMetric(s);
-  if(data)signal=UnifiedStrategy.evaluate({...settings,glassnode:data});
- }
+ const signal=UnifiedStrategy.evaluate(settings);
  Object.assign(r,signal);
  r.dir=signal.side;r.G=signal.checks||[];
- r.glassnodeBasis=signal.glassnode?.status||'Not connected';
  if(r.status==='confirm'&&r.plan)r.plan.ck=signal.pattern.confirmTime;
  },10,(x,failure)=>{
       const r=res[x.symbol];
       if(failure){r.status='error';scanFailures++}
       R[x.symbol]={...r};
       scanDone++;
-      recentScans.unshift({sym:x.symbol,dir:r.dir,status:r.status});
-      if(recentScans.length>50)recentScans.length=50;
     });
     if(Date.now()<banUntil){lim=false;wait=(banUntil-Date.now())/1000+5;err=banMsg()}
-    else{lastScan=new Date();err='';dur=Math.round((Date.now()-t0)/1000);if(lim){lim=false;wait=90;err=XN()+' rate limit reached, so the scanner is slowing down. Raise “Scan every” or the minimum volume.'}}
+    else{lastScan=new Date();err='';dur=Math.round((Date.now()-t0)/1000);if(lim){lim=false;wait=90;err=XN()+' rate limit reached, so the scanner is slowing down. Reduce the scan universe or the minimum trading volume threshold.'}}
     const bl=blocked();
     Object.values(R).filter(r=>r.status==='confirm').forEach(r=>{const k=r.sym+r.plan.ck;if(!seen.has(k)){seen.add(k);if(!bl)fire(r)}});
   }catch(e){if(Date.now()<banUntil){err=banMsg();wait=(banUntil-Date.now())/1000+5}else err='Could not load '+XN()+' data: '+e.message+'. Check your connection or VPN; retrying.'}
@@ -335,9 +257,7 @@ function fire(r){
 const day=()=>new Date().toISOString().slice(0,10);
 const today=()=>st.hist.filter(x=>new Date(x.close).toISOString().slice(0,10)===day());
 function blocked(){
-  const h=new Date().getUTCHours(),t=today();let s=0;for(let i=t.length-1;i>=0&&t[i].r<0;i--)s++;
-  if($('news').checked)return'News window active';
-  if($('sess').checked&&(h<8||h>=21))return'Outside 08:00–21:00 UTC session';
+  const t=today();let s=0;for(let i=t.length-1;i>=0&&t[i].r<0;i--)s++;
   if(t.length>=10)return'10 trades reached today';
   if(s>=3)return'3 losses in a row: take a 1 hour break';
   if(-t.reduce((a,x)=>a+x.r,0)*n('risk')>=2)return'2% daily loss limit reached';
@@ -388,10 +308,6 @@ function card(r,bl){
   ['Candlestick',pat.name||'—'],['Volume',f(pat.volumeRatio,2)+'x'],
   ['RSI 5m/15m/1h',[rsi.r5,rsi.r15,rsi.r1h].map(x=>f(x,1)).join(' / ')],
   ['Funding',f(r.fundingPct,4)+'%'],
-  ['Glassnode source',r.glassnodeBasis||'Exchange-only'],
-  ['GN netflow / baseline',r.glassnode?.status==='Glassnode live'?f(r.glassnode.ratio,2)+'x':'Not available'],
-  ['GN OI change',Number.isFinite(r.glassnode?.oiChangePct)?f(r.glassnode.oiChangePct,2)+'%':'Not available'],
-  ['GN reading age',Number.isFinite(r.glassnode?.ageMinutes)?f(r.glassnode.ageMinutes,0)+' min':'Not available'],
   ['Setup','Unified confluence'],['Position value','$'+f(p.nt,0)],['Estimated leverage (not a signal filter)',f(p.lev,2)+'x']
  ];
  return '<div class="card '+r.dir+'" data-a="chart" data-s="'+r.sym+
@@ -401,50 +317,29 @@ function card(r,bl){
   '<button class="p" data-a="take" data-s="'+r.sym+'" '+(bl||t?'disabled':'')+'>'+(t?'Tracking':'Track this trade')+
   '</button><button class="p" data-a="chart" data-s="'+r.sym+'" style="margin-top:7px">View Entry / SL / TP chart</button></div>';
 }
-function renderRsiHeatmap(){
- const data=Object.values(R).filter(r=>r.rsi&&Number.isFinite(r.rsi.r15)&&Number.isFinite(r.rsi.r1h));
- $('rsiUpdated').textContent=data.length+' RSI readings · Glassnode checks '+gnQueries+'/'+GN_MAX_PER_SCAN;
- for(const side of ['long','short']){
-  const list=data.filter(r=>r.dir===side).sort((a,b)=>side==='long'?b.rsi.scoreLong-a.rsi.scoreLong:b.rsi.scoreShort-a.rsi.scoreShort).slice(0,50);
-  $(side==='long'?'rsiLongNum':'rsiShortNum').textContent=list.length+' coins';
-  const rows=list.map(r=>{
-   const p=r.rsi,score=side==='long'?p.scoreLong:p.scoreShort;
-   return '<tr><td>'+tv(r.sym)+'</td><td>'+f(p.r5,1)+'</td><td>'+f(p.r15,1)+'</td><td>'+f(p.r1h,1)+
-   '</td><td>'+f(p.d15,1)+'</td><td><span class="rsi-score '+(side==='long'?'hot-long':'hot-short')+'">'+score+'</span></td><td>'+
-   (r.status==='confirm'?'CONFIRMED':r.status==='watch'?'Watchlist':'Not confirmed')+'</td></tr>';
-  });
-  $(side==='long'?'rsiLong':'rsiShort').innerHTML=tbl(['Coin','RSI 5m','RSI 15m','RSI 1h','15m Δ','RSI rank','Status'],rows,'No candidates in this scan.');
- }
-}
 function render(){
-  const watchScroll=$('wl').scrollTop,longScroll=$('cl').scrollTop,shortScroll=$('cs').scrollTop,feedScroll=$('scanRecent').scrollTop;
-  $('sot').hidden=!$('showot').checked;$('smk').hidden=!$('showmk').checked;
+  const watchScroll=$('wl').scrollTop,longScroll=$('cl').scrollTop,shortScroll=$('cs').scrollTop;
+  $('sot').hidden=!$('showot').checked;
   const bl=blocked(),L=Object.values(R),cf=L.filter(r=>r.status==='confirm'),cl=cf.filter(r=>r.dir==='long'),cs=cf.filter(r=>r.dir==='short'),t=today(),dr=t.reduce((a,x)=>a+x.r,0);
   $('dot').className='dot '+(err?'bad':lastScan?'ok':'');
   if(!busy)$('stat').textContent=lastScan?XN()+' futures · last scan '+lastScan.toLocaleTimeString()+' · '+L.length+' coins · took '+dur+'s':'Starting…';
   $('ban').innerHTML=err?`<div class="ban err">${err}</div>`:bl?`<div class="ban">Signals paused: ${bl}</div>`:'';
-  const actual=L.filter(r=>r.glassnode?.status==='Glassnode live');
-  const netflowConflicts=L.filter(r=>r.G?.some(x=>x.t==='Glassnode netflow does not strongly contradict'&&!x.ok));
-  $('gnActive').textContent='Fresh Glassnode readings: '+actual.length;
-  $('gnRejected').textContent='Opposing netflow flagged: '+netflowConflicts.length;
-  $('gnUsage').textContent=gnQueries+' checks this scan · '+actual.length+' fresh';
   $('kpi').innerHTML=[['Long signals',cl.length],['Short signals',cs.length],['Watching',L.filter(r=>r.status==='watch').length],['Open trades',st.open.length],['Today',t.length+' trades'],['Today result',f(dr)+' R']].map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join('');
   $('cl').innerHTML=cl.length?cl.map(r=>card(r,bl)).join(''):'<div class="empty">No confirmed long setups right now.</div>';
   $('cs').innerHTML=cs.length?cs.map(r=>card(r,bl)).join(''):'<div class="empty">No confirmed short setups right now.</div>';
   $('cl').scrollTop=longScroll;$('cs').scrollTop=shortScroll;
   $('nl').textContent=cl.length+' coins';$('ns').textContent=cs.length+' coins';
-  const wlAll=L.filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).sort((a,b)=>{const m=r=>r.G?r.G.filter(g=>!g.ok).length:9;return m(a)-m(b)||(a.dist??9)-(b.dist??9)});
+  const wlAll=L.filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).sort((a,b)=>{const m=r=>r.G?r.G.filter(g=>!g.ok).length:9;return m(a)-m(b)||(b.score||0)-(a.score||0)});
 const wl=wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).slice(0,watchLimit);
 $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).length+' coins · scroll for more';
   $('wl').innerHTML=tbl(
- ['','Coin','Side','Price','RSI 5m','RSI 15m','RSI 1h','Candle','Volume x','Funding %','Glassnode','Score','Status','Still missing'],
+ ['','Coin','Side','Price','Candle','Volume x','Funding %','Score','Status','Still missing'],
  wl.map(r=>{
   const p=r.rsi||{},c=r.pattern||{},miss=r.G?r.G.filter(x=>!x.ok).map(x=>x.t):[];
   return '<tr><td>'+star(r.sym)+'</td><td>'+tv(r.sym)+'</td><td>'+
    (r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'—')+'</td><td>'+fp(M[r.sym].p)+
-   '</td><td>'+f(p.r5,1)+'</td><td>'+f(p.r15,1)+'</td><td>'+f(p.r1h,1)+
    '</td><td>'+(c.name||'—')+'</td><td>'+f(c.volumeRatio,2)+'</td><td>'+f(r.fundingPct,4)+
-   '</td><td>'+(r.glassnodeBasis||'Exchange only')+'</td><td>'+f(r.score,0)+'</td><td>'+
+   '</td><td>'+f(r.score,0)+'</td><td>'+
    (r.status==='confirm'?'CONFIRMED':r.status==='watch'?'Watchlist':'Not confirmed')+
    '</td><td class="mut">'+(r.status==='confirm'?'Nothing missing':miss.join(', ')||'—')+'</td></tr>';
  }), 'No candidates yet.');
@@ -455,10 +350,6 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
   $('stats').innerHTML=[['Trades',H.length],['Win rate',H.length?f(w.length/H.length*100,0)+'%':'–'],['Total R',f(tr)],['Total P&L','$'+f(H.reduce((a,x)=>a+x.pnl,0))],['Avg R',H.length?f(tr/H.length):'–'],['Profit factor',gl?f(w.reduce((a,x)=>a+x.r,0)/gl):'–']].map(x=>`<span>${x[0]}: <b>${x[1]}</b></span>`).join('');
   $('hs').innerHTML=tbl(['Closed','Coin','Side','Entry','Exit','Result','P&L','Reason'],[...H].reverse().slice(0,100).map(x=>`<tr><td>${new Date(x.close).toLocaleString()}</td><td>${tv(x.sym)}</td><td>${pill(x.dir==='long'?'pl':'ps',x.dir.toUpperCase())}</td><td>${fp(x.en)}</td><td>${fp(x.ex)}</td><td class="${x.r>0?'long-t':'short-t'}">${f(x.r)} R</td><td class="${x.pnl>0?'long-t':'short-t'}">$${f(x.pnl)}</td><td class="mut">${x.why}</td></tr>`),'No closed trades yet.');
   eq();
-  const ord={confirm:0,watch:1,trend:2,none:3};
-  $('mkn').textContent=L.length+' coins scanned';
-  $('mk').innerHTML=tbl(['','Coin','Price','24h','24h volume','15m bias','Stage'],[...L].sort((a,b)=>ord[a.status]-ord[b.status]||b.vol-a.vol).map(r=>`<tr><td>${star(r.sym)}</td><td>${tv(r.sym)}</td><td>${fp(M[r.sym].p)}</td><td class="${r.chg>=0?'long-t':'short-t'}">${f(r.chg)}%</td><td>${f(r.vol/1e6,0)}M</td><td>${r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'<span class="mut">none</span>'}</td><td>${r.status==='confirm'?pill(r.dir==='long'?'pl':'ps','CONFIRMED'):r.status==='watch'?pill('pw','In zone'):r.status==='trend'?pill('pn','Trend only'):pill('pn','–')}</td></tr>`),'Waiting for the first scan.');
-  renderScanProgress();$('scanRecent').scrollTop=feedScroll;renderRsiHeatmap();
 }
 function eq(){
   const cv=$('eq'),d=devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;cv.width=w*d;cv.height=h*d;const x=cv.getContext('2d');x.scale(d,d);
@@ -476,7 +367,7 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b
 $('watchSearch').addEventListener('input',()=>{watchQuery=$('watchSearch').value.trim().toLowerCase();watchLimit=50;$('wl').scrollTop=0;render()});
 $('wl').addEventListener('scroll',()=>{const el=$('wl');if(el.scrollTop+el.clientHeight>=el.scrollHeight-90){const all=Object.values(R).filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).filter(r=>r.sym.toLowerCase().includes(watchQuery));if(watchLimit<all.length){const pos=el.scrollTop;watchLimit+=50;render();el.scrollTop=pos}}});
 $('clearHistory').addEventListener('click',()=>{if(!confirm('Permanently clear all saved trade result history? Open tracked trades will be kept.'))return;st.hist=[];save();render()});
-document.addEventListener('input',()=>{IDS.forEach(i=>st.set[i]=$(i).value);st.set.showot=$('showot').checked;st.set.showmk=$('showmk').checked;save();render()});
+document.addEventListener('input',()=>{IDS.forEach(i=>st.set[i]=$(i).value);st.set.showot=$('showot').checked;save();render()});
 $('alert').onclick=async()=>{audio=audio||new(window.AudioContext||window.webkitAudioContext)();if('Notification'in window)notif=(await Notification.requestPermission())==='granted';$('alert').textContent='Alerts on'};
 $('csv').onclick=()=>{const rows=[['closed','coin','side','entry','exit','R','pnl_usd','reason'],...st.hist.map(x=>[new Date(x.close).toISOString(),x.sym,x.dir,x.en,x.ex,x.r.toFixed(3),x.pnl.toFixed(2),x.why])];
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([rows.map(r=>r.join(',')).join('\n')],{type:'text/csv'}));a.download='trade-history.csv';a.click()};
