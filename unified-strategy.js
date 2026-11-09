@@ -4,7 +4,6 @@
    exchange volume + real futures funding rates. No inactive data sources. */
 (function(root){
  const ok=Number.isFinite;
- const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
  function rsiSeries(bars,n=14){
    const rs=Array(bars.length).fill(null);
    if(bars.length<n+2)return rs;
@@ -40,10 +39,9 @@
    const r5=a.at(-1),r15=b.at(-1),r1h=c.at(-1);
    const d5=ok(a.at(-2))&&ok(r5)?r5-a.at(-2):0;
    const d15=ok(b.at(-2))&&ok(r15)?r15-b.at(-2):0;
-   const d1h=ok(c.at(-2))&&ok(r1h)?r1h-c.at(-2):0;
-   return {r5,r15,r1h,d5,d15,d1h,
-     scoreLong:ok(r15)&&ok(r1h)?Math.round(clamp((53-r15)*2+Math.max(0,d15)*3+(60-r1h)*.7,0,100)):0,
-     scoreShort:ok(r15)&&ok(r1h)?Math.round(clamp((r15-47)*2+Math.max(0,-d15)*3+(r1h-40)*.7,0,100)):0};
+   // The RSI values and their 5m/15m direction are used directly in
+   // long/short confirmation. No unused heatmap display ranking is calculated.
+   return {r5,r15,r1h,d5,d15};
  }
  function candlestick(bars,dir){
    if(bars.length<29)return null;
