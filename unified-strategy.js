@@ -84,16 +84,24 @@
       r.r15>=23&&r.r15<=59&&r.d15>=.25&&r.r5>=30&&r.r5<=70&&r.d5>.4&&r.r1h<=67:
       r.r15>=41&&r.r15<=77&&r.d15<=-.25&&r.r5>=30&&r.r5<=70&&r.d5<-.4&&r.r1h>=33;
  }
+ // Glassnode Studio time-series metrics are licensed API data.
+ // Positive exchange netflow may indicate distribution / potential sell pressure;
+ // negative exchange netflow may indicate withdrawal / reduced sell pressure.
+ // Neither implies causation or identifies the direction of any specific trade.
  function glassnodeBias(gn){
-   if(!gn||gn.status!=='available')return {status:'Not connected',direction:null,ageMinutes:null};
+   if(!gn)return {status:'Exchange-only',direction:null,ageMinutes:null,source:'No licensed metric'};
+   if(gn.status!=='available')return {status:'Glassnode unavailable',direction:null,ageMinutes:null,
+     source:String(gn.reason||'No licensed reading').slice(0,110)};
    const net=Number(gn.netflow),base=Number(gn.netflowBaseline);
    const age=Number(gn.ageMinutes);
-   if(!ok(net)||!ok(base)||base<=0||!ok(age)||age>240)
-     return {status:'Metrics unavailable/stale',direction:null,ageMinutes:ok(age)?age:null};
+   if(!ok(net)||!ok(base)||base<=0||!ok(age)||age< -10||age>240)
+     return {status:'Glassnode stale',direction:null,ageMinutes:ok(age)?age:null,source:'Metric too old for trading'};
    const ratio=net/base;
    const direction=ratio<=-1?'long':ratio>=1?'short':null;
-   return {status:'Glassnode live',direction,ageMinutes:age,
-     netflow:net,ratio,oiChangePct:ok(Number(gn.oiChangePct))?Number(gn.oiChangePct):null};
+   const oi=(gn.oiChangePct!=null&&ok(Number(gn.oiChangePct)))?Number(gn.oiChangePct):null;
+   const participation=oi==null?'OI unavailable':oi>=1.5?'OI rising':oi<=-1.5?'OI falling':'OI stable';
+   return {status:'Glassnode live',direction,ageMinutes:age,netflow:net,ratio,
+     oiChangePct:oi,participation,source:'Glassnode API / Studio metrics'};
  }
  function evaluate({bars15,bars5,mark,fundingPct,maxFunding=0.05,maxStop=0.4,targetPct=2.8,
                     account=2000,risk=0.5,maxLev=5,fee=0.075,glassnode=null}){
@@ -108,8 +116,12 @@
      const fundingOK=ok(fundingPct)&&Math.abs(fundingPct)<=Math.max(0,maxFunding)&&
        (side==='long'?fundingPct<=maxFunding:fundingPct>=-maxFunding);
      const candleOK=!!pattern;
-     const opposite=gn.direction&&gn.direction!==side;
+     // Only a fresh, sizable *opposing* exchange netflow reading blocks a
+     // trade. Open interest affects context/score but cannot prove whale buying.
+     const opposite=gn.status==='Glassnode live'&&gn.direction&&gn.direction!==side;
      const glassnodeOK=!opposite;
+     const participationOK=gn.status==='Glassnode live'&&gn.direction===side&&
+        gn.oiChangePct!=null&&gn.oiChangePct>=1.5;
      const stop=pattern?pattern.extreme-sg*Math.max(mark*.00035,pattern.atr*.12):null;
      const stopPct=stop&&sg*(mark-stop)>0?Math.abs(mark-stop)/mark*100:null;
      const priceOK=!!pattern&&sg*(mark-pattern.confirmClose)>=-pattern.atr*.4&&
@@ -133,14 +145,14 @@
      const qualified=checkItems.every(x=>x.ok);
      const score=Math.round(20*Number(rsiOK)+20*Number(candleOK)+20*Number(volOK)+
        15*Number(fundingOK)+10*Number(glassnodeOK)+5*Number(priceOK)+
-       5*Number(stopOK)+5*Number(rrOK));
+       5*Number(stopOK)+5*Number(rrOK)+3*Number(participationOK));
      const entry=mark,tp1=mark*(1+sg*targetPct/200),tp2=mark*(1+sg*targetPct/100);
      const nt=stopPct>0?(account*risk/100)/(stopPct/100):null;
      const plan=pattern?{en:entry,stop,tp1,tp2,sp:stopPct,r$:account*risk/100,nt,
        lev:leverage,ck:pattern.confirmTime,rr,tp1pct:targetPct/2,tp2pct:targetPct,
        setupType:'RSI + Candle + Volume + Funding',structureExtreme:pattern.extreme}:null;
      return {side,status:qualified?'confirm':rsiOK?'watch':'none',
-       score,rsi,pattern,glassnode:gn,fundingPct,volumeRatio:pattern?.volumeRatio??null,
+       score:Math.min(100,score),rsi,pattern,glassnode:gn,fundingPct,volumeRatio:pattern?.volumeRatio??null,
        checks:checkItems,G:checkItems,plan,setupType:'Unified confluence',ok:qualified,
        reason:qualified?'Confluence confirmed':checkItems.filter(x=>!x.ok).map(x=>x.t).join('; ')};
    });
