@@ -107,11 +107,8 @@
   // Charts opened from stored trades must use that exact trade's saved plan,
   // not whichever new signal happens to be displayed for the same coin.
   window.openTrackedTradeChart=function(kind,id){
-    if(!['open','history','paper-open','paper-history'].includes(kind))return;
-    const paper=kind.startsWith('paper-');
-    const records=paper?
-      (kind==='paper-open'?paperSnapshot?.open:paperSnapshot?.history):
-      (kind==='open'?st.open:st.hist);
+    if(kind!=='open'&&kind!=='history')return;
+    const records=kind==='open'?st.open:st.hist;
     if(!Array.isArray(records))return;
     const trade=records.find(x=>String(x.id)===String(id));
     if(!trade||!trade.sym||!['long','short'].includes(trade.dir))return;
@@ -121,8 +118,8 @@
     const risk=Math.abs(en-stop),rr=risk?Math.abs(tp-en)/risk:0;
     if(!(risk>0))return;
     const record={
-      status:'confirm',dir:trade.dir,source:paper?'binance':trade.source||EX(),
-      paperTrade:paper,tradeKind:kind.endsWith('history')?'history':'open',
+      status:'confirm',dir:trade.dir,source:trade.source||EX(),
+      tradeKind:kind,
       openedAt:trade.open,closedAt:trade.close,
       outcome:trade.why||null,exitPrice:Number(trade.ex),
       plan:{en,stop,tp2:tp,sp:risk/en*100,rr,structureExtreme:null},
@@ -143,9 +140,7 @@
     const session=++activeSession;
     byId('tradeChartModal').hidden=false;
     document.body.style.overflow='hidden';
-    const title=result.paperTrade?
-       (result.tradeKind==='history'?'Completed Binance PAPER result':'Open Binance PAPER position'):
-       result.tradeKind==='history'?'Completed trade result':
+    const title=result.tradeKind==='history'?'Completed trade result':
        result.tradeKind==='open'?'Automatically tracked trade':'Confirmed trade';
     byId('tradeChartTitle').textContent=symbol+' · '+result.dir.toUpperCase()+' · '+title+' · 5-minute chart';
     byId('tradeChartTV').href='https://www.tradingview.com/chart/?symbol='+encodeURIComponent((source==='bybit'?'BYBIT':'BINANCE')+':'+symbol+'.P');
