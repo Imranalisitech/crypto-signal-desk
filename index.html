@@ -106,6 +106,12 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 .rsi-score.hot-short{background:rgba(235,73,85,.25);color:#ffadb4}
 .rsi-intro{font-size:12.5px;color:var(--mut);margin:0 0 12px}
 @media(max-width:800px){.rsi-grid{grid-template-columns:1fr}}
+
+.market-sources{margin:4px 0 12px;padding:10px 12px;border:1px solid #35516b;border-radius:9px;background:linear-gradient(135deg,#192b3d,#132335);color:#afc5d7}
+.market-sources summary{cursor:pointer;font-weight:700;color:#d8e6f3}
+.market-sources p{font-size:12px;margin:9px 0;line-height:1.45}
+.market-sources a{color:#a3dcff}
+.market-sources .data-status{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;padding:8px 0}
 </style>
 </head>
 <body>
@@ -135,6 +141,12 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   </div>
 </details>
 <div id="gnStatus" class="mut" style="text-align:center;font-size:12px;margin-bottom:8px">Checking Glassnode access…</div>
+<details class="market-sources"><summary>Market intelligence data sources <small id="gnUsage">Glassnode data checks: pending</small></summary>
+<div class="data-status"><span id="gnActive">Live Glassnode signals: 0</span><span id="gnRejected">Netflow conflicts: 0</span></div>
+<p><b>Glassnode Studio:</b> <a href="https://studio.glassnode.com/" target="_blank" rel="noopener noreferrer">View Studio metrics</a>. The scanner can use genuine exchange-netflow and futures open-interest data when the licensed API is connected and measurements are fresh. Studio's web page alone does not provide unrestricted live data access.</p>
+<p><b>Glassnode Prediction Markets Latency:</b> <a href="https://latency.glassnode.com/prediction-markets" target="_blank" rel="noopener noreferrer">Open network-latency monitor</a>. This measures connectivity to prediction-market exchanges (Polymarket/Kalshi), <b>not market probabilities or bullish/bearish coin signals</b>. It is for infrastructure reference only and never changes the LONG/SHORT direction.</p>
+<p id="gnDetails">A fresh on-chain exchange netflow strongly opposing the signal can prevent confirmation; open-interest growth is participation context, not proof of institutional buying. If no licensed metric is available, signals use exchange candles, RSI, volume and funding only.</p>
+</details>
 <div id="ban"></div>
 <div class="kpi" id="kpi"></div>
 
@@ -219,7 +231,7 @@ async function glassnodeStatus(){
   const r=await fetch(GN_PROXY+'/glassnode/status',{signal:c.signal});
   if(!r.ok)throw Error('Unavailable');
   const x=await r.json();gnReady=x.configured===true;
-  gnNote=gnReady?'Licensed Glassnode API enabled (selected assets only)':'Glassnode API not configured — exchange-only signals';
+  gnNote=gnReady?'Glassnode key configured — metric availability checked for selected coins':'Glassnode API not configured — exchange-only signals';
  }catch(e){gnReady=false;gnNote='Glassnode service unavailable — exchange-only signals'}
  finally{clearTimeout(tm)}
  $('gnStatus').textContent=gnNote;
@@ -369,7 +381,11 @@ function card(r,bl){
   ['Final TP ('+f(p.tp2pct,1)+'%)',fp(p.tp2)],['Target R:R','1 : '+f(p.rr,1)],
   ['Candlestick',pat.name||'—'],['Volume',f(pat.volumeRatio,2)+'x'],
   ['RSI 5m/15m/1h',[rsi.r5,rsi.r15,rsi.r1h].map(x=>f(x,1)).join(' / ')],
-  ['Funding',f(r.fundingPct,4)+'%'],['Glassnode',r.glassnodeBasis||'Exchange only'],
+  ['Funding',f(r.fundingPct,4)+'%'],
+  ['Glassnode source',r.glassnodeBasis||'Exchange-only'],
+  ['GN netflow / baseline',r.glassnode?.status==='Glassnode live'?f(r.glassnode.ratio,2)+'x':'Not available'],
+  ['GN OI change',Number.isFinite(r.glassnode?.oiChangePct)?f(r.glassnode.oiChangePct,2)+'%':'Not available'],
+  ['GN reading age',Number.isFinite(r.glassnode?.ageMinutes)?f(r.glassnode.ageMinutes,0)+' min':'Not available'],
   ['Setup','Unified confluence'],['Size','$'+f(p.nt,0)],['Leverage',f(p.lev,2)+'x']
  ];
  return '<div class="card '+r.dir+'" data-a="chart" data-s="'+r.sym+
@@ -401,6 +417,11 @@ function render(){
   $('dot').className='dot '+(err?'bad':lastScan?'ok':'');
   if(!busy)$('stat').textContent=lastScan?XN()+' futures · last scan '+lastScan.toLocaleTimeString()+' · '+L.length+' coins · took '+dur+'s':'Starting…';
   $('ban').innerHTML=err?`<div class="ban err">${err}</div>`:bl?`<div class="ban">Signals paused: ${bl}</div>`:'';
+  const actual=L.filter(r=>r.glassnode?.status==='Glassnode live');
+  const netflowConflicts=L.filter(r=>r.G?.some(x=>x.t==='Glassnode netflow does not strongly contradict'&&!x.ok));
+  $('gnActive').textContent='Fresh Glassnode readings: '+actual.length;
+  $('gnRejected').textContent='Opposing netflow flagged: '+netflowConflicts.length;
+  $('gnUsage').textContent=gnQueries+' checks this scan · '+actual.length+' fresh';
   $('kpi').innerHTML=[['Long signals',cl.length],['Short signals',cs.length],['Watching',L.filter(r=>r.status==='watch').length],['Open trades',st.open.length],['Today',t.length+' trades'],['Today result',f(dr)+' R']].map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join('');
   $('cl').innerHTML=cl.length?cl.map(r=>card(r,bl)).join(''):'<div class="empty">No confirmed long setups right now.</div>';
   $('cs').innerHTML=cs.length?cs.map(r=>card(r,bl)).join(''):'<div class="empty">No confirmed short setups right now.</div>';
