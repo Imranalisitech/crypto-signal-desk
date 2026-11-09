@@ -5,6 +5,7 @@ const http=require('node:http');
 const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
+const {BinancePaperBroker,normalizePaperConfig}=require('./binance-paper.js');
 
 if(typeof fetch!=='function')throw Error('Node.js 20 or newer required.');
 const BASE=__dirname,STATE_FILE=path.join(BASE,'laptop-state.json'),
@@ -28,6 +29,7 @@ function normalizedConfig(raw){
     port:Math.trunc(safeNumber(raw.port,17654,1024,65535))};
 }
 config=normalizedConfig(config);
+config.paper=normalizePaperConfig(config.paper);
 const ctx={window:{}};
 vm.runInNewContext(fs.readFileSync(path.join(BASE,'unified-strategy.js'),'utf8'),ctx);
 const strategy=ctx.window.UnifiedStrategy;
@@ -38,6 +40,7 @@ const state={
   version:1,
   createdAt:loaded.createdAt||Date.now(),
   results:loaded.results&&typeof loaded.results==='object'?loaded.results:{},
+  paper:loaded.paper&&typeof loaded.paper==='object'?loaded.paper:null,
   markets:{},open:Array.isArray(loaded.open)?loaded.open:[],
   history:Array.isArray(loaded.history)?loaded.history:[],
   trackedKeys:loaded.trackedKeys&&typeof loaded.trackedKeys==='object'?loaded.trackedKeys:{},
@@ -69,6 +72,9 @@ function log(message){
   console.log(line);
   try{fs.appendFileSync(path.join(BASE,'laptop-server.log'),line+'\n')}catch(_){}
 }
+const paperBroker=new BinancePaperBroker({config:config.paper,state:state.paper,persist,log});
+state.paper=paperBroker.state;
+config.paper=paperBroker.config;
 function fault(message){
   state.errors.push({time:Date.now(),message:String(message).slice(0,220)});
   if(state.errors.length>40)state.errors.shift();
@@ -157,6 +163,25 @@ async function refreshTickers(){
     lastTickers=tickers;
     return tickers;
   }finally{tickersBusy=false}
+}
+// Binance Futures public mark-price feed is used exclusively by the local
+// paper execution simulator. The scanner may still use Bybit or Binance data.
+let paperPricesBusy=false,paperLastErrorAt=0;
+async function refreshPaperMarks(){
+  if(paperPricesBusy||!paperBroker.config.enabled)return;
+  paperPricesBusy=true;
+  try{
+    const marks=await getJson('https://fapi.binance.com/fapi/v1/premiumIndex');
+    if(!Array.isArray(marks))throw Error('Binance public mark-price feed unavailable');
+    const count=paperBroker.setMarks(marks);
+    if(count<10)throw Error('Binance mark-price feed contains too few symbols');
+    paperBroker.monitor();
+  }catch(e){
+    paperBroker.state.feedError=String(e.message).slice(0,160);
+    if(Date.now()-paperLastErrorAt>120000){
+      paperLastErrorAt=Date.now();fault('PAPER BINANCE FEED '+e.message);
+    }
+  }finally{paperPricesBusy=false}
 }
 function signalKey(r){
   const time=Number(r.plan?.ck);
@@ -247,7 +272,10 @@ async function scan(){
           const result={...decision,sym:item.symbol,dir:decision.side,
             chg:item.change,vol:item.vol,G:decision.checks||[]};
           state.results[item.symbol]=compactResult(result);
-          if(result.status==='confirm')register(result);
+          if(result.status==='confirm'){
+            register(result); // Existing simulated trade results are unchanged.
+            paperBroker.onSignal(result,config.exchange); // Separate, risk-capped paper ledger.
+          }
         }catch(e){state.scanFailures++;
           if(state.scanFailures<=4)fault(item.symbol+': '+e.message)}
         finally{state.scanned++}
@@ -282,10 +310,19 @@ function snapshot(fullHistory=false){
     connection:state.connection,nextScanAt:state.nextScanAt,
     markets,results:Object.values(state.results),
     open:state.open,history,historyTotal:totalHistory,
-    trackedKeys:state.trackedKeys};
+    trackedKeys:state.trackedKeys,paper:paperBroker.snapshot(fullHistory)};
   while(!fullHistory&&Buffer.byteLength(JSON.stringify(out))>1_900_000&&history.length>100){
     history=history.slice(Math.ceil(history.length/4));
     out.history=history;
+  }
+  // Bound the public read-only Render snapshot without ever trimming local
+  // full histories stored in laptop-state.json.
+  while(!fullHistory&&Buffer.byteLength(JSON.stringify(out))>1_900_000&&out.paper.history.length>40){
+    out.paper.history=out.paper.history.slice(Math.ceil(out.paper.history.length/4));
+    out.paper.historyTruncated=true;
+  }
+  while(!fullHistory&&Buffer.byteLength(JSON.stringify(out))>1_900_000&&out.paper.rejections.length>20){
+    out.paper.rejections=out.paper.rejections.slice(Math.ceil(out.paper.rejections.length/4));
   }
   out.historyTruncated=history.length<totalHistory;
   return out;
@@ -314,7 +351,8 @@ const server=http.createServer((req,res)=>{
     return respond(res,200,{...snapshot(true),config:{exchange:config.exchange,
       scanMax:config.scanMax,account:config.account,riskPct:config.riskPct,
       fundingLimitPct:config.fundingLimitPct,feePct:config.feePct,
-      minTurnoverMillions:config.minTurnoverMillions},lastSyncAt:state.lastSyncAt});
+      minTurnoverMillions:config.minTurnoverMillions,paper:paperBroker.config},
+      lastSyncAt:state.lastSyncAt,paper:paperBroker.summary()});
   if(url.pathname==='/api/config'&&req.method==='POST'){
     // Reject cross-site browser requests that try to alter laptop settings.
     const allowedOrigins=new Set(['http://127.0.0.1:'+config.port,'http://localhost:'+config.port]);
@@ -329,6 +367,10 @@ const server=http.createServer((req,res)=>{
         const data=JSON.parse(buf);
         if(!data||typeof data!=='object')throw Error('Invalid config');
         const was=config.exchange;config=normalizedConfig({...config,...data});
+        if(data.paper&&typeof data.paper==='object'){
+          paperBroker.setConfig(data.paper);
+        }
+        config.paper=paperBroker.config;
         fs.writeFileSync(CONFIG_FILE,JSON.stringify(config,null,2));
         if(was!==config.exchange){state.results={};state.markets={};lastTickers=[]}
         respond(res,200,{ok:true});
@@ -356,6 +398,7 @@ const server=http.createServer((req,res)=>{
 server.listen(config.port,'127.0.0.1',()=>log('Laptop server ready at http://127.0.0.1:'+config.port));
 async function polling(){
   try{await refreshTickers();monitor()}catch(e){fault('TICKERS '+e.message)}
+  try{await refreshPaperMarks()}catch(e){fault('BINANCE PAPER '+e.message)}
   setTimeout(polling,10_000);
 }
 async function scheduleScan(){
