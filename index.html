@@ -94,6 +94,18 @@ input,select{background:#122030;color:var(--ink);border-color:#40556c}
 button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9fb7d0;color:inherit;font-weight:800;font-size:16px}
 .card[data-a="chart"]{cursor:pointer}
 .card[data-a="chart"]:focus-visible{outline:2px solid #7db8ff;outline-offset:3px}
+
+.rsi-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.rsi-box{padding:10px;border:1px solid var(--line);background:#132538;border-radius:9px;min-width:0}
+.rsi-box h3{font-size:14px;margin:0 0 9px}
+.rsi-scroll{max-height:350px;overflow:auto;scrollbar-color:#6883a3 #172535}
+.rsi-scroll table{width:100%}
+.rsi-scroll th{position:sticky;top:0;z-index:1;background:#132538}
+.rsi-score{border-radius:5px;padding:3px 5px;font-weight:700;display:inline-block;min-width:42px;text-align:center}
+.rsi-score.hot-long{background:rgba(20,180,122,.25);color:#7ff5ca}
+.rsi-score.hot-short{background:rgba(235,73,85,.25);color:#ffadb4}
+.rsi-intro{font-size:12.5px;color:var(--mut);margin:0 0 12px}
+@media(max-width:800px){.rsi-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -130,13 +142,21 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   <section><h2>Confirmed LONG <small id="nl"></small></h2><div class="cards" id="cl"></div></section>
   <section><h2>Confirmed SHORT <small id="ns"></small></h2><div class="cards" id="cs"></div></section>
 </div>
+<section id="rsiPanel">
+  <h2>RSI Heatmap — Exchange Calculated <small id="rsiUpdated">Scanning RSI for each coin</small></h2>
+  <p class="rsi-intro">Independent 15-minute and 1-hour RSI(14) values calculated from the selected exchange's closed candles; 5-minute RSI is calculated for qualifying candidates. <b>This is not live CoinGlass heatmap data.</b> RSI extremes identify candidates, not confirmed trades; the setup must also satisfy price, volume, money-flow, and risk checks. <a href="https://www.coinglass.com/RsiHeatMap" target="_blank" rel="noopener noreferrer">Compare with CoinGlass RSI heatmap</a>.</p>
+  <div class="rsi-grid">
+    <div class="rsi-box"><h3>Oversold recovery · LONG candidates <small id="rsiLongNum"></small></h3><div id="rsiLong" class="rsi-scroll"><div class="empty">Waiting for first scan.</div></div></div>
+    <div class="rsi-box"><h3>Overbought reversal · SHORT candidates <small id="rsiShortNum"></small></h3><div id="rsiShort" class="rsi-scroll"><div class="empty">Waiting for first scan.</div></div></div>
+  </div>
+</section>
 
-<section><h2>Watchlist <small>click a coin name to open it in TradingView</small></h2><p class="mut" style="margin:0 0 8px;font-size:12.5px"><b>These are NOT confirmed trades.</b> Extended targets require historical 4-hour volatility and directional volume confirmation. Money-flow values estimate buying/selling pressure from futures turnover; they are not literal cash inflows or guaranteed predictions. They have a 15m trend and price is near the 5m value zone, but rules are still missing (last column). A coin can confirm after either <b>(1) a reclaimed liquidity sweep plus closed 5-minute confirmation</b> or <b>(2) strong 1h/3h money flow, expanding breakout volume and a subsequent closed 5-minute continuation candle</b>. Stops sit beyond the sweep wick or the breakout structure. A coin becomes a trade only when it shows <b>CONFIRMED</b> with “Nothing” missing, and then it moves into the Confirmed LONG / SHORT boxes at the top. Closest to confirming is listed first.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
+<section><h2>Watchlist <small>click a coin name to open it in TradingView</small></h2><p class="mut" style="margin:0 0 8px;font-size:12.5px"><b>These are NOT confirmed trades.</b> Extended targets require historical 4-hour volatility and directional volume confirmation. Money-flow values estimate buying/selling pressure from futures turnover; they are not literal cash inflows or guaranteed predictions. They have a 15m trend and price is near the 5m value zone, but rules are still missing (last column). The scanner has four independently qualifying confirmation methods: <b>liquidity sweep</b>, <b>strong-flow breakout</b>, <b>large-position activity proxy with open-interest change</b>, and <b>RSI reversal confirmed by price, volume, and money flow</b>. Stops sit beyond the sweep wick or the breakout structure. A coin becomes a trade only when it shows <b>CONFIRMED</b> with “Nothing” missing, and then it moves into the Confirmed LONG / SHORT boxes at the top. Closest to confirming is listed first.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 <section id="sot"><h2>Open trades <small>tracked automatically against live mark price</small></h2><div class="tw" id="ot"></div></section>
 <section><h2>Trade result history <span><button id="clearHistory" type="button">Clear history</button> <button id="csv" type="button">Export CSV</button></span></h2>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
 <section id="smk" style="display:none!important"><h2>Market scan <small id="mkn"></small></h2><div class="tw" id="mk"></div></section>
-<p class="mut" style="font-size:12px">Targets are planned levels, not guaranteed outcomes. The historical 4h P80 move and directional money-flow pressure are screening statistics, not forecasts. Signals and tracked trades are simulated: the dashboard never places orders. Results use mark-price polling and include your fee setting, so real fills can differ. Educational tool, not financial advice.</p>
+<p class="mut" style="font-size:12px">Targets are planned levels, not guaranteed outcomes. The historical 4h P80 move, money-flow pressure, RSI and open-interest changes are screening statistics, not forecasts; OI changes do not identify actual whales or institutions. Signals and tracked trades are simulated: the dashboard never places orders. Results use mark-price polling and include your fee setting, so real fills can differ. Educational tool, not financial advice.</p>
 </main>
 <div id="tradeChartModal" class="trade-chart-modal" hidden>
   <div id="tradeChartDialog" class="trade-chart-dialog" role="dialog" aria-modal="true" aria-labelledby="tradeChartTitle" tabindex="-1">
@@ -159,6 +179,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
     <div class="trade-chart-status">Interactive chart powered by <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">TradingView Lightweight Charts</a>. Entry, stop and targets are from the selected confirmed trade. These areas are visual guides, not orders.</div>
   </div>
 </div>
+<script src="signal-extras.js"></script>
 <script>
 const $=i=>document.getElementById(i),n=i=>parseFloat($(i).value);
 const f=(x,d=2)=>x==null||!isFinite(x)?'–':(+x).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
@@ -177,6 +198,20 @@ const J=async(u,w=1)=>{
 const K=async(s,iv,l)=>{
   if(EX()==='bybit'){const j=await J(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${s}&interval=${BIV[iv]}&limit=${l}`);return j.result.list.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5],q:+k[6],buyq:null})).reverse()}
   return(await J(`${B}klines?symbol=${s}&interval=${iv}&limit=${l}`,l<100?1:2)).map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5],q:+k[7],buyq:+k[10]}))};
+// Open-interest series is fetched only for a limited high-pressure shortlist,
+// never for all 500+ scanned coins. OI changes do not identify individual whales.
+let oiLookups=0;
+const MAX_OI_LOOKUPS_PER_SCAN=24;
+async function fetchOpenInterest(symbol){
+  if(EX()==='bybit'){
+    const j=await J('https://api.bybit.com/v5/market/open-interest?category=linear&symbol='+encodeURIComponent(symbol)+'&intervalTime=15min&limit=9');
+    if(j.retCode!==0||!Array.isArray(j.result?.list))return null;
+    return SignalExtras.openInterestChange(j.result.list.map(x=>({t:Number(x.timestamp),oi:Number(x.openInterest)})));
+  }
+  const j=await J('https://fapi.binance.com/futures/data/openInterestHist?symbol='+encodeURIComponent(symbol)+'&period=15m&limit=9');
+  if(!Array.isArray(j))return null;
+  return SignalExtras.openInterestChange(j.map(x=>({t:Number(x.timestamp),oi:Number(x.sumOpenInterest)})));
+}
 async function getTickers(){
   if(EX()==='bybit'){const j=await J('https://api.bybit.com/v5/market/tickers?category=linear');
     return j.result.list.map(x=>{M[x.symbol]={p:+x.markPrice||+x.lastPrice,fr:+x.fundingRate*100};return{symbol:x.symbol,chg:+x.price24hPcnt*100,vol:+x.turnover24h}})}
@@ -352,36 +387,49 @@ function detectFlowBreakout(bars,dir,flow){
 }
 function evalLive(r,k5,px){
   const G=[],add=(ok,reason)=>G.push({ok,t:reason});
-  const dir=r.dir,sg=dir==='long'?1:-1,sweep=r.sweep,momentum=r.momentum;
-  const setup=sweep||momentum,setupType=sweep?'Liquidity sweep':momentum?'Strong-flow breakout':null;
-  add(!!setup,'Waiting for a liquidity sweep or strong-flow breakout');
+  const dir=r.dir,sg=dir==='long'?1:-1;
+  const sweep=r.sweep,momentum=r.momentum,large=r.large,oversold=r.rsiSetup;
+  const setup=sweep||momentum||large||oversold;
+  const setupType=sweep?'Liquidity sweep':momentum?'Strong-flow breakout':
+    large?'Large-position activity proxy':oversold?'RSI heatmap reversal':null;
+  add(!!setup,'Waiting for liquidity sweep, strong flow, OI activity or RSI reversal');
   if(sweep){
-    add(sweep.confirmTime>sweep.sweepTime,'Waiting for closed 5m confirmation after sweep');
+    add(sweep.confirmTime>sweep.sweepTime,'Waiting for closed 5m confirmation after liquidity sweep');
     const zone=dir==='long'?
       sweep.extreme<=r.zh*(1+n('tol')/100)&&sweep.confirmClose>=r.zl*(1-n('tol')/100):
       sweep.extreme>=r.zl*(1-n('tol')/100)&&sweep.confirmClose<=r.zh*(1+n('tol')/100);
     add(zone,'Liquidity sweep must interact with 5m value zone');
-  }else{
-    add(!!momentum&&momentum.confirmTime>momentum.breakoutTime,'Waiting for closed 5m breakout confirmation');
-    add(!!momentum&&momentum.breakoutVolRatio>=1.4,'Breakout volume below 1.4x baseline');
+  }else if(momentum){
+    add(momentum.confirmTime>momentum.breakoutTime,'Waiting for closed 5m breakout confirmation');
+    add(momentum.breakoutVolRatio>=1.4,'Breakout volume below 1.4x baseline');
+  }else if(large){
+    add(!!r.oi&&Math.abs(r.oi.percent)>=1.2,'Open interest has not changed sufficiently');
+    add(large.confirmTime>large.breakoutTime&&large.breakoutVolRatio>=1.65,
+      'Large-position proxy needs closed 5m price and volume confirmation');
+  }else if(oversold){
+    add(oversold.confirmTime>oversold.breakoutTime,
+      'RSI reversal requires closed 5m confirmation after prior candle');
+    add(oversold.breakoutVolRatio>=1.2,'RSI reversal volume below 1.2x');
   }
   const flow=r.flow;
-  add(!!flow&&sg*flow.oneHour>=(sweep?.05:.16),'1h buying/selling pressure below requirement');
-  add(!!flow&&sg*flow.threeHour>=(sweep?.012:.07),'3h directional pressure below requirement');
-  add(!!flow&&flow.volumeRatio>=(sweep?.75:1.25),'Quote turnover not expanding enough');
-  add(!!flow&&(dir==='long'?!flow.weakRally:!flow.weakSelloff),'Possible fake breakout / flow-price divergence');
+  const hourThreshold=sweep?.05:momentum?.16:large?.15:.065;
+  const threeHourThreshold=sweep?.012:momentum?.07:large?.065:.025;
+  const volumeThreshold=sweep?.75:momentum?1.25:large?1.45:1.0;
+  add(!!flow&&sg*flow.oneHour>=hourThreshold,'1h buying/selling pressure below requirement');
+  add(!!flow&&sg*flow.threeHour>=threeHourThreshold,'3h directional pressure below requirement');
+  add(!!flow&&flow.volumeRatio>=volumeThreshold,'Quote turnover not expanding enough');
+  add(!!flow&&(dir==='long'?!flow.weakRally:!flow.weakSelloff),'Potential fake breakout / flow divergence');
   const fr=M[r.sym]&&M[r.sym].fr,fl=n('fundlim');
-  add(Number.isFinite(fr)&&(dir==='short'?fr>-fl:fr<fl),'Funding extreme against you');
+  add(Number.isFinite(fr)&&(dir==='short'?fr>-fl:fr<fl),'Funding extreme against trade');
   const confClose=setup?setup.confirmClose:0;
-  const maxChase=setup?Math.max(setup.atr*(sweep?.8:.70),confClose*.003):0;
-  add(!!setup&&sg*(px-confClose)>=-setup.atr*.40&&sg*(px-confClose)<=maxChase,
+  const atr=setup?setup.atr:0;
+  const maxChase=setup?Math.max(atr*(sweep?.80:momentum?.70:.65),confClose*.003):0;
+  add(!!setup&&sg*(px-confClose)>=-atr*.40&&sg*(px-confClose)<=maxChase,
     'Price too far from confirmed entry or reversed');
-  // The stop uses the actual sweep wick, or the actual preceding 5m consolidation low/high.
-  // An ATR buffer is placed beyond that level: never force a stop closer than structure.
-  const stop=setup?setup.extreme-sg*Math.max(setup.atr*.12,px*.00035):NaN;
+  const stop=setup?setup.extreme-sg*Math.max(atr*.12,px*.00035):NaN;
   const risk=Math.abs(px-stop),sp=Number.isFinite(risk)&&px>0?risk/px*100:NaN;
   add(!!setup&&sg*(px-stop)>0&&Number.isFinite(sp)&&sp>0&&sp<=n('maxstop'),
-    'Structure-based stop exceeds maximum risk');
+    'Stop beyond recent structure exceeds risk limit');
   const targetPct=Math.min(15,Math.max(1,n('mintp')||2.8));
   add((r.move4h||0)>=targetPct,'Historical 4h movement below '+f(targetPct,1)+'%');
   add(Number.isFinite(sp)&&sp>0&&targetPct/sp>=3,'Target risk/reward below 3R');
@@ -442,15 +490,41 @@ async function scan(){
     const tk=await getTickers();
     const list=tk.filter(x=>x.symbol.endsWith('USDT')&&!/[_-]/.test(x.symbol)&&x.vol>=n('minvol')*1e6&&M[x.symbol]&&M[x.symbol].p>0).sort((a,b)=>b.vol-a.vol).slice(0,n('topn'));
     const res={};list.forEach(x=>res[x.symbol]={sym:x.symbol,chg:x.chg,vol:x.vol,status:'none'});
-    R={};scanTotal=list.length;scanDone=0;scanFailures=0;recentScans=[];activeScanCoins.clear();render();
+    R={};scanTotal=list.length;scanDone=0;scanFailures=0;oiLookups=0;recentScans=[];activeScanCoins.clear();render();
     await pool(list,async x=>{
-      const s=x.symbol,r=res[s],k15=await K(s,'15m',99);if(k15.length<25)return;r.dir=bias(k15.slice(0,-1));if(!r.dir)return;r.status='trend';
-      const k5raw=await K(s,'5m',300);if(k5raw.length<25)return;const k5=k5raw.slice(0,-1),e9=ema(k5,9),e21=ema(k5,21),v5=vwap(k5);if(v5==null)return;
-      r.move4h=historical4hMovePct(k5);r.flow=assessMoneyFlow(k5);r.zl=Math.min(e9,e21,v5);r.zh=Math.max(e9,e21,v5);
+      const s=x.symbol,r=res[s],k15raw=await K(s,'15m',99);
+      if(k15raw.length<62)return;
+      const closed15=k15raw.slice(0,-1);
+      r.rsi=SignalExtras.heatmap(closed15);
+      const trend=bias(closed15);
+      r.dir=trend||r.rsi.hotDir;
+      if(!r.dir)return;
+      r.status='trend';
+      const k5raw=await K(s,'5m',300);
+      if(k5raw.length<90)return;
+      const k5=k5raw.slice(0,-1),e9=ema(k5,9),e21=ema(k5,21),v5=vwap(k5);
+      if(v5==null)return;
+      r.rsi=SignalExtras.heatmap(closed15,k5);
+      r.move4h=historical4hMovePct(k5);r.flow=assessMoneyFlow(k5);
+      r.zl=Math.min(e9,e21,v5);r.zh=Math.max(e9,e21,v5);
       const px=M[s].p;r.dist=px<r.zl?(r.zl-px)/px*100:px>r.zh?(px-r.zh)/px*100:0;
       r.sweep=detectLiquiditySweep(k5,r.dir);
       r.momentum=r.sweep?null:detectFlowBreakout(k5,r.dir,r.flow);
-      if(r.dist>0.4&&!r.sweep&&!r.momentum)return;
+      r.rsiSetup=!r.sweep&&!r.momentum?
+        SignalExtras.rsiReversal(k5,r.dir,r.rsi,r.flow):null;
+      r.large=null;r.oi=null;
+      if(!r.sweep&&!r.momentum&&!r.rsiSetup&&
+         oiLookups<MAX_OI_LOOKUPS_PER_SCAN&&
+         SignalExtras.largePositionPrecheck(k5,r.dir,r.flow)){
+        oiLookups++;
+        try{
+          r.oi=await fetchOpenInterest(s);
+          r.large=SignalExtras.largePositionSetup(k5,r.dir,r.flow,r.oi);
+        }catch(e){
+          r.oiError=e.message; // OI unavailable: never label it as confirmed.
+        }
+      }
+      if(r.dist>0.4&&!r.sweep&&!r.momentum&&!r.large&&!r.rsiSetup)return;
       r.status='watch';
       Object.assign(r,evalLive(r,k5,px));
       if(r.ok)r.status='confirm';
@@ -517,8 +591,29 @@ const star=s=>`<button class="ic" data-a="pin" data-s="${s}" title="Pin to watch
 const tbl=(h,rows,e)=>rows.length?`<table><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr>${rows.join('')}</table>`:`<div class="empty">${e}</div>`;
 function card(r,bl){const p=r.plan,t=st.open.some(x=>x.sym===r.sym);
   return`<div class="card ${r.dir}" data-a="chart" data-s="${r.sym}" role="button" tabindex="0" aria-label="Open ${r.sym} confirmed trade chart with entry, stop and targets"><div class="ch"><button type="button" class="coin-chart" data-a="chart" data-s="${r.sym}" title="Open confirmed entry/TP/SL chart">${nm(r.sym)}</button>${star(r.sym)}<span class="m">${fp(M[r.sym].p)}</span></div>
-  <table class="kv">${[['Entry',fp(p.en)],['Stop',fp(p.stop)],['TP1 ('+f(p.tp1pct,1)+'%)',fp(p.tp1)],['Final TP ('+f(p.tp2pct,1)+'%)',fp(p.tp2)],['Target R:R','1 : '+f(p.rr,1)],['Historical 4h P80',f(p.move4h,2)+'%'],['Flow 1h',r.flow?flowPct(r.flow.oneHour):'—'],['Flow 3h',r.flow?flowPct(r.flow.threeHour):'—'],['Volume activity',r.flow?f(r.flow.volumeRatio,2)+'x':'—'],['Flow status',flowTrend(r)],['Setup type',r.setupType||'—'],['Key level',r.sweep?fp(r.sweep.level):r.momentum?fp(r.momentum.level):'—'],['Stop structure',r.sweep?fp(r.sweep.extreme):r.momentum?fp(r.momentum.extreme):'—'],['5m confirmation',r.plan?.ck?new Date(r.plan.ck).toLocaleTimeString():'—'],['Size',' $'+f(p.nt,0)],['Leverage',f(p.lev,2)+'x']].map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td></tr>`).join('')}</table>
+  <table class="kv">${[['Entry',fp(p.en)],['Stop',fp(p.stop)],['TP1 ('+f(p.tp1pct,1)+'%)',fp(p.tp1)],['Final TP ('+f(p.tp2pct,1)+'%)',fp(p.tp2)],['Target R:R','1 : '+f(p.rr,1)],['Historical 4h P80',f(p.move4h,2)+'%'],['Flow 1h',r.flow?flowPct(r.flow.oneHour):'—'],['Flow 3h',r.flow?flowPct(r.flow.threeHour):'—'],['Volume activity',r.flow?f(r.flow.volumeRatio,2)+'x':'—'],['Flow status',flowTrend(r)],['Setup type',r.setupType||'—'],['RSI 5m / 15m / 1h',r.rsi?[r.rsi.r5,r.rsi.r15,r.rsi.r1h].map(x=>f(x,1)).join(' / '):'—'],['OI change 1h',r.oi?f(r.oi.percent,2)+'%':'Not checked'],['Key level',r.plan?.structureLevel?fp(r.plan.structureLevel):'—'],['Stop structure',r.plan?.structureExtreme?fp(r.plan.structureExtreme):'—'],['5m confirmation',r.plan?.ck?new Date(r.plan.ck).toLocaleTimeString():'—'],['Size',' $'+f(p.nt,0)],['Leverage',f(p.lev,2)+'x']].map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td></tr>`).join('')}</table>
   <button class="p" data-a="take" data-s="${r.sym}" ${bl||t?'disabled':''}>${t?'Tracking':'Track this trade'}</button><button class="p" type="button" data-a="chart" data-s="${r.sym}" style="margin-top:7px">View chart with Entry / TP / SL</button></div>`}
+function renderRsiHeatmap(){
+  const L=Object.values(R),hot=L.filter(r=>r.rsi&&Number.isFinite(r.rsi.r15)&&Number.isFinite(r.rsi.r1h));
+  const scans=hot.length;
+  $('rsiUpdated').textContent=(busy?'During scan · ':'')+scans+' coins with RSI data · OI lookups '+oiLookups+'/'+MAX_OI_LOOKUPS_PER_SCAN;
+  for(const side of ['long','short']){
+    const list=hot.filter(r=>r.rsi.hotDir===side)
+      .sort((a,b)=>side==='long'?b.rsi.scoreLong-a.rsi.scoreLong:b.rsi.scoreShort-a.rsi.scoreShort).slice(0,50);
+    $(side==='long'?'rsiLongNum':'rsiShortNum').textContent=list.length+' candidates';
+    const rows=list.map(r=>{
+      const p=r.rsi,score=side==='long'?p.scoreLong:p.scoreShort;
+      const status=r.status==='confirm'?'CONFIRMED':r.status==='watch'?'Watchlist':r.status==='error'?'Data error':'RSI candidate';
+      return '<tr><td>'+tv(r.sym)+'</td><td>'+f(p.r5,1)+'</td><td>'+f(p.r15,1)+'</td>'+
+        '<td>'+f(p.r1h,1)+'</td><td>'+f(p.d15,1)+'</td>'+
+        '<td><span class="rsi-score '+(side==='long'?'hot-long':'hot-short')+'">'+score+'</span></td>'+
+        '<td>'+status+'</td></tr>';
+    });
+    $(side==='long'?'rsiLong':'rsiShort').innerHTML=tbl(
+      ['Coin','RSI 5m','RSI 15m','RSI 1h','15m Δ','RSI rank','Signal status'],rows,
+      'No '+(side==='long'?'oversold recoveries':'overbought reversals')+' found in this scan.');
+  }
+}
 function render(){
   const watchScroll=$('wl').scrollTop,longScroll=$('cl').scrollTop,shortScroll=$('cs').scrollTop,feedScroll=$('scanRecent').scrollTop;
   $('sot').hidden=!$('showot').checked;$('smk').hidden=!$('showmk').checked;
@@ -534,9 +629,9 @@ function render(){
   const wlAll=L.filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).sort((a,b)=>{const m=r=>r.G?r.G.filter(g=>!g.ok).length:9;return m(a)-m(b)||(a.dist??9)-(b.dist??9)});
 const wl=wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).slice(0,watchLimit);
 $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).length+' coins · scroll for more';
-  $('wl').innerHTML=tbl(['','Coin','Side','Price','24h vol','1h flow','3h flow','Vol trend','Flow status','4h move P80','Target','Zone distance','Status','Still missing'],wl.map(r=>{
+  $('wl').innerHTML=tbl(['','Coin','Side','Price','RSI 15m','RSI 1h','OI 1h','Method','24h vol','1h flow','3h flow','Vol trend','Flow status','4h move P80','Target','Zone distance','Status','Still missing'],wl.map(r=>{
     const miss=r.G?r.G.filter(g=>!g.ok).map(g=>g.t):[];
-    return`<tr><td>${star(r.sym)}</td><td>${tv(r.sym)}</td><td>${r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'<span class="mut">none</span>'}</td><td>${fp(M[r.sym].p)}</td><td>${f(r.vol/1e6,0)}M</td><td>${r.flow?flowPct(r.flow.oneHour):'–'}</td><td>${r.flow?flowPct(r.flow.threeHour):'–'}</td><td>${r.flow?f(r.flow.volumeRatio,2)+'x':'–'}</td><td>${r.flow?flowTrend(r):'–'}</td><td>${r.move4h?f(r.move4h,2)+'%':'–'}</td><td>${r.plan?f(r.plan.tp2pct,2)+'%':'–'}</td><td>${r.dist!=null?f(r.dist,2)+'%':'–'}</td><td>${r.status==='confirm'?pill(r.dir==='long'?'pl':'ps','CONFIRMED'):r.status==='watch'?pill('pw','In zone'):r.status==='trend'?pill('pn','Trend only'):pill('pn','No bias')}</td><td class="mut">${r.status==='confirm'?'Nothing':miss.length?miss.join(', '):r.status==='trend'?'Waiting for pullback to zone':'–'}</td></tr>`}),'Nothing in the zone yet. Pin coins with the star to follow them.');
+    return`<tr><td>${star(r.sym)}</td><td>${tv(r.sym)}</td><td>${r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'<span class="mut">none</span>'}</td><td>${fp(M[r.sym].p)}</td><td>${r.rsi?f(r.rsi.r15,1):'–'}</td><td>${r.rsi?f(r.rsi.r1h,1):'–'}</td><td>${r.oi?f(r.oi.percent,2)+'%':'–'}</td><td>${r.setupType||'—'}</td><td>${f(r.vol/1e6,0)}M</td><td>${r.flow?flowPct(r.flow.oneHour):'–'}</td><td>${r.flow?flowPct(r.flow.threeHour):'–'}</td><td>${r.flow?f(r.flow.volumeRatio,2)+'x':'–'}</td><td>${r.flow?flowTrend(r):'–'}</td><td>${r.move4h?f(r.move4h,2)+'%':'–'}</td><td>${r.plan?f(r.plan.tp2pct,2)+'%':'–'}</td><td>${r.dist!=null?f(r.dist,2)+'%':'–'}</td><td>${r.status==='confirm'?pill(r.dir==='long'?'pl':'ps','CONFIRMED'):r.status==='watch'?pill('pw','In zone'):r.status==='trend'?pill('pn','Trend only'):pill('pn','No bias')}</td><td class="mut">${r.status==='confirm'?'Nothing':miss.length?miss.join(', '):r.status==='trend'?'Waiting for pullback to zone':'–'}</td></tr>`}),'Nothing in the zone yet. Pin coins with the star to follow them.');
   $('wl').scrollTop=watchScroll;
   $('ot').innerHTML=tbl(['Coin','Side','Entry','Now','Stop','TP1','TP2','Live R','Age',''],st.open.map(o=>{const px=M[o.sym]&&M[o.sym].p,sg=o.dir==='long'?1:-1,rn=px?(px-o.en)*sg/Math.abs(o.en-o.stop0):null;
     return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp1)}${o.tp1h?' ✓':''}</td><td>${fp(o.tp2)}</td><td class="${rn>=0?'long-t':'short-t'}">${f(rn)} R</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td><button data-a="close" data-s="${o.id}">Close</button></td></tr>`}),'No open trades. Use “Track this trade” on a confirmed signal.');
@@ -547,7 +642,7 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
   const ord={confirm:0,watch:1,trend:2,none:3};
   $('mkn').textContent=L.length+' coins scanned';
   $('mk').innerHTML=tbl(['','Coin','Price','24h','24h volume','15m bias','Stage'],[...L].sort((a,b)=>ord[a.status]-ord[b.status]||b.vol-a.vol).map(r=>`<tr><td>${star(r.sym)}</td><td>${tv(r.sym)}</td><td>${fp(M[r.sym].p)}</td><td class="${r.chg>=0?'long-t':'short-t'}">${f(r.chg)}%</td><td>${f(r.vol/1e6,0)}M</td><td>${r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'<span class="mut">none</span>'}</td><td>${r.status==='confirm'?pill(r.dir==='long'?'pl':'ps','CONFIRMED'):r.status==='watch'?pill('pw','In zone'):r.status==='trend'?pill('pn','Trend only'):pill('pn','–')}</td></tr>`),'Waiting for the first scan.');
-  renderScanProgress();$('scanRecent').scrollTop=feedScroll;
+  renderScanProgress();$('scanRecent').scrollTop=feedScroll;renderRsiHeatmap();
 }
 function eq(){
   const cv=$('eq'),d=devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;cv.width=w*d;cv.height=h*d;const x=cv.getContext('2d');x.scale(d,d);
