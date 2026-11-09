@@ -299,7 +299,8 @@ async function getTickers(){
 // Remote laptop snapshots replace browser-only tracking when available.
 let remoteMode=!!window.CRYPTO_LOCAL_SERVER||localStorage.getItem('cryptoLaptopActivated')==='1',
     remoteSource=window.CRYPTO_LOCAL_SERVER?'local':remoteMode?'cloud':'browser',
-    remoteOnline=false,remoteLastSeen=null,remoteHistoryTruncated=false;
+    remoteOnline=false,remoteLastSeen=null,remoteHistoryTruncated=false,
+    remoteMarketFresh=false,remoteLastPriceAt=null;
 let st={hist:[],open:[],pins:[],trackedKeys:{},set:{}};
 try{st=Object.assign(st,JSON.parse(localStorage.getItem('scan1')||'{}'))}catch(e){}
 if(!Array.isArray(st.open))st.open=[];
@@ -498,19 +499,26 @@ function renderScanInspector(){
     COMPLETE_WITH_ERRORS:'COMPLETED WITH ERRORS',RATE_LIMITED:'RATE LIMITED',
     PARTIAL:'PARTIAL SCAN',NO_DATA:'NO MARKET DATA',ERROR:'SCAN ERROR',
     UNKNOWN:'STATUS NOT YET AVAILABLE',IDLE:'NOT STARTED'};
-  $('scanPhase').textContent=(labels[phase]||phase)+(remoteMode&&!remoteOnline?' · OFFLINE':'');
+  const scanBadge=remoteMode&&!remoteOnline?'SERVER DISCONNECTED':
+    remoteMode&&!remoteMarketFresh&&phase==='RUNNING'?'WAITING FOR EXCHANGE PRICES':
+    labels[phase]||phase;
+  $('scanPhase').textContent=scanBadge;
   $('scanBar').max=Math.max(1,total);
   $('scanBar').value=Math.max(0,Math.min(processed,total||1));
   const stamp=last?new Date(last).toLocaleString():'None yet';
   const message=remoteMode?(meta.scanMessage||
     'This laptop may be running an older scanner version; update it for detailed diagnostics.'):
     running?'Scanning exchange candles':last?'Last scan completed':'Preparing initial scan';
-  $('scanDescription').textContent=message+' · Last completed: '+stamp+
+  $('scanDescription').textContent=
+    (remoteMode&&remoteOnline&&!remoteMarketFresh?
+      'Exchange prices not updating — saved scan shown. ':'')+
+    message+' · Last completed: '+stamp+
     (meta.lastScanDurationSec?' · '+meta.lastScanDurationSec+' sec':'')+
     (!running&&meta.nextScanAt?' · Next scheduled '+new Date(meta.nextScanAt).toLocaleTimeString():'');
   const data=[
     ['Processed',processed+' / '+(total||'?')],
-    ['Evaluated',analyzed],['Stored coin data',results.length],
+    ['Evaluated this scan',analyzed],
+    ['Last scan evaluated',meta.lastScanAnalyzed??'—'],['Saved coin data',results.length],
     ['Confirmed',results.filter(x=>x.status==='confirm').length],
     ['Watching',results.filter(x=>x.status==='watch').length],
     ['Errors',failures],['Insufficient candles',insufficient]
@@ -521,7 +529,10 @@ function renderScanInspector(){
   let notes=errors.map(x=>safe(x.message)).join(' · ');
   if(phase==='RATE_LIMITED'&&meta.scanRateLimitedUntil)
     notes+=' · Exchange cooldown until '+new Date(meta.scanRateLimitedUntil).toLocaleTimeString();
-  if(remoteMode&&!remoteOnline)notes+=(notes?' · ':'')+'Laptop disconnected: last saved results shown';
+  if(remoteMode&&!remoteOnline)
+    notes+=(notes?' · ':'')+'Laptop server unavailable; previous data only';
+  else if(remoteMode&&!remoteMarketFresh)
+    notes+=(notes?' · ':'')+'Laptop server is running, but exchange price data is stale. Trade monitoring cannot update from stale marks.';
   $('scanIssues').innerHTML=notes?'<b>Diagnostics:</b> '+notes:'';
   const list=results.filter(r=>(scanFilter==='all'||r.status===scanFilter)&&
     String(r.sym||'').toLowerCase().includes(scanQuery));
@@ -544,9 +555,17 @@ function renderScanInspector(){
     const status=r.status==='confirm'?'CONFIRMED':r.status==='watch'?'WATCHLIST':
       r.status==='none'?'Not confirmed':r.status==='insufficient'?'Not enough data':
       r.status==='error'?'Data error':safe(r.status);
-    const price=M[r.sym]?.p;
+    const market=M[r.sym];
+    const isLive=!remoteMode||(
+      remoteOnline&&remoteMarketFresh&&market&&Number(market.at)>0&&
+      Date.now()-Number(market.at)<45000);
+    const livePrice=isLive?Number(market?.p):null;
+    const storedPrice=Number(r.price);
+    const priceCell=Number.isFinite(livePrice)&&livePrice>0?fp(livePrice):
+      Number.isFinite(storedPrice)&&storedPrice>0?
+        '<span title="Last analyzed price — NOT live">'+fp(storedPrice)+' (saved)</span>':'—';
     return '<tr><td>'+link+'</td><td>'+safe(r.dir||'—')+'</td><td>'+
-      (Number.isFinite(price)?fp(price):'—')+'</td><td>'+safe(c.name||'—')+
+      priceCell+'</td><td>'+safe(c.name||'—')+
       '</td><td>'+(Number.isFinite(c.volumeRatio)?f(c.volumeRatio,2)+'×':'—')+
       '</td><td>'+(Number.isFinite(r.fundingPct)?f(r.fundingPct,4)+'%':'—')+
       '</td><td>'+(Number.isFinite(r.score)?f(r.score,0):'—')+
@@ -572,13 +591,17 @@ function render(){
   $('dot').className='dot '+(err?'bad':lastScan?'ok':'');
   if(remoteMode){
     const origin=remoteSource==='local'?'Windows laptop server':'Windows laptop via Render';
-    $('stat').textContent=origin+' · '+(remoteOnline?'connected':'offline / last saved data')+
-      ' · '+L.length+' coins · '+st.open.length+' open · '+st.hist.length+' results';
+    const feedState=!remoteOnline?'server disconnected':
+      remoteMarketFresh?'server connected, exchange feed current':
+      'server connected, exchange feed delayed';
+    $('stat').textContent=origin+' · '+feedState+
+      ' · '+L.length+' saved coins · '+st.open.length+' saved open trades · '+st.hist.length+' results';
     $('serverMode').hidden=false;
-    $('serverMode').className='server-mode'+(remoteOnline?'':' offline');
+    $('serverMode').className='server-mode'+(remoteOnline&&remoteMarketFresh?'':' offline');
     $('serverMode').innerHTML='<strong>'+origin+'</strong> · '+
-      (remoteOnline?(scanMeta?.scanning?'Scanner currently processing markets':'Laptop connected; waiting for next scan'):
-      'Laptop disconnected or sleeping — live scanning unavailable')+
+      (!remoteOnline?'Laptop server connection unavailable — showing last saved data':
+       !remoteMarketFresh?'Laptop server is running, but exchange prices are stale / rate limited. Monitoring of simulated trades cannot update without fresh prices':
+       scanMeta?.scanning?'Scanner currently processing markets':'Laptop server and exchange feed connected')+
       (remoteLastSeen?' · last report '+new Date(remoteLastSeen).toLocaleString():'')+
       (remoteHistoryTruncated?' · online view shows recent history; full record stays on laptop':'');
     $('settingsPanel').hidden=remoteSource==='cloud';
@@ -590,7 +613,9 @@ function render(){
     if(!busy)$('stat').textContent=lastScan?XN()+' futures · last scan '+lastScan.toLocaleTimeString()+' · '+L.length+' coins · took '+dur+'s'+(scanFailures?' · '+scanFailures+' data errors':''):'Starting…';
   }
   $('ban').innerHTML=err?`<div class="ban err">${err}</div>`:'';
-  $('kpi').innerHTML=[['Long signals',cl.length],['Short signals',cs.length],['Watching',L.filter(r=>r.status==='watch').length],['Open trades',st.open.length],['Today',t.length+' trades'],['Today result',f(dr)+' R']].map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join('');
+  $('kpi').innerHTML=[['Long signals',cl.length],['Short signals',cs.length],['Watching',L.filter(r=>r.status==='watch').length],
+    [remoteMode&&!remoteMarketFresh?'Saved open trades':'Open trades',st.open.length],
+    ['Today',t.length+' trades'],['Today result',f(dr)+' R']].map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join('');
   $('cl').innerHTML=cl.length?cl.map(r=>card(r)).join(''):'<div class="empty">No confirmed long setups right now.</div>';
   $('cs').innerHTML=cs.length?cs.map(r=>card(r)).join(''):'<div class="empty">No confirmed short setups right now.</div>';
   $('cl').scrollTop=longScroll;$('cs').scrollTop=shortScroll;
@@ -610,8 +635,15 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
    '</td><td class="mut">'+(r.status==='confirm'?'Nothing missing':miss.join(', ')||'—')+'</td></tr>';
  }), 'No candidates yet.');
     $('wl').scrollTop=watchScroll;
-  $('ot').innerHTML=tbl(['Coin','Side','Entry','Now','Stop','Final TP','Live R','Age','View trade chart',''],st.open.map(o=>{const px=M[o.sym]&&M[o.sym].p,sg=o.dir==='long'?1:-1,rn=px?(px-o.en)*sg/Math.abs(o.en-o.stop0):null;
-    return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp2)}</td><td class="${rn>=0?'long-t':'short-t'}">${f(rn)} R</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td>${trackedChartButton(o,'open')}</td><td>${remoteMode?'Auto':'<button data-a="close" data-s="'+o.id+'">Close</button>'}</td></tr>`}),'No open trades yet. Every new confirmed signal is enrolled automatically while this dashboard is running.');
+  $('ot').innerHTML=tbl(['Coin','Side','Entry','Now','Stop','Final TP','Live R','Age','View trade chart',''],st.open.map(o=>{
+    const market=M[o.sym];
+    const fresh=!remoteMode||(
+      remoteOnline&&remoteMarketFresh&&market&&Number(market.at)>0&&
+      Date.now()-Number(market.at)<45000);
+    const px=fresh&&Number.isFinite(Number(market?.p))&&Number(market.p)>0?Number(market.p):null;
+    const sg=o.dir==='long'?1:-1,risk=Math.abs(o.en-o.stop0);
+    const rn=px!=null&&risk>0?(px-o.en)*sg/risk:null;
+    return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${px==null?'— (stale)':fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp2)}</td><td class="${rn==null?'mut':rn>=0?'long-t':'short-t'}">${rn==null?'—':f(rn)+' R'}</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td>${trackedChartButton(o,'open')}</td><td>${remoteMode?'Auto':'<button data-a="close" data-s="'+o.id+'">Close</button>'}</td></tr>`}),'No open trades yet. Every new confirmed signal is enrolled automatically while this dashboard is running.');
   const H=st.hist,w=H.filter(x=>x.r>0),lo=H.filter(x=>x.r<=0),tr=H.reduce((a,x)=>a+x.r,0),gl=Math.abs(lo.reduce((a,x)=>a+x.r,0));
   $('stats').innerHTML=[['Total registered',Object.keys(st.trackedKeys).length],['Closed results',H.length],['Auto-tracked open',st.open.length],['Win rate',H.length?f(w.length/H.length*100,0)+'%':'–'],['Total R',f(tr)],['Total P&L','$'+f(H.reduce((a,x)=>a+x.pnl,0))],['Avg R',H.length?f(tr/H.length):'–'],['Profit factor',gl?f(w.reduce((a,x)=>a+x.r,0)/gl):'–']].map(x=>`<span>${x[0]}: <b>${x[1]}</b></span>`).join('');
   $('allResults').hidden=H.length<=100;
@@ -672,6 +704,9 @@ $('ex').onchange=async()=>{
 function adoptLaptop(snapshot,source,online,lastSeen){
  if(!snapshot||!Array.isArray(snapshot.results)||!Array.isArray(snapshot.open)||!Array.isArray(snapshot.history))return false;
  remoteMode=true;remoteSource=source;remoteOnline=online;remoteLastSeen=lastSeen;
+ remoteLastPriceAt=Number(snapshot.lastPriceAt)||null;
+ remoteMarketFresh=!!(remoteOnline&&remoteLastPriceAt&&
+   Date.now()-remoteLastPriceAt>=0&&Date.now()-remoteLastPriceAt<45000);
  if(source==='cloud')try{localStorage.setItem('cryptoLaptopActivated','1')}catch(_){};
  remoteHistoryTruncated=!!snapshot.historyTruncated;
  scanMeta=snapshot;
@@ -704,8 +739,9 @@ async function remotePoll(){
    data=await response.json();
   }finally{clearTimeout(timer)}
   if(local){
-    adoptLaptop(data,'local',!!data.lastPriceAt&&Date.now()-data.lastPriceAt<45000,
-      data.lastPriceAt||data.lastScanAt);
+    // A successful localhost response proves the laptop server is running.
+    // Market-feed freshness is tracked separately from server connectivity.
+    adoptLaptop(data,'local',true,Date.now());
   }else if(data.snapshot){
     adoptLaptop(data.snapshot,'cloud',!!data.connected,data.lastSeen);
   }else if(remoteMode&&remoteSource==='cloud'){
