@@ -103,8 +103,8 @@
    return {status:'Glassnode live',direction,ageMinutes:age,netflow:net,ratio,
      oiChangePct:oi,participation,source:'Glassnode API / Studio metrics'};
  }
- function evaluate({bars15,bars5,mark,fundingPct,maxFunding=0.05,maxStop=0.4,targetPct=2.8,
-                    account=2000,risk=0.5,maxLev=5,fee=0.075,glassnode=null}){
+ function evaluate({bars15,bars5,mark,fundingPct,maxFunding=0.05,
+                    account=2000,risk=0.5,fee=0.075,glassnode=null}){
    const insufficient=!(bars15?.length>=64&&bars5?.length>=40&&ok(mark)&&mark>0);
    if(insufficient)return {status:'none',side:null,reason:'Insufficient closed candles',checks:[],score:0};
    const rsi=mapRSI(bars15,bars5),gn=glassnodeBias(glassnode);
@@ -122,35 +122,42 @@
      const glassnodeOK=!opposite;
      const participationOK=gn.status==='Glassnode live'&&gn.direction===side&&
         gn.oiChangePct!=null&&gn.oiChangePct>=1.5;
+     // Structure defines SL; risk/reward is always 1:3, not a fixed percent.
+     // Neither stop distance nor projected leverage may reject an otherwise
+     // qualified confluence signal. Estimated exposure is INFORMATIONAL only.
      const stop=pattern?pattern.extreme-sg*Math.max(mark*.00035,pattern.atr*.12):null;
-     const stopPct=stop&&sg*(mark-stop)>0?Math.abs(mark-stop)/mark*100:null;
-     const priceOK=!!pattern&&sg*(mark-pattern.confirmClose)>=-pattern.atr*.4&&
+     const structureCorrect=pattern&&Number.isFinite(stop)&&sg*(mark-stop)>0;
+     const riskDistance=structureCorrect?Math.abs(mark-stop):null;
+     const stopPct=structureCorrect?riskDistance/mark*100:null;
+     const priceOK=!!pattern&&!!structureCorrect&&
+       sg*(mark-pattern.confirmClose)>=-pattern.atr*.4&&
        sg*(mark-pattern.confirmClose)<=Math.max(pattern.atr*.8,mark*.003);
-     const stopOK=ok(stopPct)&&stopPct>0&&stopPct<=maxStop;
-     const rr=stopOK?targetPct/stopPct:null;
-     const rrOK=ok(rr)&&rr>=3;
-     const leverage=stopPct>0?(account*risk/100/(stopPct/100))/account:null;
-     const levOK=ok(leverage)&&leverage<=maxLev;
+     const rr=3;
+     const targetPct=structureCorrect?stopPct*3:null;
+     const entry=mark;
+     // TP1 is retained only for compatibility with stored trade shapes.
+     // A 3R trade now exits the full position at TP2 (final target).
+     const tp2=structureCorrect?mark+sg*3*riskDistance:null;
+     const tp1=tp2;
+     const cashRisk=Math.max(0,Number(account)*Number(risk)/100);
+     const nt=structureCorrect&&stopPct>0?cashRisk/(stopPct/100):null;
+     const leverage=Number(account)>0&&nt!=null?nt/Number(account):null;
      const checkItems=[
        {ok:rsiOK,t:'RSI 5m/15m/1h alignment'},
        {ok:candleOK,t:'Closed candlestick pattern + confirmation'},
-       {ok:volOK,t:'Volume at least 1.30x the recent baseline'},
+       {ok:volOK,t:'Volume at least 1.30x recent baseline'},
        {ok:fundingOK,t:'Funding rate within risk limits'},
        {ok:glassnodeOK,t:'Glassnode netflow does not strongly contradict'},
-       {ok:priceOK,t:'Price close enough to confirmed candle'},
-       {ok:stopOK,t:'Stop beyond candle structure within risk limit'},
-       {ok:rrOK,t:'Final target at least 3R'},
-       {ok:levOK,t:'Maximum leverage respected'}
+       {ok:priceOK,t:'Price close enough to confirmed candle and stop on correct side'}
      ];
      const qualified=checkItems.every(x=>x.ok);
-     const score=Math.round(20*Number(rsiOK)+20*Number(candleOK)+20*Number(volOK)+
-       15*Number(fundingOK)+10*Number(glassnodeOK)+5*Number(priceOK)+
-       5*Number(stopOK)+5*Number(rrOK)+3*Number(participationOK));
-     const entry=mark,tp1=mark*(1+sg*targetPct/200),tp2=mark*(1+sg*targetPct/100);
-     const nt=stopPct>0?(account*risk/100)/(stopPct/100):null;
-     const plan=pattern?{en:entry,stop,tp1,tp2,sp:stopPct,r$:account*risk/100,nt,
-       lev:leverage,ck:pattern.confirmTime,rr,tp1pct:targetPct/2,tp2pct:targetPct,
-       setupType:'RSI + Candle + Volume + Funding',structureExtreme:pattern.extreme}:null;
+     const score=Math.min(100,Math.round(25*Number(rsiOK)+25*Number(candleOK)+
+       25*Number(volOK)+15*Number(fundingOK)+5*Number(glassnodeOK)+
+       5*Number(priceOK)+3*Number(participationOK)));
+     const plan=pattern&&structureCorrect?{en:entry,stop,tp1,tp2,sp:stopPct,r$:cashRisk,nt,
+       lev:leverage,ck:pattern.confirmTime,rr,tp1pct:targetPct,tp2pct:targetPct,
+       targetMode:'fixed3r',setupType:'RSI + Candle + Volume + Funding',
+       structureExtreme:pattern.extreme}:null;
      return {side,status:qualified?'confirm':rsiOK?'watch':'none',
        score:Math.min(100,score),rsi,pattern,glassnode:gn,fundingPct,volumeRatio:pattern?.volumeRatio??null,
        checks:checkItems,G:checkItems,plan,setupType:'Unified confluence',ok:qualified,
