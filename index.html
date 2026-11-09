@@ -87,6 +87,7 @@ input,select{background:#122030;color:var(--ink);border-color:#40556c}
     <label>Risk % per trade<input id="risk" type="number" step="0.1" value="0.5"></label>
     <label>Max leverage<input id="maxlev" type="number" value="5"></label>
     <label>Max stop %<input id="maxstop" type="number" step="0.05" value="0.4"></label>
+    <label>Minimum target move (%)<input id="mintp" type="number" min="1" max="15" step="0.1" value="2.8"></label>
     <label>Funding limit %<input id="fundlim" type="number" step="0.01" value="0.05"></label>
     <label>Zone tolerance %<input id="tol" type="number" step="0.01" value="0.05"></label>
     <label>Fees maker+taker %<input id="fee" type="number" step="0.005" value="0.075"></label>
@@ -108,12 +109,12 @@ input,select{background:#122030;color:var(--ink);border-color:#40556c}
   <section><h2>Confirmed SHORT <small id="ns"></small></h2><div class="cards" id="cs"></div></section>
 </div>
 
-<section><h2>Watchlist <small>click a coin name to open it in TradingView</small></h2><p class="mut" style="margin:0 0 8px;font-size:12.5px"><b>These are NOT confirmed trades.</b> They have a 15m trend and price is near the 5m value zone, but rules are still missing (last column). A coin becomes a trade only when it shows <b>CONFIRMED</b> with “Nothing” missing, and then it moves into the Confirmed LONG / SHORT boxes at the top. Closest to confirming is listed first.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
+<section><h2>Watchlist <small>click a coin name to open it in TradingView</small></h2><p class="mut" style="margin:0 0 8px;font-size:12.5px"><b>These are NOT confirmed trades.</b> Extended targets require enough historical 4-hour volatility; a target is not a guaranteed move. They have a 15m trend and price is near the 5m value zone, but rules are still missing (last column). A coin becomes a trade only when it shows <b>CONFIRMED</b> with “Nothing” missing, and then it moves into the Confirmed LONG / SHORT boxes at the top. Closest to confirming is listed first.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 <section id="sot"><h2>Open trades <small>tracked automatically against live mark price</small></h2><div class="tw" id="ot"></div></section>
 <section><h2>Trade result history <span><button id="clearHistory" type="button">Clear history</button> <button id="csv" type="button">Export CSV</button></span></h2>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
 <section id="smk"><h2>Market scan <small id="mkn"></small></h2><div class="tw" id="mk"></div></section>
-<p class="mut" style="font-size:12px">Signals and tracked trades are simulated: the dashboard never places orders. Results use mark-price polling and include your fee setting, so real fills can differ. Educational tool, not financial advice.</p>
+<p class="mut" style="font-size:12px">Targets are planned levels, not guaranteed outcomes. The historical 4h P80 move is a screening statistic, not a forecast. Signals and tracked trades are simulated: the dashboard never places orders. Results use mark-price polling and include your fee setting, so real fills can differ. Educational tool, not financial advice.</p>
 </main>
 <script>
 const $=i=>document.getElementById(i),n=i=>parseFloat($(i).value);
@@ -142,7 +143,7 @@ async function getTickers(){
 let st={hist:[],open:[],pins:[],set:{}};
 try{st=Object.assign(st,JSON.parse(localStorage.getItem('scan1')||'{}'))}catch(e){}
 const save=()=>{try{localStorage.setItem('scan1',JSON.stringify(st))}catch(e){}};
-const IDS=['ex','acct','risk','maxlev','maxstop','fundlim','tol','fee','minvol','topn','every'];
+const IDS=['ex','acct','risk','maxlev','maxstop','mintp','fundlim','tol','fee','minvol','topn','every'];
 if(st.set.v!==4){st.set.v=4;st.set.topn=600;st.set.minvol=0;st.set.every=300;st.set.ex='bybit';save()}
 IDS.forEach(i=>{if(st.set[i]!=null)$(i).value=st.set[i]});
 try{banUntil=+localStorage.getItem('ban_'+EX())||0}catch(e){}
@@ -156,6 +157,17 @@ function rej(c,p,dir){const body=Math.abs(c.c-c.o),rg=c.h-c.l;if(rg<=0)return fa
   if(dir==='long'){const w=Math.min(c.o,c.c)-c.l;return(w>=Math.max(2*body,.5*rg)&&c.c>=c.l+.6*rg)||(c.c>c.o&&p.c<p.o&&c.c>=p.o&&c.o<=p.c)}
   const w=c.h-Math.max(c.o,c.c);return(w>=Math.max(2*body,.5*rg)&&c.c<=c.h-.6*rg)||(c.c<c.o&&p.c>p.o&&c.c<=p.o&&c.o>=p.c)}
 
+// Historical 4h P80 absolute move; a capacity screen, not a prediction.
+function historical4hMovePct(bars){
+  const values=[];
+  for(let i=48;i<bars.length;i++){
+    const start=bars[i-48].c,end=bars[i].c;
+    if(start>0&&end>0)values.push(Math.abs((end/start-1)*100));
+  }
+  if(values.length<40)return 0;
+  values.sort((a,b)=>a-b);
+  return values[Math.floor((values.length-1)*0.8)];
+}
 function evalLive(r,k1,px){
   const G=[],add=(ok,t)=>G.push({ok,t}),dir=r.dir,m=k1.length,C=k1[m-2],Rj=k1[m-3],P=k1[m-4],tol=n('tol')/100;
   add(Rj.l<=r.zh*(1+tol)&&Rj.h>=r.zl*(1-tol),'Pullback touched value zone');
@@ -167,9 +179,15 @@ function evalLive(r,k1,px){
   const stop=dir==='long'?Math.min(...sl.map(c=>c.l))*(1-buf):Math.max(...sl.map(c=>c.h))*(1+buf);
   const R1=Math.abs(px-stop),sp=R1/px*100,sg=dir==='long'?1:-1;
   add((dir==='long'?stop<px:stop>px)&&sp<=n('maxstop'),'Stop wider than '+n('maxstop')+'%');
-  add(sp>0&&2*sp>=3*n('fee'),'Target below 3x fees');
-  const r$=n('acct')*n('risk')/100,nt=sp>0?r$/(sp/100):Infinity,lev=nt/n('acct');add(lev<=n('maxlev'),'Leverage above cap');
-  return{G,ok:G.every(g=>g.ok),plan:{en:px,stop,tp1:px+sg*R1,tp2:px+sg*2*R1,sp,r$,nt,lev,ck:C.t}};
+  const targetPct=Math.min(15,Math.max(1,n('mintp')||2.8));
+  const observedMove=r.move4h||0;
+  add(observedMove>=targetPct,'Historical 4h movement below '+f(targetPct,1)+'%');
+  add(sp>0&&targetPct/sp>=3,'Target risk/reward below 3R');
+  add(sp>0&&targetPct>=3*n('fee'),'Target too small after fees');
+  const r$=n('acct')*n('risk')/100,nt=sp>0?r$/(sp/100):Infinity,lev=nt/n('acct');add(Number.isFinite(nt)&&lev<=n('maxlev'),'Leverage above cap');
+  const tp1=px*(1+sg*targetPct/200),tp2=px*(1+sg*targetPct/100);
+  return{G,ok:G.every(g=>g.ok),plan:{en:px,stop,tp1,tp2,sp,r$,nt,lev,ck:C.t,
+    tp1pct:targetPct/2,tp2pct:targetPct,rr:sp>0?targetPct/sp:0,move4h:observedMove}};
 }
 let lim=false,dur=0,scanTotal=0,scanDone=0,scanFailures=0;
 let activeScanCoins=new Set(),recentScans=[],liveRenderTimer=null;
@@ -217,7 +235,7 @@ async function scan(){
     await pool(list,async x=>{
       const s=x.symbol,r=res[s],k15=await K(s,'15m',99);if(k15.length<25)return;r.dir=bias(k15.slice(0,-1));if(!r.dir)return;r.status='trend';
       const k5raw=await K(s,'5m',300);if(k5raw.length<25)return;const k5=k5raw.slice(0,-1),e9=ema(k5,9),e21=ema(k5,21),v5=vwap(k5);if(v5==null)return;
-      r.zl=Math.min(e9,e21,v5);r.zh=Math.max(e9,e21,v5);
+      r.move4h=historical4hMovePct(k5);r.zl=Math.min(e9,e21,v5);r.zh=Math.max(e9,e21,v5);
       const px=M[s].p;r.dist=px<r.zl?(r.zl-px)/px*100:px>r.zh?(px-r.zh)/px*100:0;
       if(r.dist>0.4)return;r.status='watch';
       const k1=await K(s,'1m',40);if(k1.length<25)return;Object.assign(r,evalLive(r,k1,px));if(r.ok)r.status='confirm';
@@ -253,7 +271,7 @@ function blocked(){
 }
 function take(s){
   const r=R[s];if(!r||r.status!=='confirm'||blocked()||st.open.some(t=>t.sym===s))return;
-  const p=r.plan;st.open.push({id:Date.now(),sym:s,dir:r.dir,en:p.en,stop:p.stop,stop0:p.stop,tp1:p.tp1,tp2:p.tp2,sp:p.sp,r$:p.r$,open:Date.now(),tp1h:false});save();render();
+  const p=r.plan;st.open.push({id:Date.now(),sym:s,dir:r.dir,en:p.en,stop:p.stop,stop0:p.stop,tp1:p.tp1,tp2:p.tp2,sp:p.sp,r$:p.r$,open:Date.now(),tp1h:false,targetMode:'extended',horizonMs:4*3600000});save();render();
 }
 function closeT(t,why,px,gross){
   const net=gross-n('fee')/t.sp;
@@ -262,12 +280,18 @@ function closeT(t,why,px,gross){
 }
 function monitor(){
   for(const t of [...st.open]){
-    const px=M[t.sym]&&M[t.sym].p;if(!px){if(Date.now()-t.open>3600000){st.open=st.open.filter(x=>x.id!==t.id);save()}continue}
-    const sg=t.dir==='long'?1:-1,R1=Math.abs(t.en-t.stop0),now=(px-t.en)*sg/R1;
-    if((px-t.stop)*sg<=0)closeT(t,t.tp1h?'Stopped at breakeven after TP1':'Stop loss',px,t.tp1h?.5:-1);
-    else if((px-t.tp2)*sg>=0)closeT(t,'TP2 hit',px,1.5);
-    else if((px-t.tp1)*sg>=0&&!t.tp1h){t.tp1h=true;t.stop=t.en;save()}
-    else if(!t.tp1h&&Date.now()-t.open>15*60000)closeT(t,'Time stop (15 min)',px,now);
+    const px=M[t.sym]&&M[t.sym].p;
+    if(!(px>0))continue;
+    const dir=t.dir==='long'?1:-1,unit=Math.abs(t.en-t.stop0);
+    if(!(unit>0))continue;
+    const currentR=(px-t.en)*dir/unit,extended=t.targetMode==='extended';
+    const firstR=(t.tp1-t.en)*dir/unit,lastR=(t.tp2-t.en)*dir/unit;
+    const limit=extended?(t.horizonMs||4*3600000):15*60000;
+    const partialR=t.tp1h?(extended?0.5*firstR+0.5*currentR:0.5+0.5*currentR):currentR;
+    if((px-t.stop)*dir<=0)closeT(t,t.tp1h?'Stopped at breakeven after TP1':'Stop loss',px,t.tp1h?(extended?0.5*firstR:0.5):-1);
+    else if((px-t.tp2)*dir>=0)closeT(t,extended?'Final TP reached':'TP2 hit',px,extended?0.5*(firstR+lastR):1.5);
+    else if((px-t.tp1)*dir>=0&&!t.tp1h){t.tp1h=true;t.stop=t.en;save()}
+    else if(Date.now()-t.open>limit)closeT(t,extended?'Time stop (4 hours)':'Time stop (15 min)',px,partialR);
   }
 }
 function ws(){const w=new WebSocket('wss://fstream.binance.com/ws/!markPrice@arr@1s');w.onmessage=e=>{try{for(const x of JSON.parse(e.data)){const m=M[x.s]||(M[x.s]={});m.p=+x.p;m.fr=+x.r*100}}catch(_){}};w.onclose=()=>setTimeout(ws,5000);w.onerror=()=>w.close()}
@@ -278,7 +302,7 @@ const star=s=>`<button class="ic" data-a="pin" data-s="${s}" title="Pin to watch
 const tbl=(h,rows,e)=>rows.length?`<table><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr>${rows.join('')}</table>`:`<div class="empty">${e}</div>`;
 function card(r,bl){const p=r.plan,t=st.open.some(x=>x.sym===r.sym);
   return`<div class="card ${r.dir}"><div class="ch">${tv(r.sym)}${star(r.sym)}<span class="m">${fp(M[r.sym].p)}</span></div>
-  <table class="kv">${[['Entry',fp(p.en)],['Stop',fp(p.stop)],['TP1 (1R)',fp(p.tp1)],['TP2 (2R)',fp(p.tp2)],['Size',' $'+f(p.nt,0)],['Leverage',f(p.lev,2)+'x']].map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td></tr>`).join('')}</table>
+  <table class="kv">${[['Entry',fp(p.en)],['Stop',fp(p.stop)],['TP1 ('+f(p.tp1pct,1)+'%)',fp(p.tp1)],['Final TP ('+f(p.tp2pct,1)+'%)',fp(p.tp2)],['Target R:R','1 : '+f(p.rr,1)],['Historical 4h P80',f(p.move4h,2)+'%'],['Size',' $'+f(p.nt,0)],['Leverage',f(p.lev,2)+'x']].map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td></tr>`).join('')}</table>
   <button class="p" data-a="take" data-s="${r.sym}" ${bl||t?'disabled':''}>${t?'Tracking':'Track this trade'}</button></div>`}
 function render(){
   const watchScroll=$('wl').scrollTop,longScroll=$('cl').scrollTop,shortScroll=$('cs').scrollTop,feedScroll=$('scanRecent').scrollTop;
@@ -295,9 +319,9 @@ function render(){
   const wlAll=L.filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).sort((a,b)=>{const m=r=>r.G?r.G.filter(g=>!g.ok).length:9;return m(a)-m(b)||(a.dist??9)-(b.dist??9)});
 const wl=wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).slice(0,watchLimit);
 $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).length+' coins · scroll for more';
-  $('wl').innerHTML=tbl(['','Coin','Side','Price','24h vol','Zone distance','Status','Still missing'],wl.map(r=>{
+  $('wl').innerHTML=tbl(['','Coin','Side','Price','24h vol','4h move P80','Target','Zone distance','Status','Still missing'],wl.map(r=>{
     const miss=r.G?r.G.filter(g=>!g.ok).map(g=>g.t):[];
-    return`<tr><td>${star(r.sym)}</td><td>${tv(r.sym)}</td><td>${r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'<span class="mut">none</span>'}</td><td>${fp(M[r.sym].p)}</td><td>$${f(r.vol/1e6,0)}M</td><td>${r.dist!=null?f(r.dist,2)+'%':'–'}</td><td>${r.status==='confirm'?pill(r.dir==='long'?'pl':'ps','CONFIRMED'):r.status==='watch'?pill('pw','In zone'):r.status==='trend'?pill('pn','Trend only'):pill('pn','No bias')}</td><td class="mut">${r.status==='confirm'?'Nothing':miss.length?miss.join(', '):r.status==='trend'?'Waiting for pullback to zone':'–'}</td></tr>`}),'Nothing in the zone yet. Pin coins with the star to follow them.');
+    return`<tr><td>${star(r.sym)}</td><td>${tv(r.sym)}</td><td>${r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'<span class="mut">none</span>'}</td><td>${fp(M[r.sym].p)}</td><td>${f(r.vol/1e6,0)}M</td><td>${r.move4h?f(r.move4h,2)+'%':'–'}</td><td>${r.plan?f(r.plan.tp2pct,2)+'%':'–'}</td><td>${r.dist!=null?f(r.dist,2)+'%':'–'}</td><td>${r.status==='confirm'?pill(r.dir==='long'?'pl':'ps','CONFIRMED'):r.status==='watch'?pill('pw','In zone'):r.status==='trend'?pill('pn','Trend only'):pill('pn','No bias')}</td><td class="mut">${r.status==='confirm'?'Nothing':miss.length?miss.join(', '):r.status==='trend'?'Waiting for pullback to zone':'–'}</td></tr>`}),'Nothing in the zone yet. Pin coins with the star to follow them.');
   $('wl').scrollTop=watchScroll;
   $('ot').innerHTML=tbl(['Coin','Side','Entry','Now','Stop','TP1','TP2','Live R','Age',''],st.open.map(o=>{const px=M[o.sym]&&M[o.sym].p,sg=o.dir==='long'?1:-1,rn=px?(px-o.en)*sg/Math.abs(o.en-o.stop0):null;
     return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp1)}${o.tp1h?' ✓':''}</td><td>${fp(o.tp2)}</td><td class="${rn>=0?'long-t':'short-t'}">${f(rn)} R</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td><button data-a="close" data-s="${o.id}">Close</button></td></tr>`}),'No open trades. Use “Track this trade” on a confirmed signal.');
@@ -320,7 +344,7 @@ function eq(){
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,s=b.dataset.s;
   if(a==='pin'){st.pins=st.pins.includes(s)?st.pins.filter(x=>x!==s):[...st.pins,s];save();render()}
   else if(a==='take')take(s);
-  else if(a==='close'){const t=st.open.find(x=>x.id==s),px=t&&M[t.sym]&&M[t.sym].p;if(t&&px){const sg=t.dir==='long'?1:-1,g=(px-t.en)*sg/Math.abs(t.en-t.stop0);closeT(t,'Closed manually',px,(t.tp1h?.5+.5*g:g));render()}}
+  else if(a==='close'){const t=st.open.find(x=>x.id==s),px=t&&M[t.sym]&&M[t.sym].p;if(t&&px){const sg=t.dir==='long'?1:-1,g=(px-t.en)*sg/Math.abs(t.en-t.stop0),r1=(t.tp1-t.en)*sg/Math.abs(t.en-t.stop0),net=t.tp1h?(t.targetMode==='extended'?0.5*r1+0.5*g:0.5+0.5*g):g;closeT(t,'Closed manually',px,net);render()}}
 });
 $('watchSearch').addEventListener('input',()=>{watchQuery=$('watchSearch').value.trim().toLowerCase();watchLimit=50;$('wl').scrollTop=0;render()});
 $('wl').addEventListener('scroll',()=>{const el=$('wl');if(el.scrollTop+el.clientHeight>=el.scrollHeight-90){const all=Object.values(R).filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).filter(r=>r.sym.toLowerCase().includes(watchQuery));if(watchLimit<all.length){const pos=el.scrollTop;watchLimit+=50;render();el.scrollTop=pos}}});
