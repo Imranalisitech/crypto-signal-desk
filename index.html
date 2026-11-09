@@ -480,6 +480,90 @@ function card(r){
     recorded?'✓ Result recorded automatically':'✓ Signal registered for automatic tracking')+'</div>'+
   '<button class="p" data-a="chart" data-s="'+r.sym+'" style="margin-top:7px">View Entry / SL / TP chart</button></div>';
 }
+function renderScanInspector(){
+  const meta=scanMeta||{},results=Object.values(R);
+  const phase=remoteMode?(meta.scanPhase||(meta.scanning?'RUNNING':'UNKNOWN')):
+    busy?'RUNNING':lastScan?'COMPLETE':'IDLE';
+  const running=remoteMode?!!meta.scanning:!!busy;
+  const processed=remoteMode?Number(meta.scanned)||0:
+    (busy?Number(String(prog).split('/')[0])||0:results.length);
+  const total=remoteMode?Number(meta.scanTotal)||0:
+    (busy?Number(String(prog).split('/')[1])||0:results.length);
+  const analyzed=remoteMode?Number(meta.scanAnalyzed)||0:
+    results.filter(x=>x.status!=='error'&&x.status!=='insufficient').length;
+  const failures=remoteMode?Number(meta.scanFailures)||0:scanFailures;
+  const insufficient=remoteMode?Number(meta.scanInsufficient)||0:0;
+  const last=meta.lastScanAt||(lastScan?.getTime())||null;
+  const labels={RUNNING:'SCANNING',COMPLETE:'COMPLETE',
+    COMPLETE_WITH_ERRORS:'COMPLETED WITH ERRORS',RATE_LIMITED:'RATE LIMITED',
+    PARTIAL:'PARTIAL SCAN',NO_DATA:'NO MARKET DATA',ERROR:'SCAN ERROR',
+    UNKNOWN:'STATUS NOT YET AVAILABLE',IDLE:'NOT STARTED'};
+  $('scanPhase').textContent=(labels[phase]||phase)+(remoteMode&&!remoteOnline?' · OFFLINE':'');
+  $('scanBar').max=Math.max(1,total);
+  $('scanBar').value=Math.max(0,Math.min(processed,total||1));
+  const stamp=last?new Date(last).toLocaleString():'None yet';
+  const message=remoteMode?(meta.scanMessage||
+    'This laptop may be running an older scanner version; update it for detailed diagnostics.'):
+    running?'Scanning exchange candles':last?'Last scan completed':'Preparing initial scan';
+  $('scanDescription').textContent=message+' · Last completed: '+stamp+
+    (meta.lastScanDurationSec?' · '+meta.lastScanDurationSec+' sec':'')+
+    (!running&&meta.nextScanAt?' · Next scheduled '+new Date(meta.nextScanAt).toLocaleTimeString():'');
+  const data=[
+    ['Processed',processed+' / '+(total||'?')],
+    ['Evaluated',analyzed],['Stored coin data',results.length],
+    ['Confirmed',results.filter(x=>x.status==='confirm').length],
+    ['Watching',results.filter(x=>x.status==='watch').length],
+    ['Errors',failures],['Insufficient candles',insufficient]
+  ];
+  $('scanCounters').innerHTML=data.map(x=>'<span>'+x[0]+': <b>'+x[1]+'</b></span>').join('');
+  const safe=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const errors=Array.isArray(meta.errors)?meta.errors.slice(-3).reverse():[];
+  let notes=errors.map(x=>safe(x.message)).join(' · ');
+  if(phase==='RATE_LIMITED'&&meta.scanRateLimitedUntil)
+    notes+=' · Exchange cooldown until '+new Date(meta.scanRateLimitedUntil).toLocaleTimeString();
+  if(remoteMode&&!remoteOnline)notes+=(notes?' · ':'')+'Laptop disconnected: last saved results shown';
+  $('scanIssues').innerHTML=notes?'<b>Diagnostics:</b> '+notes:'';
+  const list=results.filter(r=>(scanFilter==='all'||r.status===scanFilter)&&
+    String(r.sym||'').toLowerCase().includes(scanQuery));
+  const order={confirm:0,watch:1,none:2,insufficient:3,error:4};
+  list.sort((a,b)=>(order[a.status]??5)-(order[b.status]??5)||
+    (Number(b.score)||0)-(Number(a.score)||0)||String(a.sym).localeCompare(String(b.sym)));
+  $('scanListCount').textContent=list.length+' of '+results.length+' coins';
+  const displayed=list.slice(0,scanLimit);
+  $('scanMore').hidden=displayed.length===list.length;
+  $('scanMore').textContent='Show more ('+displayed.length+'/'+list.length+')';
+  const rows=displayed.map(r=>{
+    const sym=String(r.sym||''),name=safe(sym),c=r.pattern||{};
+    const link=/^[A-Z0-9]{2,30}$/.test(sym)?
+      '<a href="https://www.tradingview.com/chart/?symbol='+
+      encodeURIComponent(($('ex').value==='binance'?'BINANCE':'BYBIT')+':'+sym+'.P')+
+      '" target="_blank" rel="noopener noreferrer">'+name+'</a>':name;
+    const failures=Array.isArray(r.G)?r.G.filter(x=>!x.ok).map(x=>x.t):[];
+    const reason=safe(r.reason||failures.join('; ')||(r.status==='confirm'?
+      'All checks passed':'Not confirmed by signal filters'));
+    const status=r.status==='confirm'?'CONFIRMED':r.status==='watch'?'WATCHLIST':
+      r.status==='none'?'Not confirmed':r.status==='insufficient'?'Not enough data':
+      r.status==='error'?'Data error':safe(r.status);
+    const price=M[r.sym]?.p;
+    return '<tr><td>'+link+'</td><td>'+safe(r.dir||'—')+'</td><td>'+
+      (Number.isFinite(price)?fp(price):'—')+'</td><td>'+safe(c.name||'—')+
+      '</td><td>'+(Number.isFinite(c.volumeRatio)?f(c.volumeRatio,2)+'×':'—')+
+      '</td><td>'+(Number.isFinite(r.fundingPct)?f(r.fundingPct,4)+'%':'—')+
+      '</td><td>'+(Number.isFinite(r.score)?f(r.score,0):'—')+
+      '</td><td>'+status+'</td><td class="mut">'+reason+'</td></tr>';
+  });
+  const scroll=$('scanCoinTable').scrollTop;
+  $('scanCoinTable').innerHTML=tbl(
+    ['Coin','Side','Price','Candle','Volume','Funding','Score','Result','Analysis / reason'],rows,
+    running?'Scan in progress; previous results remain visible until analysis completes.':
+    'No stored coin results yet. Check the scanner diagnostics above.');
+  $('scanCoinTable').scrollTop=scroll;
+  const recent=Array.isArray(meta.scanRecent)?meta.scanRecent.slice(0,4):[];
+  $('scanHelp').textContent=(running?'Current scan is processing markets. ':'')+
+    'This list includes scanned coins that did not qualify, not just confirmed trades. '+
+    'Zero watchlist candidates does not mean zero coins were analyzed.'+
+    (recent.length?' · Recently scanned: '+recent.map(x=>x.sym).join(', '):'');
+}
 function render(){
   const watchScroll=$('wl').scrollTop,longScroll=$('cl').scrollTop,shortScroll=$('cs').scrollTop;
   $('sot').hidden=!$('showot').checked;
