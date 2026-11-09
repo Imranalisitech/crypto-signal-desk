@@ -71,7 +71,6 @@ input,select{background:#122030;color:var(--ink);border-color:#40556c}
 .watch-tools small{color:var(--mut)}
 .rsi-link{display:inline-flex;align-items:center;padding:7px 13px;border-radius:7px;color:#fff;text-decoration:none;font-weight:700;background:linear-gradient(110deg,#137f8e,#4657ac)}
 @media(max-width:850px){header>div:last-child{position:static;justify-content:center;flex-wrap:wrap}}
-.scan-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.scan-mode{display:flex;flex-direction:column;gap:9px;padding:12px;border:1px solid var(--line);border-radius:9px;background:#132233}.scan-mode small{color:var(--mut)}.scan-mode button{min-height:36px}.scan-controls h2{margin-bottom:12px}@media(max-width:700px){.scan-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -92,14 +91,14 @@ input,select{background:#122030;color:var(--ink);border-color:#40556c}
     <label>Fees maker+taker %<input id="fee" type="number" step="0.005" value="0.075"></label>
     <label>Min 24h volume ($M)<input id="minvol" type="number" value="0"></label>
     <label>Max coins to scan<input id="topn" type="number" value="600"></label>
-    <label>Scan every (sec)<input id="every" type="number" value="90"></label>
+    <label>Scan every (sec)<input id="every" type="number" value="300" disabled></label>
     <label class="c"><input type="checkbox" id="news"> Major news window (block)</label>
     <label class="c"><input type="checkbox" id="sess" checked> Enforce 08–21 UTC</label>
     <label class="c"><input type="checkbox" id="showot"> Show Open trades panel</label>
     <label class="c"><input type="checkbox" id="showmk"> Show Market scan table</label>
   </div>
 </details>
-<section class="scan-controls"><h2>Scanning controls <small>Manual and automatic modes can be enabled independently</small></h2><div class="scan-grid"><div class="scan-mode"><label class="c"><input type="checkbox" id="manualEnabled" checked> Enable manual scan</label><label>Minimum time between manual scans (seconds)<input id="manualCooldown" type="number" min="20" max="3600" step="10" value="90"></label><button id="manualScan" type="button">Scan now</button><small id="manualInfo">Ready for manual scan</small></div><div class="scan-mode"><label class="c"><input type="checkbox" id="autoEnabled" checked> Enable auto scan</label><label>Automatic scan interval (seconds)<input id="autoInterval" type="number" min="30" max="86400" step="30" value="90"></label><button id="autoToggle" type="button">Disable auto scan</button><small id="autoInfo">Auto scan enabled</small></div></div></section><div id="ban"></div>
+<div id="ban"></div>
 <div class="kpi" id="kpi"></div>
 
 <div class="two">
@@ -142,33 +141,11 @@ let st={hist:[],open:[],pins:[],set:{}};
 try{st=Object.assign(st,JSON.parse(localStorage.getItem('scan1')||'{}'))}catch(e){}
 const save=()=>{try{localStorage.setItem('scan1',JSON.stringify(st))}catch(e){}};
 const IDS=['ex','acct','risk','maxlev','maxstop','fundlim','tol','fee','minvol','topn','every'];
-if(st.set.v!==4){st.set.v=4;st.set.topn=600;st.set.minvol=0;st.set.every=90;st.set.ex='bybit';save()}
+if(st.set.v!==4){st.set.v=4;st.set.topn=600;st.set.minvol=0;st.set.every=300;st.set.ex='bybit';save()}
 IDS.forEach(i=>{if(st.set[i]!=null)$(i).value=st.set[i]});
 try{banUntil=+localStorage.getItem('ban_'+EX())||0}catch(e){}
 $('showot').checked=!!st.set.showot;$('showmk').checked=!!st.set.showmk;
 let R={},M={},seen=new Set(),audio=null,notif=false,busy=false,lastScan=null,err='',prog='';let watchLimit=50,watchQuery='',watchKey='';
-let scanTimer=null,lastManualStart=0,manualCountdown=null;
-const scanSettings=Object.assign({manualEnabled:true,autoEnabled:true,manualCooldown:90,autoInterval:90},st.set.scanModes||{});
-function saveScanSettings(){st.set.scanModes={...scanSettings};save()}
-function scheduleAuto(delay){
-  clearTimeout(scanTimer);scanTimer=null;
-  if(!scanSettings.autoEnabled)return;
-  scanTimer=setTimeout(()=>scan('auto'),Math.max(1000,delay));
-}
-function updateScanControls(){
-  $('manualEnabled').checked=scanSettings.manualEnabled;
-  $('autoEnabled').checked=scanSettings.autoEnabled;
-  $('manualCooldown').value=scanSettings.manualCooldown;
-  $('autoInterval').value=scanSettings.autoInterval;
-  const remaining=Math.max(0,Math.ceil((lastManualStart+scanSettings.manualCooldown*1000-Date.now())/1000));
-  $('manualScan').disabled=!scanSettings.manualEnabled||busy||remaining>0;
-  $('manualScan').textContent=busy?'Scanning…':'Scan now';
-  $('manualInfo').textContent=!scanSettings.manualEnabled?'Manual scanning disabled':busy?'Scan in progress':remaining?'Next manual scan in '+remaining+'s':'Ready for manual scan';
-  $('autoToggle').textContent=scanSettings.autoEnabled?'Disable auto scan':'Enable auto scan';
-  $('autoInfo').textContent=scanSettings.autoEnabled?'Auto scanning every '+scanSettings.autoInterval+'s':'Auto scanning paused';
-}
-
-
 const ema=(cs,p)=>{const k=2/(p+1);let e=cs[0].c;for(let i=1;i<cs.length;i++)e=cs[i].c*k+e*(1-k);return e};
 const vwap=cs=>{const d=new Date(),d0=Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate());let a=0,b=0;for(const c of cs)if(c.t>=d0){a+=(c.h+c.l+c.c)/3*c.v;b+=c.v}return b?a/b:null};
 function bias(k){const p=k[k.length-1].c,e9=ema(k,9),e21=ema(k,21),v=vwap(k);if(v==null)return null;
@@ -195,17 +172,10 @@ function evalLive(r,k1,px){
 let lim=false,dur=0;
 async function pool(items,fn,c=10){let i=0,d=0;await Promise.all(Array(c).fill(0).map(async()=>{while(i<items.length){const it=items[i++];try{await fn(it)}catch(e){if(/429|418/.test(e.message))lim=true}prog=(++d)+'/'+items.length;$('stat').textContent='Scanning '+prog}}))}
 
-async function scan(mode='manual'){
+async function scan(){
   if(busy)return;
-  if(mode==='auto'&&!scanSettings.autoEnabled)return;
-  if(mode==='manual'){
-    if(!scanSettings.manualEnabled)return;
-    if(Date.now()<lastManualStart+scanSettings.manualCooldown*1000)return;
-    lastManualStart=Date.now();
-  }
-  clearTimeout(scanTimer);scanTimer=null;
-  if(Date.now()<banUntil){err=banMsg();render();updateScanControls();scheduleAuto(banUntil-Date.now()+5000);return}
-  busy=true;updateScanControls();const t0=Date.now();let wait=Math.max(30,scanSettings.autoInterval);
+  if(Date.now()<banUntil){err=banMsg();render();setTimeout(scan,banUntil-Date.now()+5000);return}
+  busy=true;const t0=Date.now();let wait=300;
   try{
     const tk=await getTickers();
     const list=tk.filter(x=>x.symbol.endsWith('USDT')&&!/[_-]/.test(x.symbol)&&x.vol>=n('minvol')*1e6&&M[x.symbol]&&M[x.symbol].p>0).sort((a,b)=>b.vol-a.vol).slice(0,n('topn'));
@@ -223,7 +193,7 @@ async function scan(mode='manual'){
     const bl=blocked();
     Object.values(R).filter(r=>r.status==='confirm').forEach(r=>{const k=r.sym+r.plan.ck;if(!seen.has(k)){seen.add(k);if(!bl)fire(r)}});
   }catch(e){if(Date.now()<banUntil){err=banMsg();wait=(banUntil-Date.now())/1000+5}else err='Could not load '+XN()+' data: '+e.message+'. Check your connection or VPN; retrying.'}
-  busy=false;render();updateScanControls();scheduleAuto(wait*1000);
+  busy=false;render();setTimeout(scan,wait*1000);
 }
 function fire(r){
   if(audio){try{const o=audio.createOscillator(),g=audio.createGain();o.connect(g);g.connect(audio.destination);o.frequency.value=r.dir==='long'?880:520;g.gain.value=.15;o.start();o.stop(audio.currentTime+.35)}catch(e){}}
@@ -315,14 +285,7 @@ $('alert').onclick=async()=>{audio=audio||new(window.AudioContext||window.webkit
 $('csv').onclick=()=>{const rows=[['closed','coin','side','entry','exit','R','pnl_usd','reason'],...st.hist.map(x=>[new Date(x.close).toISOString(),x.sym,x.dir,x.en,x.ex,x.r.toFixed(3),x.pnl.toFixed(2),x.why])];
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([rows.map(r=>r.join(',')).join('\n')],{type:'text/csv'}));a.download='trade-history.csv';a.click()};
 $('ex').onchange=()=>{st.set.ex=$('ex').value;save();location.reload()};
-$('manualEnabled').addEventListener('change',()=>{scanSettings.manualEnabled=$('manualEnabled').checked;saveScanSettings();updateScanControls()});
-$('autoEnabled').addEventListener('change',()=>{scanSettings.autoEnabled=$('autoEnabled').checked;saveScanSettings();updateScanControls();if(scanSettings.autoEnabled)scheduleAuto(1000);else clearTimeout(scanTimer)});
-$('manualCooldown').addEventListener('change',()=>{scanSettings.manualCooldown=Math.max(20,Math.min(3600,Number($('manualCooldown').value)||90));saveScanSettings();updateScanControls()});
-$('autoInterval').addEventListener('change',()=>{scanSettings.autoInterval=Math.max(30,Math.min(86400,Number($('autoInterval').value)||90));saveScanSettings();updateScanControls();if(scanSettings.autoEnabled&&!busy)scheduleAuto(scanSettings.autoInterval*1000)});
-$('manualScan').addEventListener('click',()=>scan('manual'));
-$('autoToggle').addEventListener('click',()=>{$('autoEnabled').checked=!scanSettings.autoEnabled;$('autoEnabled').dispatchEvent(new Event('change'))});
-setInterval(updateScanControls,1000);
-render();updateScanControls();if(scanSettings.autoEnabled)scheduleAuto(1000);
+render();scan();
 if(EX()==='binance')ws();else setInterval(async()=>{if(Date.now()<banUntil||busy)return;try{await getTickers()}catch(e){}},5000);
 setInterval(()=>{monitor();render()},5000);
 </script>
