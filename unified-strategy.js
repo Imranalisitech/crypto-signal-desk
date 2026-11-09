@@ -1,7 +1,7 @@
 'use strict';
-/* Single composite LONG/SHORT strategy:
-   RSI heatmap + closed-candle pattern + volume + funding + optional licensed
-   Glassnode netflow/open-interest context. No legacy signal engines. */
+/* Single active LONG/SHORT strategy:
+   Exchange-calculated RSI (5m/15m/1h) + closed candlestick patterns +
+   exchange volume + real futures funding rates. No inactive data sources. */
 (function(root){
  const ok=Number.isFinite;
  const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
@@ -84,30 +84,11 @@
       r.r15>=23&&r.r15<=59&&r.d15>=.25&&r.r5>=30&&r.r5<=70&&r.d5>.4&&r.r1h<=67:
       r.r15>=41&&r.r15<=77&&r.d15<=-.25&&r.r5>=30&&r.r5<=70&&r.d5<-.4&&r.r1h>=33;
  }
- // Glassnode Studio time-series metrics are licensed API data.
- // Positive exchange netflow may indicate distribution / potential sell pressure;
- // negative exchange netflow may indicate withdrawal / reduced sell pressure.
- // Neither implies causation or identifies the direction of any specific trade.
- function glassnodeBias(gn){
-   if(!gn)return {status:'Exchange-only',direction:null,ageMinutes:null,source:'No licensed metric'};
-   if(gn.status!=='available')return {status:'Glassnode unavailable',direction:null,ageMinutes:null,
-     source:String(gn.reason||'No licensed reading').slice(0,110)};
-   const net=Number(gn.netflow),base=Number(gn.netflowBaseline);
-   const age=Number(gn.ageMinutes);
-   if(!ok(net)||!ok(base)||base<=0||!ok(age)||age< -10||age>240)
-     return {status:'Glassnode stale',direction:null,ageMinutes:ok(age)?age:null,source:'Metric too old for trading'};
-   const ratio=net/base;
-   const direction=ratio<=-1?'long':ratio>=1?'short':null;
-   const oi=(gn.oiChangePct!=null&&ok(Number(gn.oiChangePct)))?Number(gn.oiChangePct):null;
-   const participation=oi==null?'OI unavailable':oi>=1.5?'OI rising':oi<=-1.5?'OI falling':'OI stable';
-   return {status:'Glassnode live',direction,ageMinutes:age,netflow:net,ratio,
-     oiChangePct:oi,participation,source:'Glassnode API / Studio metrics'};
- }
  function evaluate({bars15,bars5,mark,fundingPct,maxFunding=0.05,
-                    account=2000,risk=0.5,fee=0.075,glassnode=null}){
+                    account=2000,risk=0.5}){
    const insufficient=!(bars15?.length>=64&&bars5?.length>=40&&ok(mark)&&mark>0);
    if(insufficient)return {status:'none',side:null,reason:'Insufficient closed candles',checks:[],score:0};
-   const rsi=mapRSI(bars15,bars5),gn=glassnodeBias(glassnode);
+   const rsi=mapRSI(bars15,bars5);
    const evaluated=['long','short'].map(side=>{
      const sg=side==='long'?1:-1;
      const pattern=candlestick(bars5,side);
@@ -116,12 +97,6 @@
      const fundingOK=ok(fundingPct)&&Math.abs(fundingPct)<=Math.max(0,maxFunding)&&
        (side==='long'?fundingPct<=maxFunding:fundingPct>=-maxFunding);
      const candleOK=!!pattern;
-     // Only a fresh, sizable *opposing* exchange netflow reading blocks a
-     // trade. Open interest affects context/score but cannot prove whale buying.
-     const opposite=gn.status==='Glassnode live'&&gn.direction&&gn.direction!==side;
-     const glassnodeOK=!opposite;
-     const participationOK=gn.status==='Glassnode live'&&gn.direction===side&&
-        gn.oiChangePct!=null&&gn.oiChangePct>=1.5;
      // Structure defines SL; risk/reward is always 1:3, not a fixed percent.
      // Neither stop distance nor projected leverage may reject an otherwise
      // qualified confluence signal. Estimated exposure is INFORMATIONAL only.
@@ -147,19 +122,17 @@
        {ok:candleOK,t:'Closed candlestick pattern + confirmation'},
        {ok:volOK,t:'Volume at least 1.30x recent baseline'},
        {ok:fundingOK,t:'Funding rate within risk limits'},
-       {ok:glassnodeOK,t:'Glassnode netflow does not strongly contradict'},
        {ok:priceOK,t:'Price close enough to confirmed candle and stop on correct side'}
      ];
      const qualified=checkItems.every(x=>x.ok);
      const score=Math.min(100,Math.round(25*Number(rsiOK)+25*Number(candleOK)+
-       25*Number(volOK)+15*Number(fundingOK)+5*Number(glassnodeOK)+
-       5*Number(priceOK)+3*Number(participationOK)));
+       25*Number(volOK)+15*Number(fundingOK)+10*Number(priceOK)));
      const plan=pattern&&structureCorrect?{en:entry,stop,tp1,tp2,sp:stopPct,r$:cashRisk,nt,
        lev:leverage,ck:pattern.confirmTime,rr,tp1pct:targetPct,tp2pct:targetPct,
        targetMode:'fixed3r',setupType:'RSI + Candle + Volume + Funding',
        structureExtreme:pattern.extreme}:null;
      return {side,status:qualified?'confirm':rsiOK?'watch':'none',
-       score:Math.min(100,score),rsi,pattern,glassnode:gn,fundingPct,volumeRatio:pattern?.volumeRatio??null,
+       score,rsi,pattern,fundingPct,volumeRatio:pattern?.volumeRatio??null,
        checks:checkItems,G:checkItems,plan,setupType:'Unified confluence',ok:qualified,
        reason:qualified?'Confluence confirmed':checkItems.filter(x=>!x.ok).map(x=>x.t).join('; ')};
    });
@@ -170,5 +143,5 @@
      return {...top,status:'watch',ok:false,reason:'Conflicting LONG/SHORT confirmation'};
    return top;
  }
- root.UnifiedStrategy=Object.freeze({rsiSeries,mapRSI,candlestick,rsiAligned,glassnodeBias,evaluate});
+ root.UnifiedStrategy=Object.freeze({rsiSeries,mapRSI,candlestick,rsiAligned,evaluate});
 })(window);
