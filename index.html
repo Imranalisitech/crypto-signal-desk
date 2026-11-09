@@ -72,6 +72,28 @@ input,select{background:#122030;color:var(--ink);border-color:#40556c}
 .rsi-link{display:inline-flex;align-items:center;padding:7px 13px;border-radius:7px;color:#fff;text-decoration:none;font-weight:700;background:linear-gradient(110deg,#137f8e,#4657ac)}
 @media(max-width:850px){header>div:last-child{position:static;justify-content:center;flex-wrap:wrap}}
 .scan-feed{margin-bottom:12px}.scan-feed-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.scan-feed-head small{color:var(--mut)}.scan-now{margin:5px 0 10px;color:var(--mut);font-size:12.5px;overflow-wrap:anywhere}.scan-recent{max-height:240px;overflow-y:auto;scrollbar-color:#6883a3 #172535}.scan-recent td{white-space:nowrap}.scan-stage{font-weight:700}
+
+.trade-chart-modal[hidden]{display:none!important}
+.trade-chart-modal{position:fixed;inset:0;z-index:500;background:rgba(3,8,15,.88);display:flex;align-items:center;justify-content:center;padding:14px}
+.trade-chart-dialog{width:min(1160px,98vw);max-height:96vh;overflow:auto;background:#142130;border:1px solid #47607e;box-shadow:0 24px 75px #000a;border-radius:14px;padding:16px}
+.trade-chart-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.trade-chart-header h2{font-size:20px;margin:0}
+.trade-chart-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.trade-chart-actions a{color:#b8d8ff}
+.trade-chart-levels{display:flex;gap:9px;flex-wrap:wrap;margin:10px 0;font-variant-numeric:tabular-nums}
+.trade-chart-levels>span{padding:6px 11px;border:1px solid #37506b;border-radius:7px;background:#1e3045}
+.trade-chart-levels .good{color:#56e2b5}.trade-chart-levels .bad{color:#ff8793}.trade-chart-levels .entry{color:#9bcaff}
+.trade-chart-view{position:relative;width:100%;height:min(65vh,620px);min-height:350px;background:#0b1423;border-radius:9px;overflow:hidden}
+#tradeChartCanvas,#tradeChartOverlay{position:absolute;inset:0}
+#tradeChartOverlay{pointer-events:none;z-index:2}
+.trade-chart-zone{position:absolute;border:1px solid;opacity:.85}
+.trade-chart-zone.gain{background:rgba(0,152,111,.24);border-color:rgba(35,219,150,.68)}
+.trade-chart-zone.loss{background:rgba(197,40,64,.23);border-color:rgba(246,89,106,.7)}
+.trade-chart-zone span{position:absolute;right:5px;top:5px;padding:3px 6px;border-radius:4px;color:#fff;background:#122032ea;font-size:11px;font-weight:700}
+.trade-chart-status{color:#a8bad0;font-size:12px;margin:8px 0 1px}
+button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9fb7d0;color:inherit;font-weight:800;font-size:16px}
+.card[data-a="chart"]{cursor:pointer}
+.card[data-a="chart"]:focus-visible{outline:2px solid #7db8ff;outline-offset:3px}
 </style>
 </head>
 <body>
@@ -116,6 +138,27 @@ input,select{background:#122030;color:var(--ink);border-color:#40556c}
 <section id="smk"><h2>Market scan <small id="mkn"></small></h2><div class="tw" id="mk"></div></section>
 <p class="mut" style="font-size:12px">Targets are planned levels, not guaranteed outcomes. The historical 4h P80 move is a screening statistic, not a forecast. Signals and tracked trades are simulated: the dashboard never places orders. Results use mark-price polling and include your fee setting, so real fills can differ. Educational tool, not financial advice.</p>
 </main>
+<div id="tradeChartModal" class="trade-chart-modal" hidden>
+  <div id="tradeChartDialog" class="trade-chart-dialog" role="dialog" aria-modal="true" aria-labelledby="tradeChartTitle" tabindex="-1">
+    <div class="trade-chart-header">
+      <h2 id="tradeChartTitle">Confirmed trade chart</h2>
+      <div class="trade-chart-actions">
+        <a id="tradeChartTV" target="_blank" rel="noopener noreferrer" href="https://www.tradingview.com/">Open full TradingView chart</a>
+        <button id="closeTradeChart" type="button" aria-label="Close trade chart">✕ Close</button>
+      </div>
+    </div>
+    <div id="tradeChartLevels" class="trade-chart-levels"></div>
+    <div class="trade-chart-view">
+      <div id="tradeChartCanvas"></div>
+      <div id="tradeChartOverlay">
+        <div id="tradeChartGain" class="trade-chart-zone gain"><span>TP zone</span></div>
+        <div id="tradeChartLoss" class="trade-chart-zone loss"><span>SL zone</span></div>
+      </div>
+    </div>
+    <div id="tradeChartStatus" class="trade-chart-status">Loading 5-minute market candles…</div>
+    <div class="trade-chart-status">Interactive chart powered by <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">TradingView Lightweight Charts</a>. Entry, stop and targets are from the selected confirmed trade. These areas are visual guides, not orders.</div>
+  </div>
+</div>
 <script>
 const $=i=>document.getElementById(i),n=i=>parseFloat($(i).value);
 const f=(x,d=2)=>x==null||!isFinite(x)?'–':(+x).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
@@ -302,9 +345,9 @@ const pill=(c,t)=>`<span class="pill ${c}">${t}</span>`;
 const star=s=>`<button class="ic" data-a="pin" data-s="${s}" title="Pin to watchlist">${st.pins.includes(s)?'★':'☆'}</button>`;
 const tbl=(h,rows,e)=>rows.length?`<table><tr>${h.map(x=>`<th>${x}</th>`).join('')}</tr>${rows.join('')}</table>`:`<div class="empty">${e}</div>`;
 function card(r,bl){const p=r.plan,t=st.open.some(x=>x.sym===r.sym);
-  return`<div class="card ${r.dir}"><div class="ch">${tv(r.sym)}${star(r.sym)}<span class="m">${fp(M[r.sym].p)}</span></div>
+  return`<div class="card ${r.dir}" data-a="chart" data-s="${r.sym}" role="button" tabindex="0" aria-label="Open ${r.sym} confirmed trade chart with entry, stop and targets"><div class="ch"><button type="button" class="coin-chart" data-a="chart" data-s="${r.sym}" title="Open confirmed entry/TP/SL chart">${nm(r.sym)}</button>${star(r.sym)}<span class="m">${fp(M[r.sym].p)}</span></div>
   <table class="kv">${[['Entry',fp(p.en)],['Stop',fp(p.stop)],['TP1 ('+f(p.tp1pct,1)+'%)',fp(p.tp1)],['Final TP ('+f(p.tp2pct,1)+'%)',fp(p.tp2)],['Target R:R','1 : '+f(p.rr,1)],['Historical 4h P80',f(p.move4h,2)+'%'],['Size',' $'+f(p.nt,0)],['Leverage',f(p.lev,2)+'x']].map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td></tr>`).join('')}</table>
-  <button class="p" data-a="take" data-s="${r.sym}" ${bl||t?'disabled':''}>${t?'Tracking':'Track this trade'}</button></div>`}
+  <button class="p" data-a="take" data-s="${r.sym}" ${bl||t?'disabled':''}>${t?'Tracking':'Track this trade'}</button><button class="p" type="button" data-a="chart" data-s="${r.sym}" style="margin-top:7px">View chart with Entry / TP / SL</button></div>`}
 function render(){
   const watchScroll=$('wl').scrollTop,longScroll=$('cl').scrollTop,shortScroll=$('cs').scrollTop,feedScroll=$('scanRecent').scrollTop;
   $('sot').hidden=!$('showot').checked;$('smk').hidden=!$('showmk').checked;
@@ -345,6 +388,7 @@ function eq(){
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,s=b.dataset.s;
   if(a==='pin'){st.pins=st.pins.includes(s)?st.pins.filter(x=>x!==s):[...st.pins,s];save();render()}
   else if(a==='take')take(s);
+  else if(a==='chart')window.openPositionChart(s);
   else if(a==='close'){const t=st.open.find(x=>x.id==s),px=t&&M[t.sym]&&M[t.sym].p;if(t&&px){const sg=t.dir==='long'?1:-1,g=(px-t.en)*sg/Math.abs(t.en-t.stop0),r1=(t.tp1-t.en)*sg/Math.abs(t.en-t.stop0),net=t.tp1h?(t.targetMode==='extended'?0.5*r1+0.5*g:0.5+0.5*g):g;closeT(t,'Closed manually',px,net);render()}}
 });
 $('watchSearch').addEventListener('input',()=>{watchQuery=$('watchSearch').value.trim().toLowerCase();watchLimit=50;$('wl').scrollTop=0;render()});
@@ -359,5 +403,6 @@ render();scan();
 if(EX()==='binance')ws();else setInterval(async()=>{if(Date.now()<banUntil||busy)return;try{await getTickers()}catch(e){}},5000);
 setInterval(()=>{monitor();render()},5000);
 </script>
+<script src="trade-chart.js"></script>
 </body>
 </html>
