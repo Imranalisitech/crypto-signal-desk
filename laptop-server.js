@@ -316,6 +316,12 @@ const server=http.createServer((req,res)=>{
       fundingLimitPct:config.fundingLimitPct,feePct:config.feePct,
       minTurnoverMillions:config.minTurnoverMillions},lastSyncAt:state.lastSyncAt});
   if(url.pathname==='/api/config'&&req.method==='POST'){
+    // Reject cross-site browser requests that try to alter laptop settings.
+    const allowedOrigins=new Set(['http://127.0.0.1:'+config.port,'http://localhost:'+config.port]);
+    const origin=req.headers.origin;
+    if(origin&&!allowedOrigins.has(origin))return respond(res,403,{error:'Local dashboard only'});
+    if(!String(req.headers['content-type']||'').startsWith('application/json'))
+      return respond(res,415,{error:'JSON request required'});
     let buf='',size=0;
     req.on('data',chunk=>{size+=chunk.length;if(size<5000)buf+=chunk;else req.destroy()});
     req.on('end',()=>{
