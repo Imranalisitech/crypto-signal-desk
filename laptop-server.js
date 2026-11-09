@@ -265,7 +265,7 @@ async function scan(){
   finally{state.scanning=false;scanning=false;state.nextScanAt=
     Math.max(Date.now()+20_000,start+300_000,cooldownUntil);persist()}
 }
-function snapshot(){
+function snapshot(fullHistory=false){
   const active=new Set([...Object.keys(state.results),...state.open.map(x=>x.sym)]);
   const markets={};
   for(const sym of active)if(state.markets[sym])markets[sym]=state.markets[sym];
@@ -283,7 +283,7 @@ function snapshot(){
     markets,results:Object.values(state.results),
     open:state.open,history,historyTotal:totalHistory,
     trackedKeys:state.trackedKeys};
-  while(Buffer.byteLength(JSON.stringify(out))>1_900_000&&history.length>100){
+  while(!fullHistory&&Buffer.byteLength(JSON.stringify(out))>1_900_000&&history.length>100){
     history=history.slice(Math.ceil(history.length/4));
     out.history=history;
   }
@@ -311,7 +311,7 @@ function respond(res,code,data){
 const server=http.createServer((req,res)=>{
   const url=new URL(req.url,'http://127.0.0.1');
   if(url.pathname==='/api/state'&&req.method==='GET')
-    return respond(res,200,{...snapshot(),config:{exchange:config.exchange,
+    return respond(res,200,{...snapshot(true),config:{exchange:config.exchange,
       scanMax:config.scanMax,account:config.account,riskPct:config.riskPct,
       fundingLimitPct:config.fundingLimitPct,feePct:config.feePct,
       minTurnoverMillions:config.minTurnoverMillions},lastSyncAt:state.lastSyncAt});
