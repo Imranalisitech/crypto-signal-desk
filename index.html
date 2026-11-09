@@ -464,6 +464,7 @@ function adoptLaptop(snapshot,source,online,lastSeen){
  if(!snapshot||!Array.isArray(snapshot.results)||!Array.isArray(snapshot.open)||!Array.isArray(snapshot.history))return false;
  remoteMode=true;remoteSource=source;remoteOnline=online;remoteLastSeen=lastSeen;
  remoteHistoryTruncated=!!snapshot.historyTruncated;
+ if(['bybit','binance'].includes(snapshot.exchange))$('ex').value=snapshot.exchange;
  R=Object.fromEntries(snapshot.results.filter(x=>x&&x.sym).map(x=>[x.sym,x]));
  M=snapshot.markets||{};
  st.open=snapshot.open;st.hist=snapshot.history;
