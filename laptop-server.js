@@ -107,12 +107,42 @@ function fault(message){
   persist();log('WARN '+message);
 }
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+class ExchangeRateLimitError extends Error {
+  constructor(message,until){super(message);this.name='ExchangeRateLimitError';
+    this.cooldownUntil=until;}
+}
 let sendSlot=Promise.resolve(),nextSendAt=0,cooldownUntil=0;
+let throttledTimes=0,lastThrottleAt=0;
+const MIN_REQUEST_GAP_MS=360; // one shared exchange request slot across scanner & ticker polling
+function rateLimitCooldown(message,headerMs=null,ipBan=false){
+  const now=Date.now();
+  if(now-lastThrottleAt>15*60_000)throttledTimes=0;
+  throttledTimes++;lastThrottleAt=now;
+  // Bybit 403 IP bans require >=10m; 10006 returns a reset header when
+  // available, otherwise back off progressively to avoid a retry storm.
+  const backoff=ipBan?11*60_000:
+    Math.min(10*60_000,90_000*Math.pow(2,Math.min(3,throttledTimes-1)));
+  const headerDelay=Number.isFinite(headerMs)&&headerMs>now&&headerMs<now+30*60_000?
+    headerMs-now+2500:0;
+  cooldownUntil=Math.max(cooldownUntil,now+Math.max(backoff,headerDelay));
+  const waitSeconds=Math.ceil((cooldownUntil-now)/1000);
+  state.scanRateLimitedUntil=cooldownUntil;
+  state.scanMessage='Exchange rate limited (10006 / HTTP 429 / 403); preserving prior scan. '+
+    'Next retry after '+new Date(cooldownUntil).toLocaleTimeString();
+  state.scanPhase='RATE_LIMITED';
+  return new ExchangeRateLimitError(message+'; retry after '+waitSeconds+' seconds',cooldownUntil);
+}
 async function waitSlot(){
+  // Rate-limit errors must STOP new requests, rather than creating many
+  // delayed requests which all resume simultaneously after the cooldown.
   const slot=sendSlot.then(async()=>{
-    const pause=Math.max(0,nextSendAt-Date.now(),cooldownUntil-Date.now());
+    if(Date.now()<cooldownUntil)
+      throw new ExchangeRateLimitError('Exchange in rate-limit cooldown',cooldownUntil);
+    const pause=Math.max(0,nextSendAt-Date.now());
     if(pause>0)await sleep(pause);
-    nextSendAt=Date.now()+180;
+    if(Date.now()<cooldownUntil)
+      throw new ExchangeRateLimitError('Exchange rate limit cooldown activated',cooldownUntil);
+    nextSendAt=Date.now()+MIN_REQUEST_GAP_MS;
   });
   sendSlot=slot.catch(()=>{});
   await slot;
@@ -126,14 +156,18 @@ async function getJson(url){
     catch(e){if(attempt===0){await sleep(1200);continue;}throw e}
     if(res.status===429||res.status===418||res.status===403){
       const retry=Number(res.headers.get('retry-after'))||0;
-      cooldownUntil=Date.now()+Math.min(15*60_000,Math.max(90_000,retry*1000));
-      throw Error('Exchange rate limit HTTP '+res.status+'; scanner cooling down');
+      const headerTime=retry>0?Date.now()+Math.min(30*60_000,retry*1000):null;
+      throw rateLimitCooldown('Exchange HTTP '+res.status+' limit',headerTime,res.status===403||res.status===418);
     }
     if(!res.ok){if(attempt===0&&res.status>=500){await sleep(1300);continue}
       throw Error('Exchange data HTTP '+res.status)}
     const obj=await res.json();
     if(obj?.retCode&&obj.retCode!==0){
-      if(obj.retCode===10006)cooldownUntil=Date.now()+90_000;
+      if(Number(obj.retCode)===10006){
+        const reset=Number(res.headers.get('x-bapi-limit-reset-timestamp'));
+        throw rateLimitCooldown('Bybit 10006 Too many visits',
+          reset>1e12?reset:null,false);
+      }
       throw Error('Bybit '+obj.retCode+': '+String(obj.retMsg||'data unavailable'));
     }
     return obj;
@@ -158,15 +192,22 @@ function closed(bars,minutes){
   const now=Date.now()-1500,span=minutes*60_000;
   return bars.filter(k=>Number.isFinite(k.t)&&Number.isFinite(k.c)&&k.t+span<=now);
 }
-let tickersBusy=false,lastTickers=[];
-async function refreshTickers(){
-  if(tickersBusy)return lastTickers;
-  tickersBusy=true;
-  try{
+let lastTickers=[],tickerRefreshPromise=null,lastTickerFetchAt=0;
+// Reuse the same in-flight ticker request. Previously, a concurrent scan
+// received [] while the 10-second price loop was still loading, causing a
+// false "No matching futures markets" error.
+async function refreshTickers({allowCache=true}={}){
+  if(tickerRefreshPromise)return tickerRefreshPromise;
+  if(allowCache&&lastTickers.length&&Date.now()-lastTickerFetchAt<25000)
+    return lastTickers;
+  if(Date.now()<cooldownUntil)
+    throw new ExchangeRateLimitError('Exchange ticker feed cooling down',cooldownUntil);
+  tickerRefreshPromise=(async()=>{
     let tickers=[];
     if(config.exchange==='bybit'){
       const data=await getJson('https://api.bybit.com/v5/market/tickers?category=linear');
-      if(!Array.isArray(data?.result?.list))throw Error('Bybit ticker data unavailable');
+      if(!Array.isArray(data?.result?.list)||!data.result.list.length)
+        throw Error('Bybit ticker data unavailable; last completed scan retained');
       tickers=data.result.list.map(k=>({symbol:k.symbol,
         price:+k.markPrice||+k.lastPrice,fundingPct:+k.fundingRate*100,
         vol:+k.turnover24h,change:+k.price24hPcnt*100}));
@@ -174,20 +215,24 @@ async function refreshTickers(){
       const [raw,marks]=await Promise.all([
         getJson('https://fapi.binance.com/fapi/v1/ticker/24hr'),
         getJson('https://fapi.binance.com/fapi/v1/premiumIndex')]);
+      if(!Array.isArray(raw)||!Array.isArray(marks)||!raw.length||!marks.length)
+        throw Error('Binance ticker data unavailable; last completed scan retained');
       const lookup=new Map(marks.map(x=>[x.symbol,x]));
       tickers=raw.map(x=>{const mark=lookup.get(x.symbol)||{};return{
         symbol:x.symbol,price:+mark.markPrice||+x.lastPrice,
         fundingPct:+mark.lastFundingRate*100,vol:+x.quoteVolume,change:+x.priceChangePercent}});
     }
-    for(const item of tickers){
-      if(item.symbol&&Number.isFinite(item.price)&&item.price>0)
-        state.markets[item.symbol]={p:item.price,fr:item.fundingPct,at:Date.now()};
-    }
-    state.lastPriceAt=Date.now();
+    tickers=tickers.filter(x=>x.symbol&&Number.isFinite(x.price)&&x.price>0);
+    if(!tickers.length)throw Error('Exchange ticker feed returned no valid markets');
+    const at=Date.now();
+    for(const item of tickers)
+      state.markets[item.symbol]={p:item.price,fr:item.fundingPct,at};
+    state.lastPriceAt=at;
     state.connection='Exchange feed connected';
-    lastTickers=tickers;
+    lastTickers=tickers;lastTickerFetchAt=at;
     return tickers;
-  }finally{tickersBusy=false}
+  })();
+  try{return await tickerRefreshPromise}finally{tickerRefreshPromise=null}
 }
 // Live orders now use the freshly updated Binance scanner mark price.
 function signalKey(r){
@@ -280,7 +325,7 @@ async function scan(){
     state.scanMessage=scanUniverse.length?
       'Analyzing '+scanUniverse.length+' '+config.exchange.toUpperCase()+' perpetual markets':
       'The exchange supplied no matching perpetual futures markets';
-    if(!scanUniverse.length)throw Error('No matching futures markets returned; check exchange and minimum volume settings');
+    if(!scanUniverse.length)throw Error('Ticker feed loaded but no symbols meet your exchange/minimum-volume settings');
     let index=0;
     async function worker(){
       while(index<scanUniverse.length){
@@ -320,9 +365,14 @@ async function scan(){
             }
           }
         }catch(e){
-          state.scanFailures++;
-          record.status='error';record.reason=String(e.message).slice(0,180);
-          if(state.scanFailures<=4)fault(sym+': '+record.reason);
+          if(e instanceof ExchangeRateLimitError){
+            record.status='rate-limited';
+            record.reason='Exchange cooldown: '+new Date(e.cooldownUntil).toLocaleTimeString();
+          }else{
+            state.scanFailures++;
+            record.status='error';record.reason=String(e.message).slice(0,180);
+            if(state.scanFailures<=4)fault(sym+': '+record.reason);
+          }
         }finally{
           nextResults[sym]=record;
           state.scanned++;
@@ -363,15 +413,25 @@ async function scan(){
       ', insufficient='+state.scanInsufficient+
       ', stored='+Object.keys(state.results).length);
   }catch(e){
-    state.scanPhase='ERROR';
-    state.scanMessage='Scan error: '+String(e.message).slice(0,160)+
-      '. Previous coin data has been retained.';
-    fault(state.scanMessage);
+    if(e instanceof ExchangeRateLimitError||Date.now()<cooldownUntil){
+      state.scanPhase='RATE_LIMITED';
+      state.scanRateLimitedUntil=cooldownUntil;
+      state.scanMessage='Exchange rate limit (Bybit 10006 / HTTP protection). '+
+        'Previous coin results retained; cooldown until '+
+        new Date(cooldownUntil).toLocaleTimeString();
+      log('Scan cooling down; previous analysis retained');
+    }else{
+      state.scanPhase='ERROR';
+      state.scanMessage='Scan error: '+String(e.message).slice(0,160)+
+        '. Previous coin data has been retained.';
+      fault(state.scanMessage);
+    }
   }finally{
     state.scanning=false;
     scanning=false;
     state.scanRateLimitedUntil=Date.now()<cooldownUntil?cooldownUntil:null;
-    state.nextScanAt=Math.max(Date.now()+20_000,started+300_000,cooldownUntil);
+    // No overlapping full scans and no additional requests inside a cooldown.
+    state.nextScanAt=Math.max(Date.now()+20000,started+300000,cooldownUntil+3000);
     persist();
   }
 }
@@ -532,7 +592,11 @@ const server=http.createServer((req,res)=>{
 });
 server.listen(config.port,'127.0.0.1',()=>log('Laptop server ready at http://127.0.0.1:'+config.port));
 async function polling(){
-  try{await refreshTickers();monitor()}catch(e){fault('TICKERS '+e.message)}
+  try{await refreshTickers();monitor()}
+  catch(e){
+    if(!(e instanceof ExchangeRateLimitError)&&Date.now()>=cooldownUntil)
+      fault('TICKERS '+e.message);
+  }
   // Positions are protected by Binance-side conditional SL and TP orders.
   // Reconciliation here updates the local record, never replaces protection.
   if(liveBroker.state.orders.some(x=>x.status==='ACTIVE')&&!liveBroker.busy){
@@ -540,7 +604,7 @@ async function polling(){
     liveBroker.reconcile().catch(e=>fault('BINANCE LIVE STATUS '+e.message))
       .finally(()=>{liveBroker.busy=false});
   }
-  setTimeout(polling,10_000);
+  setTimeout(polling,25_000);
 }
 async function scheduleScan(){
   await scan();setTimeout(scheduleScan,Math.max(15_000,state.nextScanAt-Date.now()));
