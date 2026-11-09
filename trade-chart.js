@@ -92,12 +92,17 @@
       ?{...result.sweep}:null;
     const breakout=!liquidity&&result.momentum&&Number.isFinite(result.momentum.level)&&Number.isFinite(result.momentum.extreme)
       ?{...result.momentum}:null;
+    const institutional=!liquidity&&!breakout&&result.large&&Number.isFinite(result.large.level)&&Number.isFinite(result.large.extreme)
+      ?{...result.large}:null;
+    const rsiSetup=!liquidity&&!breakout&&!institutional&&result.rsiSetup&&Number.isFinite(result.rsiSetup.level)&&Number.isFinite(result.rsiSetup.extreme)
+      ?{...result.rsiSetup}:null;
+    const structure=breakout||institutional||rsiSetup;
     if(![setup.en,setup.stop,setup.tp1,setup.tp2].every(v=>Number.isFinite(v)&&v>0))return;
     close();
     const session=++activeSession;
     byId('tradeChartModal').hidden=false;
     document.body.style.overflow='hidden';
-    byId('tradeChartTitle').textContent=symbol+' · '+result.dir.toUpperCase()+' · '+(liquidity?'Liquidity Sweep':breakout?'Strong-Flow Breakout':'Confirmed')+' · 5-minute chart';
+    byId('tradeChartTitle').textContent=symbol+' · '+result.dir.toUpperCase()+' · '+(result.setupType||'Confirmed')+' · 5-minute chart';
     byId('tradeChartTV').href='https://www.tradingview.com/chart/?symbol='+encodeURIComponent((EX()==='bybit'?'BYBIT':'BINANCE')+':'+symbol+'.P');
     byId('tradeChartLevels').replaceChildren();
     const rr=setup.sp>0?Math.abs(setup.tp2-setup.en)/Math.abs(setup.en-setup.stop):0;
@@ -105,10 +110,12 @@
     if(liquidity){
       levels.push(['Swept '+liquidity.windowHours+'h '+(result.dir==='long'?'LOW ':'HIGH '),liquidity.level,'entry']);
       levels.push(['Sweep wick ',liquidity.extreme,'bad']);
-    }else if(breakout){
-      levels.push(['Breakout level ',breakout.level,'entry']);
-      levels.push(['Structural stop base ',breakout.extreme,'bad']);
-      levels.push(['Breakout volume ',breakout.breakoutVolRatio.toFixed(2)+'x','good']);
+    }else if(structure){
+      levels.push([rsiSetup?'RSI reversal level ':'Breakout level ',structure.level,'entry']);
+      levels.push(['Structural stop base ',structure.extreme,'bad']);
+      if(Number.isFinite(structure.breakoutVolRatio))levels.push(['Volume activity ',structure.breakoutVolRatio.toFixed(2)+'x','good']);
+      if(institutional&&Number.isFinite(institutional.oiChangePct))levels.push(['OI change 1h ',institutional.oiChangePct.toFixed(2)+'%','good']);
+      if(rsiSetup&&Number.isFinite(rsiSetup.rsi5))levels.push(['RSI 5m ',rsiSetup.rsi5.toFixed(1),'good']);
     }
     for(const item of levels){
       const element=document.createElement('span');
@@ -145,9 +152,9 @@
       if(liquidity){
         lines.push({price:liquidity.level,color:'#e1a5fc',width:1,title:'SWEPT '+(result.dir==='long'?'LOW':'HIGH')});
         lines.push({price:liquidity.extreme,color:'#f4ab64',width:1,title:'SWEEP WICK'});
-      }else if(breakout){
-        lines.push({price:breakout.level,color:'#e1a5fc',width:1,title:'BREAKOUT LEVEL'});
-        lines.push({price:breakout.extreme,color:'#f4ab64',width:1,title:'STRUCTURE BASE'});
+      }else if(structure){
+        lines.push({price:structure.level,color:'#e1a5fc',width:1,title:rsiSetup?'RSI REVERSAL':'BREAKOUT LEVEL'});
+        lines.push({price:structure.extreme,color:'#f4ab64',width:1,title:'STRUCTURE BASE'});
       }
       for(const level of lines){
         candles.createPriceLine({price:level.price,color:level.color,lineWidth:level.width,lineStyle:0,axisLabelVisible:true,title:level.title});
