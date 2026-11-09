@@ -71,6 +71,7 @@ input,select{background:#122030;color:var(--ink);border-color:#40556c}
 .watch-tools small{color:var(--mut)}
 .rsi-link{display:inline-flex;align-items:center;padding:7px 13px;border-radius:7px;color:#fff;text-decoration:none;font-weight:700;background:linear-gradient(110deg,#137f8e,#4657ac)}
 @media(max-width:850px){header>div:last-child{position:static;justify-content:center;flex-wrap:wrap}}
+.scan-feed{margin-bottom:12px}.scan-feed-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.scan-feed-head small{color:var(--mut)}.scan-now{margin:5px 0 10px;color:var(--mut);font-size:12.5px;overflow-wrap:anywhere}.scan-recent{max-height:240px;overflow-y:auto;scrollbar-color:#6883a3 #172535}.scan-recent td{white-space:nowrap}.scan-stage{font-weight:700}
 </style>
 </head>
 <body>
@@ -101,6 +102,7 @@ input,select{background:#122030;color:var(--ink);border-color:#40556c}
 <div id="ban"></div>
 <div class="kpi" id="kpi"></div>
 
+<section class="scan-feed"><h2 class="scan-feed-head">Live scanning results <small id="scanProgress">Waiting for the first scan</small></h2><div class="scan-now" id="scanNow">Coins being scanned will appear here.</div><div class="tw scan-recent" id="scanRecent"><div class="empty">No scanned coins yet.</div></div></section>
 <div class="two">
   <section><h2>Confirmed LONG <small id="nl"></small></h2><div class="cards" id="cl"></div></section>
   <section><h2>Confirmed SHORT <small id="ns"></small></h2><div class="cards" id="cs"></div></section>
@@ -169,8 +171,39 @@ function evalLive(r,k1,px){
   const r$=n('acct')*n('risk')/100,nt=sp>0?r$/(sp/100):Infinity,lev=nt/n('acct');add(lev<=n('maxlev'),'Leverage above cap');
   return{G,ok:G.every(g=>g.ok),plan:{en:px,stop,tp1:px+sg*R1,tp2:px+sg*2*R1,sp,r$,nt,lev,ck:C.t}};
 }
-let lim=false,dur=0;
-async function pool(items,fn,c=10){let i=0,d=0;await Promise.all(Array(c).fill(0).map(async()=>{while(i<items.length){const it=items[i++];try{await fn(it)}catch(e){if(/429|418/.test(e.message))lim=true}prog=(++d)+'/'+items.length;$('stat').textContent='Scanning '+prog}}))}
+let lim=false,dur=0,scanTotal=0,scanDone=0,scanFailures=0;
+let activeScanCoins=new Set(),recentScans=[],liveRenderTimer=null;
+function queueLiveRender(){
+  if(liveRenderTimer!==null)return;
+  liveRenderTimer=setTimeout(()=>{liveRenderTimer=null;render()},650);
+}
+function renderScanProgress(){
+  const c=Object.values(R),conf=c.filter(r=>r.status==='confirm').length,watch=c.filter(r=>r.status==='watch').length;
+  $('scanProgress').textContent=scanTotal?scanDone+' / '+scanTotal+' scanned · '+conf+' confirmed · '+watch+' watchlist'+(scanFailures?' · '+scanFailures+' failed':''):'Waiting for the first scan';
+  $('scanNow').textContent=busy?(activeScanCoins.size?'Currently scanning: '+[...activeScanCoins].slice(0,12).join(' · '):'Loading market data and preparing coin scans…'):(lastScan?'Scan complete · results remain visible until the next scan':'Waiting for the first scan');
+  const statusText={confirm:'CONFIRMED',watch:'In zone',trend:'Trend only',none:'No bias',error:'Data error'};
+  $('scanRecent').innerHTML=tbl(['Coin','Side','Price','Result'],recentScans.slice(0,40).map(r=>{
+    const p=M[r.sym]&&M[r.sym].p;
+    return '<tr><td>'+tv(r.sym)+'</td><td>'+(r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'—')+'</td><td>'+fp(p)+'</td><td class="scan-stage">'+(statusText[r.status]||'Scanned')+'</td></tr>';
+  }),'No completed coin scans yet.');
+}
+async function pool(items,fn,c=10,onDone=()=>{}){
+  let i=0,d=0;
+  await Promise.all(Array(Math.min(c,items.length)).fill(0).map(async()=>{
+    while(i<items.length){
+      const it=items[i++];let failure=null;
+      activeScanCoins.add(it.symbol);queueLiveRender();
+      try{await fn(it)}catch(e){failure=e;if(/429|418|403/.test(e.message))lim=true}
+      finally{
+        activeScanCoins.delete(it.symbol);
+        prog=(++d)+'/'+items.length;
+        onDone(it,failure);
+        $('stat').textContent='Scanning '+prog+' · '+it.symbol+' completed';
+        queueLiveRender();
+      }
+    }
+  }));
+}
 
 async function scan(){
   if(busy)return;
@@ -180,6 +213,7 @@ async function scan(){
     const tk=await getTickers();
     const list=tk.filter(x=>x.symbol.endsWith('USDT')&&!/[_-]/.test(x.symbol)&&x.vol>=n('minvol')*1e6&&M[x.symbol]&&M[x.symbol].p>0).sort((a,b)=>b.vol-a.vol).slice(0,n('topn'));
     const res={};list.forEach(x=>res[x.symbol]={sym:x.symbol,chg:x.chg,vol:x.vol,status:'none'});
+    R={};scanTotal=list.length;scanDone=0;scanFailures=0;recentScans=[];activeScanCoins.clear();render();
     await pool(list,async x=>{
       const s=x.symbol,r=res[s],k15=await K(s,'15m',99);if(k15.length<25)return;r.dir=bias(k15.slice(0,-1));if(!r.dir)return;r.status='trend';
       const k5raw=await K(s,'5m',300);if(k5raw.length<25)return;const k5=k5raw.slice(0,-1),e9=ema(k5,9),e21=ema(k5,21),v5=vwap(k5);if(v5==null)return;
@@ -187,13 +221,20 @@ async function scan(){
       const px=M[s].p;r.dist=px<r.zl?(r.zl-px)/px*100:px>r.zh?(px-r.zh)/px*100:0;
       if(r.dist>0.4)return;r.status='watch';
       const k1=await K(s,'1m',40);if(k1.length<25)return;Object.assign(r,evalLive(r,k1,px));if(r.ok)r.status='confirm';
+    },(x,failure)=>{
+      const r=res[x.symbol];
+      if(failure){r.status='error';scanFailures++}
+      R[x.symbol]={...r};
+      scanDone++;
+      recentScans.unshift({sym:x.symbol,dir:r.dir,status:r.status});
+      if(recentScans.length>50)recentScans.length=50;
     });
     if(Date.now()<banUntil){lim=false;wait=(banUntil-Date.now())/1000+5;err=banMsg()}
-    else{R=res;lastScan=new Date();err='';dur=Math.round((Date.now()-t0)/1000);if(lim){lim=false;wait=90;err=XN()+' rate limit reached, so the scanner is slowing down. Raise “Scan every” or the minimum volume.'}}
+    else{lastScan=new Date();err='';dur=Math.round((Date.now()-t0)/1000);if(lim){lim=false;wait=90;err=XN()+' rate limit reached, so the scanner is slowing down. Raise “Scan every” or the minimum volume.'}}
     const bl=blocked();
     Object.values(R).filter(r=>r.status==='confirm').forEach(r=>{const k=r.sym+r.plan.ck;if(!seen.has(k)){seen.add(k);if(!bl)fire(r)}});
   }catch(e){if(Date.now()<banUntil){err=banMsg();wait=(banUntil-Date.now())/1000+5}else err='Could not load '+XN()+' data: '+e.message+'. Check your connection or VPN; retrying.'}
-  busy=false;render();setTimeout(scan,wait*1000);
+  busy=false;clearTimeout(liveRenderTimer);liveRenderTimer=null;render();setTimeout(scan,wait*1000);
 }
 function fire(r){
   if(audio){try{const o=audio.createOscillator(),g=audio.createGain();o.connect(g);g.connect(audio.destination);o.frequency.value=r.dir==='long'?880:520;g.gain.value=.15;o.start();o.stop(audio.currentTime+.35)}catch(e){}}
@@ -240,6 +281,7 @@ function card(r,bl){const p=r.plan,t=st.open.some(x=>x.sym===r.sym);
   <table class="kv">${[['Entry',fp(p.en)],['Stop',fp(p.stop)],['TP1 (1R)',fp(p.tp1)],['TP2 (2R)',fp(p.tp2)],['Size',' $'+f(p.nt,0)],['Leverage',f(p.lev,2)+'x']].map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td></tr>`).join('')}</table>
   <button class="p" data-a="take" data-s="${r.sym}" ${bl||t?'disabled':''}>${t?'Tracking':'Track this trade'}</button></div>`}
 function render(){
+  const watchScroll=$('wl').scrollTop,longScroll=$('cl').scrollTop,shortScroll=$('cs').scrollTop,feedScroll=$('scanRecent').scrollTop;
   $('sot').hidden=!$('showot').checked;$('smk').hidden=!$('showmk').checked;
   const bl=blocked(),L=Object.values(R),cf=L.filter(r=>r.status==='confirm'),cl=cf.filter(r=>r.dir==='long'),cs=cf.filter(r=>r.dir==='short'),t=today(),dr=t.reduce((a,x)=>a+x.r,0);
   $('dot').className='dot '+(err?'bad':lastScan?'ok':'');
@@ -248,6 +290,7 @@ function render(){
   $('kpi').innerHTML=[['Long signals',cl.length],['Short signals',cs.length],['Watching',L.filter(r=>r.status==='watch').length],['Open trades',st.open.length],['Today',t.length+' trades'],['Today result',f(dr)+' R']].map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join('');
   $('cl').innerHTML=cl.length?cl.map(r=>card(r,bl)).join(''):'<div class="empty">No confirmed long setups right now.</div>';
   $('cs').innerHTML=cs.length?cs.map(r=>card(r,bl)).join(''):'<div class="empty">No confirmed short setups right now.</div>';
+  $('cl').scrollTop=longScroll;$('cs').scrollTop=shortScroll;
   $('nl').textContent=cl.length+' coins';$('ns').textContent=cs.length+' coins';
   const wlAll=L.filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).sort((a,b)=>{const m=r=>r.G?r.G.filter(g=>!g.ok).length:9;return m(a)-m(b)||(a.dist??9)-(b.dist??9)});
 const wl=wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).slice(0,watchLimit);
@@ -255,6 +298,7 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
   $('wl').innerHTML=tbl(['','Coin','Side','Price','24h vol','Zone distance','Status','Still missing'],wl.map(r=>{
     const miss=r.G?r.G.filter(g=>!g.ok).map(g=>g.t):[];
     return`<tr><td>${star(r.sym)}</td><td>${tv(r.sym)}</td><td>${r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'<span class="mut">none</span>'}</td><td>${fp(M[r.sym].p)}</td><td>$${f(r.vol/1e6,0)}M</td><td>${r.dist!=null?f(r.dist,2)+'%':'–'}</td><td>${r.status==='confirm'?pill(r.dir==='long'?'pl':'ps','CONFIRMED'):r.status==='watch'?pill('pw','In zone'):r.status==='trend'?pill('pn','Trend only'):pill('pn','No bias')}</td><td class="mut">${r.status==='confirm'?'Nothing':miss.length?miss.join(', '):r.status==='trend'?'Waiting for pullback to zone':'–'}</td></tr>`}),'Nothing in the zone yet. Pin coins with the star to follow them.');
+  $('wl').scrollTop=watchScroll;
   $('ot').innerHTML=tbl(['Coin','Side','Entry','Now','Stop','TP1','TP2','Live R','Age',''],st.open.map(o=>{const px=M[o.sym]&&M[o.sym].p,sg=o.dir==='long'?1:-1,rn=px?(px-o.en)*sg/Math.abs(o.en-o.stop0):null;
     return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp1)}${o.tp1h?' ✓':''}</td><td>${fp(o.tp2)}</td><td class="${rn>=0?'long-t':'short-t'}">${f(rn)} R</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td><button data-a="close" data-s="${o.id}">Close</button></td></tr>`}),'No open trades. Use “Track this trade” on a confirmed signal.');
   const H=st.hist,w=H.filter(x=>x.r>0),lo=H.filter(x=>x.r<=0),tr=H.reduce((a,x)=>a+x.r,0),gl=Math.abs(lo.reduce((a,x)=>a+x.r,0));
@@ -263,7 +307,8 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
   eq();
   const ord={confirm:0,watch:1,trend:2,none:3};
   $('mkn').textContent=L.length+' coins scanned';
-  $('mk').innerHTML=tbl(['','Coin','Price','24h','24h volume','15m bias','Stage'],[...L].sort((a,b)=>ord[a.status]-ord[b.status]||b.vol-a.vol).map(r=>`<tr><td>${star(r.sym)}</td><td>${tv(r.sym)}</td><td>${fp(M[r.sym].p)}</td><td class="${r.chg>=0?'long-t':'short-t'}">${f(r.chg)}%</td><td>$${f(r.vol/1e6,0)}M</td><td>${r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'<span class="mut">none</span>'}</td><td>${r.status==='confirm'?pill(r.dir==='long'?'pl':'ps','CONFIRMED'):r.status==='watch'?pill('pw','In zone'):r.status==='trend'?pill('pn','Trend only'):pill('pn','–')}</td></tr>`),'Waiting for the first scan.');
+  $('mk').innerHTML=tbl(['','Coin','Price','24h','24h volume','15m bias','Stage'],[...L].sort((a,b)=>ord[a.status]-ord[b.status]||b.vol-a.vol).map(r=>`<tr><td>${star(r.sym)}</td><td>${tv(r.sym)}</td><td>${fp(M[r.sym].p)}</td><td class="${r.chg>=0?'long-t':'short-t'}">${f(r.chg)}%</td><td>${f(r.vol/1e6,0)}M</td><td>${r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'<span class="mut">none</span>'}</td><td>${r.status==='confirm'?pill(r.dir==='long'?'pl':'ps','CONFIRMED'):r.status==='watch'?pill('pw','In zone'):r.status==='trend'?pill('pn','Trend only'):pill('pn','–')}</td></tr>`),'Waiting for the first scan.');
+  renderScanProgress();$('scanRecent').scrollTop=feedScroll;
 }
 function eq(){
   const cv=$('eq'),d=devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;cv.width=w*d;cv.height=h*d;const x=cv.getContext('2d');x.scale(d,d);
