@@ -95,6 +95,9 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 
 
 .auto-track-state{font-weight:650;font-size:12px;padding:8px 4px;margin:9px 0 0;color:var(--long)}
+.server-mode{border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin:0 0 12px;background:var(--card);font-size:13px;color:var(--mut)}
+.server-mode strong{color:var(--long)}
+.server-mode.offline{border-color:var(--short);color:var(--short)}
 </style>
 </head>
 <body>
@@ -103,7 +106,8 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   <div><h1>Crypto Signal Desk — Futures Scalp Scanner</h1><div class="st"><span class="dot" id="dot"></span><span id="stat">Starting…</span></div></div>
   <div><button id="alert" type="button">Enable sound + notifications</button></div>
 </header>
-<details style="margin-bottom:12px"><summary style="cursor:pointer;font-weight:600">Settings</summary>
+<div id="serverMode" class="server-mode" hidden>Checking laptop scanner…</div>
+<details id="settingsPanel" style="margin-bottom:12px"><summary style="cursor:pointer;font-weight:600">Settings</summary>
   <div class="ctl">
     <label>Data source<select id="ex"><option value="bybit">Bybit (recommended)</option><option value="binance">Binance</option></select></label>
     <label>Account ($)<input id="acct" type="number" value="2000"></label>
@@ -179,12 +183,15 @@ async function getTickers(){
   const[tk,pi]=await Promise.all([J(B+'ticker/24hr',40),J(B+'premiumIndex',10)]);
   pi.forEach(x=>M[x.symbol]={p:+x.markPrice,fr:+x.lastFundingRate*100});
   return tk.map(x=>({symbol:x.symbol,chg:+x.priceChangePercent,vol:+x.quoteVolume}))}
+// Remote laptop snapshots replace browser-only tracking when available.
+let remoteMode=!!window.CRYPTO_LOCAL_SERVER,remoteSource=remoteMode?'local':'browser',
+    remoteOnline=false,remoteLastSeen=null,remoteHistoryTruncated=false;
 let st={hist:[],open:[],pins:[],trackedKeys:{},set:{}};
 try{st=Object.assign(st,JSON.parse(localStorage.getItem('scan1')||'{}'))}catch(e){}
 if(!Array.isArray(st.open))st.open=[];
 if(!Array.isArray(st.hist))st.hist=[];
 if(!st.trackedKeys||typeof st.trackedKeys!=='object'||Array.isArray(st.trackedKeys))st.trackedKeys={};
-const save=()=>{try{localStorage.setItem('scan1',JSON.stringify(st))}catch(e){}};
+const save=()=>{if(remoteMode)return;try{localStorage.setItem('scan1',JSON.stringify(st))}catch(e){}};
 const IDS=['ex','acct','risk','fundlim','fee','minvol','topn'];
 if(st.set.v!==4){st.set.v=4;st.set.topn=600;st.set.minvol=0;st.set.ex='bybit';save()}
 IDS.forEach(i=>{if(st.set[i]!=null)$(i).value=st.set[i]});
@@ -216,7 +223,7 @@ async function pool(items,fn,c=10,onDone=()=>{}){
 }
 
 async function scan(){
-  if(busy)return;
+  if(remoteMode||busy)return;
   if(Date.now()<banUntil){err=banMsg();render();setTimeout(scan,banUntil-Date.now()+5000);return}
   busy=true;const t0=Date.now();let wait=300;
   try{
@@ -241,6 +248,7 @@ async function scan(){
  r.dir=signal.side;r.G=signal.checks||[];
  if(r.status==='confirm'&&r.plan)r.plan.ck=signal.pattern.confirmTime;
  },10,(x,failure)=>{
+      if(remoteMode)return;
       const r=res[x.symbol];
       if(failure){r.status='error';scanFailures++}
       R[x.symbol]={...r};
@@ -249,11 +257,12 @@ async function scan(){
         if(fresh)fire(r);
       }
     });
+    if(remoteMode)return;
     if(Date.now()<banUntil){lim=false;wait=(banUntil-Date.now())/1000+5;err=banMsg()}
     else{lastScan=new Date();err='';dur=Math.round((Date.now()-t0)/1000);if(lim){lim=false;wait=90;err=XN()+' rate limit reached, so the scanner is slowing down. Reduce the scan universe or the minimum trading volume threshold.'}}
 
   }catch(e){if(Date.now()<banUntil){err=banMsg();wait=(banUntil-Date.now())/1000+5}else err='Could not load '+XN()+' data: '+e.message+'. Check your connection or VPN; retrying.'}
-  busy=false;clearTimeout(liveRenderTimer);liveRenderTimer=null;render();setTimeout(scan,wait*1000);
+  busy=false;clearTimeout(liveRenderTimer);liveRenderTimer=null;render();if(!remoteMode)setTimeout(scan,wait*1000);
 }
 function fire(r){
   if(audio){try{const o=audio.createOscillator(),g=audio.createGain();o.connect(g);g.connect(audio.destination);o.frequency.value=r.dir==='long'?880:520;g.gain.value=.15;o.start();o.stop(audio.currentTime+.35)}catch(e){}}
@@ -356,7 +365,25 @@ function render(){
   $('sot').hidden=!$('showot').checked;
   const L=Object.values(R),cf=L.filter(r=>r.status==='confirm'),cl=cf.filter(r=>r.dir==='long'),cs=cf.filter(r=>r.dir==='short'),t=today(),dr=t.reduce((a,x)=>a+x.r,0);
   $('dot').className='dot '+(err?'bad':lastScan?'ok':'');
-  if(!busy)$('stat').textContent=lastScan?XN()+' futures · last scan '+lastScan.toLocaleTimeString()+' · '+L.length+' coins · took '+dur+'s'+(scanFailures?' · '+scanFailures+' data errors':''):'Starting…';
+  if(remoteMode){
+    const origin=remoteSource==='local'?'Windows laptop server':'Windows laptop via Render';
+    $('stat').textContent=origin+' · '+(remoteOnline?'connected':'offline / last saved data')+
+      ' · '+L.length+' coins · '+st.open.length+' open · '+st.hist.length+' results';
+    $('serverMode').hidden=false;
+    $('serverMode').className='server-mode'+(remoteOnline?'':' offline');
+    $('serverMode').innerHTML='<strong>'+origin+'</strong> · '+
+      (remoteOnline?'Background scanner active — the browser may be closed':
+      'Laptop disconnected or sleeping — no new trades monitored')+
+      (remoteLastSeen?' · last report '+new Date(remoteLastSeen).toLocaleString():'')+
+      (remoteHistoryTruncated?' · online view shows recent history; full record stays on laptop':'');
+    $('settingsPanel').hidden=remoteSource==='cloud';
+    $('clearHistory').disabled=true;
+    $('clearHistory').title='Trade records are stored on the laptop; history cannot be erased from the remote display';
+  }else{
+    $('serverMode').hidden=true;$('settingsPanel').hidden=false;
+    $('clearHistory').disabled=false;
+    if(!busy)$('stat').textContent=lastScan?XN()+' futures · last scan '+lastScan.toLocaleTimeString()+' · '+L.length+' coins · took '+dur+'s'+(scanFailures?' · '+scanFailures+' data errors':''):'Starting…';
+  }
   $('ban').innerHTML=err?`<div class="ban err">${err}</div>`:'';
   $('kpi').innerHTML=[['Long signals',cl.length],['Short signals',cs.length],['Watching',L.filter(r=>r.status==='watch').length],['Open trades',st.open.length],['Today',t.length+' trades'],['Today result',f(dr)+' R']].map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join('');
   $('cl').innerHTML=cl.length?cl.map(r=>card(r)).join(''):'<div class="empty">No confirmed long setups right now.</div>';
@@ -379,7 +406,7 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
  }), 'No candidates yet.');
     $('wl').scrollTop=watchScroll;
   $('ot').innerHTML=tbl(['Coin','Side','Entry','Now','Stop','Final TP','Live R','Age',''],st.open.map(o=>{const px=M[o.sym]&&M[o.sym].p,sg=o.dir==='long'?1:-1,rn=px?(px-o.en)*sg/Math.abs(o.en-o.stop0):null;
-    return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp2)}</td><td class="${rn>=0?'long-t':'short-t'}">${f(rn)} R</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td><button data-a="close" data-s="${o.id}">Close</button></td></tr>`}),'No open trades yet. Every new confirmed signal is enrolled automatically while this dashboard is running.');
+    return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp2)}</td><td class="${rn>=0?'long-t':'short-t'}">${f(rn)} R</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td>${remoteMode?'Auto':'<button data-a="close" data-s="'+o.id+'">Close</button>'}</td></tr>`}),'No open trades yet. Every new confirmed signal is enrolled automatically while this dashboard is running.');
   const H=st.hist,w=H.filter(x=>x.r>0),lo=H.filter(x=>x.r<=0),tr=H.reduce((a,x)=>a+x.r,0),gl=Math.abs(lo.reduce((a,x)=>a+x.r,0));
   $('stats').innerHTML=[['Total registered',Object.keys(st.trackedKeys).length],['Closed results',H.length],['Auto-tracked open',st.open.length],['Win rate',H.length?f(w.length/H.length*100,0)+'%':'–'],['Total R',f(tr)],['Total P&L','$'+f(H.reduce((a,x)=>a+x.pnl,0))],['Avg R',H.length?f(tr/H.length):'–'],['Profit factor',gl?f(w.reduce((a,x)=>a+x.r,0)/gl):'–']].map(x=>`<span>${x[0]}: <b>${x[1]}</b></span>`).join('');
   $('allResults').hidden=H.length<=100;
@@ -398,23 +425,96 @@ function eq(){
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,s=b.dataset.s;
   if(a==='pin'){st.pins=st.pins.includes(s)?st.pins.filter(x=>x!==s):[...st.pins,s];save();render()}
   else if(a==='chart')window.openPositionChart(s);
-  else if(a==='close'){const t=st.open.find(x=>x.id==s),px=t&&M[t.sym]&&M[t.sym].p;if(t&&px){const sg=t.dir==='long'?1:-1,g=(px-t.en)*sg/Math.abs(t.en-t.stop0),r1=(t.tp1-t.en)*sg/Math.abs(t.en-t.stop0),net=t.tp1h?(t.targetMode==='extended'?0.5*r1+0.5*g:0.5+0.5*g):g;closeT(t,'Closed manually',px,net);render()}}
+  else if(a==='close'&&!remoteMode){const t=st.open.find(x=>x.id==s),px=t&&M[t.sym]&&M[t.sym].p;if(t&&px){const sg=t.dir==='long'?1:-1,g=(px-t.en)*sg/Math.abs(t.en-t.stop0),r1=(t.tp1-t.en)*sg/Math.abs(t.en-t.stop0),net=t.tp1h?(t.targetMode==='extended'?0.5*r1+0.5*g:0.5+0.5*g):g;closeT(t,'Closed manually',px,net);render()}}
 });
 $('watchSearch').addEventListener('input',()=>{watchQuery=$('watchSearch').value.trim().toLowerCase();watchLimit=50;$('wl').scrollTop=0;render()});
 $('wl').addEventListener('scroll',()=>{const el=$('wl');if(el.scrollTop+el.clientHeight>=el.scrollHeight-90){const all=Object.values(R).filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).filter(r=>r.sym.toLowerCase().includes(watchQuery));if(watchLimit<all.length){const pos=el.scrollTop;watchLimit+=50;render();el.scrollTop=pos}}});
 $('allResults').addEventListener('click',()=>{showAllHistory=!showAllHistory;render()});
-$('clearHistory').addEventListener('click',()=>{if(!confirm('Permanently clear all saved trade result history? Open tracked trades will be kept.'))return;st.hist=[];save();render()});
-document.addEventListener('input',()=>{IDS.forEach(i=>st.set[i]=$(i).value);st.set.showot=$('showot').checked;save();render()});
+$('clearHistory').addEventListener('click',()=>{if(remoteMode)return;if(!confirm('Permanently clear all saved trade result history? Open tracked trades will be kept.'))return;st.hist=[];save();render()});
+let sendConfigTimeout=null;
+document.addEventListener('input',()=>{
+ IDS.forEach(i=>st.set[i]=$(i).value);
+ st.set.showot=$('showot').checked;save();render();
+ if(remoteSource==='local'){
+   clearTimeout(sendConfigTimeout);
+   sendConfigTimeout=setTimeout(()=>{
+     const body={exchange:$('ex').value,account:n('acct'),riskPct:n('risk'),
+       fundingLimitPct:n('fundlim'),feePct:n('fee'),
+       minTurnoverMillions:n('minvol'),scanMax:n('topn')};
+     fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
+       body:JSON.stringify(body)}).catch(()=>{});
+   },900);
+ }
+});
 $('alert').onclick=async()=>{audio=audio||new(window.AudioContext||window.webkitAudioContext)();if('Notification'in window)notif=(await Notification.requestPermission())==='granted';$('alert').textContent='Alerts on'};
 $('csv').onclick=()=>{const rows=[['closed','coin','side','signal_candle','entry','stop','target_tp','exit','R','pnl_usd','reason'],
     ...st.hist.map(x=>[new Date(x.close).toISOString(),x.sym,x.dir,
     x.signalCandle?new Date(x.signalCandle).toISOString():'',x.en,x.stop??'',x.tp??'',x.ex,
     x.r.toFixed(3),x.pnl.toFixed(2),x.why])];
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([rows.map(r=>r.join(',')).join('\n')],{type:'text/csv'}));a.download='trade-history.csv';a.click()};
-$('ex').onchange=()=>{st.set.ex=$('ex').value;save();location.reload()};
-render();scan();
-if(EX()==='binance')ws();else setInterval(async()=>{if(Date.now()<banUntil||busy)return;try{await getTickers()}catch(e){}},5000);
-setInterval(()=>{monitor();render()},5000);
+$('ex').onchange=async()=>{
+ st.set.ex=$('ex').value;save();
+ if(remoteSource==='local'){
+   await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
+     body:JSON.stringify({exchange:$('ex').value})}).catch(()=>{});
+ }
+ location.reload();
+};
+function adoptLaptop(snapshot,source,online,lastSeen){
+ if(!snapshot||!Array.isArray(snapshot.results)||!Array.isArray(snapshot.open)||!Array.isArray(snapshot.history))return false;
+ remoteMode=true;remoteSource=source;remoteOnline=online;remoteLastSeen=lastSeen;
+ remoteHistoryTruncated=!!snapshot.historyTruncated;
+ R=Object.fromEntries(snapshot.results.filter(x=>x&&x.sym).map(x=>[x.sym,x]));
+ M=snapshot.markets||{};
+ st.open=snapshot.open;st.hist=snapshot.history;
+ st.trackedKeys=snapshot.trackedKeys||{};
+ scanFailures=snapshot.scanFailures||0;
+ lastScan=snapshot.lastScanAt?new Date(snapshot.lastScanAt):null;
+ busy=!!snapshot.scanning;
+ if(source==='local'&&snapshot.config){
+  const c=snapshot.config;
+  const mapping={ex:c.exchange,acct:c.account,risk:c.riskPct,
+    fundlim:c.fundingLimitPct,fee:c.feePct,minvol:c.minTurnoverMillions,topn:c.scanMax};
+  for(const [id,v] of Object.entries(mapping))if(v!=null&&document.activeElement!==$(id))$(id).value=v;
+ }
+ render();return true;
+}
+async function remotePoll(){
+ const local=!!window.CRYPTO_LOCAL_SERVER;
+ const origin=local?'':'https://crypto-signal-desk-market-data.onrender.com';
+ const endpoint=local?'/api/state':'/laptop/state';
+ try{
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),8500);
+  let data;
+  try{
+   const response=await fetch(origin+endpoint,{cache:'no-store',signal:controller.signal});
+   if(!response.ok)throw Error('Remote scanner '+response.status);
+   data=await response.json();
+  }finally{clearTimeout(timer)}
+  if(local){
+    adoptLaptop(data,'local',!!data.lastPriceAt&&Date.now()-data.lastPriceAt<45000,
+      data.lastPriceAt||data.lastScanAt);
+  }else if(data.snapshot&&(data.connected||remoteMode)){
+    adoptLaptop(data.snapshot,'cloud',!!data.connected,data.lastSeen);
+  }else if(remoteMode&&remoteSource==='cloud'){
+    remoteOnline=false;render();
+  }
+ }catch(e){
+  if(remoteMode){remoteOnline=false;render()}
+ }
+}
+async function begin(){
+ await remotePoll();
+ if(!remoteMode){
+   render();scan();
+   if(EX()==='binance')ws();
+   else setInterval(async()=>{if(remoteMode||Date.now()<banUntil||busy)return;
+     try{await getTickers()}catch(e){}},5000);
+ }
+ setInterval(remotePoll,8000);
+ setInterval(()=>{if(!remoteMode)monitor();render()},5000);
+}
+begin();
 </script>
 <script src="trade-chart.js"></script>
 </body>
