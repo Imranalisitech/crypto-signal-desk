@@ -37,7 +37,7 @@ const strategy=ctx.window.UnifiedStrategy;
 if(!strategy||typeof strategy.evaluate!=='function')throw Error('Missing unified-strategy.js');
 
 const loaded=readFile(STATE_FILE,{});
-const ACTIVE_STRATEGY='GAUTAM_TWO_LINE_1M_CRYPTO';
+const ACTIVE_STRATEGY='GAUTAM_DOUBLE_SWEEP_1M_CRYPTO_V2';
 // Keep old demo results in a local archive; no more paper orders run.
 if(loaded.paper&&typeof loaded.paper==='object'){
   const archive=path.join(BASE,'binance-paper-archive.json');
@@ -260,7 +260,11 @@ function register(r){
     sym:r.sym,dir:r.dir,en:p.en,stop:p.stop,stop0:p.stop,
     tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,source:config.exchange,
     signalCandle:p.ck,open:now,realizedR:null,targetMode:'fixed3r',
-    confirmationMode:r.confirmationMode||'Gautam two-line · 1m crypto futures',
+    confirmationMode:r.confirmationMode||'Gautam double sweep · strong 1m crypto futures',
+    firstSweepPrice:p.firstSweepPrice??null,
+    secondSweepPrice:p.secondSweepPrice??null,
+    breakLevel:p.breakLevel??null,
+    strength:p.bodyMultiple??null,
     timeframe:p.timeframe||'1m',
     researchOnly:p.researchOnly===true,
     previousDayLevel:p.previousDayLevel||null};
@@ -275,6 +279,10 @@ function settle(t,reason,price,grossR){
     signalCandle:t.signalCandle,source:t.source,
     open:t.open,close:Date.now(),en:t.en,stop:t.stop0,tp:t.tp2,
     confirmationMode:t.confirmationMode||null,
+    firstSweepPrice:t.firstSweepPrice??null,
+    secondSweepPrice:t.secondSweepPrice??null,
+    breakLevel:t.breakLevel??null,
+    strength:t.strength??null,
     timeframe:t.timeframe||'5m',researchOnly:!!t.researchOnly,
     previousDayLevel:t.previousDayLevel||null,
     ex:price,r,pnl:r*t.r$,why:reason});
