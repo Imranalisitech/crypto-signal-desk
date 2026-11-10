@@ -256,8 +256,7 @@ function register(r){
   const trade={id:now+'-'+Math.random().toString(36).slice(2,8),signalKey:key,
     sym:r.sym,dir:r.dir,en:p.en,stop:p.stop,stop0:p.stop,
     tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,source:config.exchange,
-    signalCandle:p.ck,open:now,realizedR:null,targetMode:'fixed3r',
-    horizonMs:4*3600000};
+    signalCandle:p.ck,open:now,realizedR:null,targetMode:'fixed3r'};
   state.open.push(trade);
   state.trackedKeys[key]=now;persist();
   log('CONFIRMED '+r.dir.toUpperCase()+' '+r.sym+' entry='+p.en+' SL='+p.stop+' TP='+p.tp2);
@@ -284,9 +283,22 @@ function monitor(){
     const currentR=dir*(price-trade.en)/unit;
     if(dir*(price-trade.stop)<=0)settle(trade,'Stop loss (1R)',price,-1);
     else if(dir*(price-trade.tp2)>=0)settle(trade,'Final target reached (3R)',price,3);
-    else if(now-trade.open>(trade.horizonMs||4*3600000))
-      settle(trade,'Time stop (4 hours)',price,currentR);
+    // No time stop: only structural SL, final TP, or explicit local manual close
+    // can settle an open simulated trade. Never infer a fill from elapsed time.
   }
+}
+function closeTrackedManually(id){
+  const trade=state.open.find(x=>String(x.id)===String(id));
+  if(!trade)throw Error('Tracked trade not found or already closed');
+  const mark=state.markets[trade.sym],now=Date.now();
+  if(!mark||!Number.isFinite(mark.p)||!(mark.p>0)||now-mark.at>30000)
+    throw Error('Fresh exchange price required to record manual simulated exit');
+  const dir=trade.dir==='long'?1:-1,risk=Math.abs(trade.en-trade.stop0);
+  if(!(risk>0))throw Error('Invalid stored stop-loss distance');
+  const grossR=dir*(mark.p-trade.en)/risk;
+  settle(trade,'Closed manually (simulated only)',mark.p,grossR);
+  return {ok:true,id:trade.id,symbol:trade.sym,price:mark.p,
+    note:'This closed only the simulated trade. It did not submit a real Binance order.'};
 }
 function compactResult(r){
   return {sym:r.sym,status:r.status,dir:r.dir,side:r.dir,
@@ -492,6 +504,30 @@ const server=http.createServer((req,res)=>{
       fundingLimitPct:config.fundingLimitPct,feePct:config.feePct,
       minTurnoverMillions:config.minTurnoverMillions},
       lastSyncAt:state.lastSyncAt});
+  if(url.pathname==='/api/trades/manual-close'){
+    const remote=(req.socket.remoteAddress||'').replace(/^::ffff:/,'');
+    const host=req.headers.host;
+    const origin=req.headers.origin;
+    const localHosts=['127.0.0.1:'+config.port,'localhost:'+config.port];
+    if(req.method!=='POST')return respond(res,405,{error:'POST only'});
+    if(!['127.0.0.1','::1'].includes(remote)||!localHosts.includes(host)||
+       (origin&&!localHosts.some(x=>origin==='http://'+x)))
+      return respond(res,403,{error:'Manual close available from the local desktop only'});
+    if(!String(req.headers['content-type']||'').startsWith('application/json'))
+      return respond(res,415,{error:'JSON required'});
+    let buffer='',bytes=0;
+    req.on('data',chunk=>{bytes+=chunk.length;
+      if(bytes<=2500)buffer+=chunk;else req.destroy()});
+    req.on('end',()=>{
+      try{
+        const body=JSON.parse(buffer||'{}');
+        if(typeof body.id!=='string'||body.confirm!==true)
+          throw Error('Explicit simulated manual-close confirmation required');
+        return respond(res,200,closeTrackedManually(body.id));
+      }catch(e){return respond(res,400,{error:String(e.message).slice(0,180)})}
+    });
+    return;
+  }
   if(url.pathname==='/api/config'&&req.method==='POST'){
     // Reject cross-site browser requests that try to alter laptop settings.
     const allowedOrigins=new Set(['http://127.0.0.1:'+config.port,'http://localhost:'+config.port]);
