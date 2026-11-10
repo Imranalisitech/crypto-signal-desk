@@ -126,19 +126,24 @@
    const values={};
    for(const el of document.querySelectorAll('[data-live-setting]')){
      const raw=el.value.trim();
-     if(!/^[0-9]+$/.test(raw)){
-       $('liveRiskDraft').textContent='Enter a positive whole number without symbols or decimals.';
+     const key=el.dataset.liveSetting;
+     const whole=key==='maxLeverage'||key==='maxOrdersPerDay';
+     if(!(whole?/^[0-9]+$/:/^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$/.test(raw))){
+       $('liveRiskDraft').textContent=whole?
+         'Leverage and daily trades must be positive whole numbers.':
+         'Margin allocation and risk percentage must be positive numbers.';
        el.focus();return;
      }
      const number=Number(raw);
-     if(!Number.isSafeInteger(number)||number<1){
-       $('liveRiskDraft').textContent='Enter a positive whole number within supported numeric precision.';
+     if(!Number.isFinite(number)||number<=0||
+        whole&&!Number.isSafeInteger(number)){
+       $('liveRiskDraft').textContent='Enter a valid positive value.';
        el.focus();return;
      }
-     values[el.dataset.liveSetting]=number;
+     values[key]=number;
    }
-   // Only the two preferences shown here are sent. Previous internal
-   // protective risk controls are not silently changed.
+   // Only the four visible preferences are sent; remaining mandatory
+   // broker safety protections remain unchanged.
    act('settings',values);
  });
  poll();
