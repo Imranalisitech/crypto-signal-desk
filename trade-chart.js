@@ -122,8 +122,11 @@
       tradeKind:kind,
       openedAt:trade.open,closedAt:trade.close,
       outcome:trade.why||null,exitPrice:Number(trade.ex),
-      plan:{en,stop,tp2:tp,sp:risk/en*100,rr,structureExtreme:null},
-      pattern:{name:'Saved trade'}
+      plan:{en,stop,tp2:tp,sp:risk/en*100,rr,structureExtreme:null,
+        previousDayLevel:trade.previousDayLevel||null},
+      confirmationMode:trade.confirmationMode||null,
+      researchOnly:trade.researchOnly===true,
+      pattern:{name:trade.confirmationMode||'Saved trade'}
     };
     return window.openPositionChart(trade.sym,record);
   };
@@ -134,6 +137,10 @@
     const source=result.source==='bybit'||result.source==='binance'?result.source:EX();
     const setup={...result.plan};
     const structure=Number.isFinite(setup.structureExtreme)?setup.structureExtreme:null;
+    const previousDay=setup.previousDayLevel;
+    const hasPreviousDay=previousDay&&
+      Number.isFinite(previousDay.high)&&previousDay.high>0&&
+      Number.isFinite(previousDay.low)&&previousDay.low>0;
     const pattern=result.pattern?.name||'Confirmed candle';
     if(![setup.en,setup.stop,setup.tp2].every(v=>Number.isFinite(v)&&v>0))return;
     close();
@@ -161,6 +168,12 @@
         levels.push(['Recorded exit ',result.exitPrice,'entry']);
     }
     if(structure!==null)levels.push(['Candle structure ',structure,'bad']);
+    if(hasPreviousDay){
+      levels.push(['Previous day high ',previousDay.high,'']);
+      levels.push(['Previous day low ',previousDay.low,'']);
+    }
+    if(result.researchOnly===true||setup.researchOnly===true)
+      levels.push(['Execution ','Research setup — simulated only','bad']);
     for(const item of levels){
       const element=document.createElement('span');
       element.className=item[2];
@@ -196,6 +209,10 @@
       if(structure!==null)lines.push({
         price:structure,color:'#f4ab64',width:1,title:'CANDLE STRUCTURE'
       });
+      if(hasPreviousDay){
+        lines.push({price:previousDay.high,color:'#ba91ed',width:1,title:'PREV DAY HIGH'});
+        lines.push({price:previousDay.low,color:'#9d8dee',width:1,title:'PREV DAY LOW'});
+      }
       if(result.tradeKind==='history'&&Number.isFinite(result.exitPrice)&&result.exitPrice>0){
         lines.push({price:result.exitPrice,color:'#efc36d',width:1,title:'RECORDED EXIT'});
       }
