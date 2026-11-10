@@ -8,7 +8,7 @@ const crypto=require('node:crypto');
 const {execFileSync}=require('node:child_process');
 const BASE='https://fapi.binance.com';
 const DEFAULT_LIVE_CONFIG=Object.freeze({
-  riskPerTradePct:0.2,maxNotionalUSDT:75,maxLeverage:2,
+  riskPerTradePct:0.2,tradeMarginUSDT:25,maxNotionalUSDT:75,maxLeverage:2,
   maxOrdersPerDay:2,maxDailyLossPct:0.75,maxChasePct:0.2,
   maxStopPct:5,minNotionalUSDT:5
 });
@@ -18,7 +18,8 @@ function liveConfig(v={},base={}){
   // Broad, individually editable limits for real-money risk management.
   // Broker/exchange safety and valid non-zero values cannot be disabled.
   const limits=[
-    ['riskPerTradePct',.01,5],['maxNotionalUSDT',5,100000],
+    ['riskPerTradePct',.01,5],['tradeMarginUSDT',1,100000],
+    ['maxNotionalUSDT',5,100000],
     // User-configurable: no arbitrary low application preset.
     // Binance symbol-specific maximum leverage and risk safeguards still apply.
     ['maxLeverage',1,125],['maxOrdersPerDay',1,Number.MAX_SAFE_INTEGER],
@@ -308,14 +309,16 @@ class BinanceLiveBroker{
   if(!lot||!tick)throw Error('Binance Futures precision filters unavailable');
   const stopDist=Math.abs(m-stop);
   const riskBudget=balance.walletBalance*this.config.riskPerTradePct/100;
+  // Both margin allocation (USDT) and WALLET risk budget cap sizing.
   const notional=Math.min(riskBudget*m/stopDist,
-    this.config.maxNotionalUSDT,balance.availableBalance*this.config.maxLeverage*.8);
+    this.config.tradeMarginUSDT*this.config.maxLeverage,
+    100000,balance.availableBalance*this.config.maxLeverage*.8);
   const qty=quantize(notional/m,lot.stepSize);
   const minQty=Number(lot.minQty)||0;
   const minNotional=Math.max(this.config.minNotionalUSDT,
     Number(rule.filters.find(x=>x.filterType==='MIN_NOTIONAL')?.notional)||5);
-  if(qty<minQty||qty*m<minNotional||qty*m>this.config.maxNotionalUSDT)
-    return {accepted:false,reason:'Trade too small for Binance rules or risk budget'};
+  if(qty<minQty||qty*m<minNotional||qty*m>100000)
+    return {accepted:false,reason:'Trade too small for Binance rules or margin/risk budget'};
   const exit=dir==='long'?'SELL':'BUY',side=dir==='long'?'BUY':'SELL';
   // Quantize thresholds against the trigger direction. No threshold may
   // move closer than intended (prefer a wider protective stop).
@@ -326,7 +329,9 @@ class BinanceLiveBroker{
   // Persist BEFORE any real order request. On ambiguous timeout or restart,
   // do not resubmit this confirmation candle.
   const item={key,sym,dir,clientId,createdAt:Date.now(),entrySignal:en,
-    sl,tpTarget:target,qty,notional:qty*m,status:'PENDING'};
+    sl,tpTarget:target,qty,notional:qty*m,status:'PENDING',
+    allocationUSDT:this.config.tradeMarginUSDT,
+    riskBudgetUSDT:riskBudget,profitLockStage:0};
   this.state.orders.push(item);this.state.keys[key]=Date.now();
   this.persist();this.record('ENTRY_REQUESTED',{sym,dir,notional:item.notional});
   this.state.dailyOrders=(this.state.dailyOrders||0)+1;
@@ -344,6 +349,7 @@ class BinanceLiveBroker{
     if(!(avg>0&&filled>0))throw Error('Market entry not confirmed FILLED; manual Binance order review required');
     item.status='UNPROTECTED';item.orderId=fill.orderId;item.entry=avg;item.filledQty=filled;
     item.tp=quantize(avg+sg*3*Math.abs(avg-sl),tick,dir==='long'?'ceil':'floor');
+    item.initialSL=sl;item.profitLockStage=0;
     this.persist();this.record('ENTRY_FILLED',{sym,side,price:avg,quantity:filled});
     const stopAlgo=await this.api.call('POST','/fapi/v1/algoOrder',{
       algoType:'CONDITIONAL',symbol:sym,side:exit,positionSide:'BOTH',
