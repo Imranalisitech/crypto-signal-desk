@@ -496,6 +496,7 @@ function respond(res,code,data){
     'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
   res.end(JSON.stringify(data));
 }
+let lastManualRefreshAt=0;
 const server=http.createServer((req,res)=>{
   const url=new URL(req.url,'http://127.0.0.1');
   if(url.pathname==='/api/state'&&req.method==='GET')
@@ -504,6 +505,30 @@ const server=http.createServer((req,res)=>{
       fundingLimitPct:config.fundingLimitPct,feePct:config.feePct,
       minTurnoverMillions:config.minTurnoverMillions},
       lastSyncAt:state.lastSyncAt});
+  if(url.pathname==='/api/refresh'){
+    const remote=(req.socket.remoteAddress||'').replace(/^::ffff:/,'');
+    const host=req.headers.host,origin=req.headers.origin;
+    const localHosts=['127.0.0.1:'+config.port,'localhost:'+config.port];
+    if(req.method!=='POST')return respond(res,405,{error:'POST only'});
+    if(!['127.0.0.1','::1'].includes(remote)||!localHosts.includes(host)||
+       (origin&&!localHosts.some(x=>origin==='http://'+x)))
+      return respond(res,403,{error:'Refresh can only be requested from the local desktop'});
+    if(!String(req.headers['content-type']||'').startsWith('application/json'))
+      return respond(res,415,{error:'JSON required'});
+    const now=Date.now();
+    if(state.scanning)return respond(res,200,{ok:true,scanning:true,
+      message:'Scanner already running — current progress is refreshing'});
+    if(now<cooldownUntil)return respond(res,429,{
+      error:'Exchange rate-limit cooldown: next retry after '+new Date(cooldownUntil).toLocaleTimeString()});
+    if(liveBroker.state.armed)return respond(res,423,{
+      error:'Pause REAL automatic Binance trading before requesting an extra scan. Normal scheduled scans continue.'});
+    if(now-lastManualRefreshAt<90000)return respond(res,429,{
+      error:'Manual refresh limited to once every 90 seconds to protect API rate limits'});
+    lastManualRefreshAt=now;
+    scan().catch(e=>fault('Manual scan failed: '+e.message));
+    return respond(res,202,{ok:true,scanning:true,
+      message:'New scan requested. Existing coin results are retained until it completes.'});
+  }
   if(url.pathname==='/api/trades/manual-close'){
     const remote=(req.socket.remoteAddress||'').replace(/^::ffff:/,'');
     const host=req.headers.host;
