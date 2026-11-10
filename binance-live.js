@@ -6,6 +6,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const crypto=require('node:crypto');
 const {execFileSync}=require('node:child_process');
+const {ProfitLock}=require('./profit-lock.js');
 const BASE='https://fapi.binance.com';
 const DEFAULT_LIVE_CONFIG=Object.freeze({
   riskPerTradePct:0.2,tradeMarginUSDT:25,maxNotionalUSDT:75,maxLeverage:2,
@@ -409,29 +410,90 @@ class BinanceLiveBroker{
           }
         }
         this.record('POSITION_CLOSED',{sym:t.sym});
-      }else if(Date.now()-t.createdAt>=4*3600000){
-        // The original signal system has a four-hour exit. Binance-side
-        // protective SL/TP remains in place even if the laptop sleeps.
+      }else{
+        // No time-based forced close. If the laptop has connectivity,
+        // manage existing Binance-side SL orders based on Binance mark price.
+        // NEVER remove the old protective stop before the new one is accepted.
         const amount=Math.abs(Number(found.positionAmt));
-        if(Math.abs(amount-Number(t.filledQty))>Math.max(0.00000001,Number(t.filledQty)*.001)){
-          this.disarm('Binance position size changed outside this app; check the account manually');
+        if(Math.abs(amount-Number(t.filledQty))>
+           Math.max(0.00000001,Number(t.filledQty)*.001)){
+          this.disarm('Binance position changed outside app; inspect protections');
           continue;
         }
-        if(!t.timeExitRequestedAt){
-          t.timeExitRequestedAt=Date.now();this.persist();
+        if(!t.slAlgoId||!t.tpAlgoId||!(Number(t.entry)>0&&Number(t.tp)>0)){
+          this.disarm('Missing verified SL/TP identifiers; review Binance order protection');
+          continue;
+        }
+        // Existing positions created before the update have no initialSL:
+        // use the original recorded stop, not a recalculated one.
+        const baseStop=Number(t.initialSL||t.sl);
+        const mark=Number(found.markPrice);
+        if(!(mark>0))continue;
+        const step=ProfitLock.next({
+          side:t.dir,entry:t.entry,initialStop:baseStop,
+          stop:t.sl,tp:t.tp,mark,stage:t.profitLockStage||0
+        });
+        if(!step.valid||!step.changed||!step.canApply)continue;
+        const rule=(await this.getSymbols()).get(t.sym);
+        const tick=rule?.filters?.find(x=>x.filterType==='PRICE_FILTER')?.tickSize;
+        if(!tick){
+          this.disarm('Tick size unavailable for protected stop adjustment');continue;
+        }
+        const sg=t.dir==='long'?1:-1;
+        const newStop=quantize(step.stop,tick,t.dir==='long'?'floor':'ceil');
+        const minGap=Math.max(Number(tick)*2,mark*.000005);
+        if(!(sg*(newStop-t.sl)>0&&sg*(mark-newStop)>minGap))continue;
+        // Verify the previous stop exists on Binance BEFORE staging a
+        // replacement. If unknown, do not send new live orders.
+        const oldId=t.slAlgoId;
+        let existing;
+        try{existing=await this.api.call('GET','/fapi/v1/algoOrder',{
+          symbol:t.sym,algoId:oldId
+        })}catch(error){
+          this.disarm('Cannot verify existing Binance SL: '+String(error.message).slice(0,110));
+          continue;
+        }
+        if(!existing||!['NEW','PENDING','TRIGGERING'].includes(String(existing.algoStatus).toUpperCase())){
+          this.disarm('Binance SL not active or unknown — manual review required');
+          continue;
+        }
+        const exit=t.dir==='long'?'SELL':'BUY';
+        const uniqueId=t.clientId.slice(0,15)+'L'+step.stage+Date.now().toString(36).slice(-8);
+        let newAlgo;
+        try{
+          newAlgo=await this.api.call('POST','/fapi/v1/algoOrder',{
+            algoType:'CONDITIONAL',symbol:t.sym,side:exit,
+            positionSide:'BOTH',type:'STOP_MARKET',
+            triggerPrice:newStop,workingType:'MARK_PRICE',
+            closePosition:'true',clientAlgoId:uniqueId
+          });
+          if(!newAlgo?.algoId)throw Error('Binance returned no stop-algo identifier');
+          // After successful NEW placement, remember both IDs so even
+          // a crash cannot silently discard the new or old protection.
+          t.previousSLAlgoId=oldId;t.slAlgoId=newAlgo.algoId;
+          t.sl=newStop;t.profitLockStage=step.stage;
+          t.profitLockProgress=step.progress;
+          this.persist();
+          this.record('PROFIT_LOCK_PROTECTED',{
+            sym:t.sym,stage:step.stage,mark,oldStop:baseStop,
+            updatedStop:newStop,progress:Number(step.progress.toFixed(4))
+          });
           try{
-            const exit=t.dir==='long'?'SELL':'BUY';
-            await this.api.call('POST','/fapi/v1/order',{
-              symbol:t.sym,side:exit,positionSide:'BOTH',type:'MARKET',
-              quantity:amount,reduceOnly:'true',
-              newClientOrderId:t.clientId.slice(0,24)+'TIME'
+            await this.api.call('DELETE','/fapi/v1/algoOrder',{
+              symbol:t.sym,algoId:oldId
             });
-            this.record('FOUR_HOUR_TIME_EXIT_SENT',{sym:t.sym});
+            t.previousSLAlgoId=null;this.persist();
           }catch(error){
-            this.disarm('4h reduce-only close failed: '+String(error.message).slice(0,100));
+            // Two stops may now be active; do not delete either blindly.
+            this.disarm('New stop placed, old SL cancellation UNCONFIRMED: '+
+              String(error.message).slice(0,105));
+            t.error='Check both Binance stop orders; do not re-arm blindly.';
+            this.persist();
           }
-        }else if(Date.now()-t.timeExitRequestedAt>60000){
-          this.disarm('Four-hour time exit not yet confirmed; verify Binance position');
+        }catch(error){
+          // The original stop has NOT been cancelled.
+          this.disarm('Profit-lock placement failed — original SL retained: '+
+            String(error.message).slice(0,110));
         }
       }
     }
