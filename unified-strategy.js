@@ -194,6 +194,71 @@
      !gapOrSweep?'Waiting for imbalance mitigation or sweep':
      'Waiting for 15m trend alignment or structural reversal'};
  }
+ // Supplemental Gautam Jha "two-line" lesson, adapted for 5-minute crypto.
+ // Exact published gold tutorial: prior day's completed high/low on the daily
+ // chart; 1m reversal candle followed by a break of its high/low; stop beyond
+ // the signal/swing extreme. This app uses 5m closed candles, existing RSI,
+ // funding, volume, and 3R instead of his discretionary 80/20 runner exits.
+ // UTC boundaries are appropriate for perpetual crypto, unlike the session
+ // boundaries of the gold CFD in the original example.
+ const DAY=86400000;
+ function priorUTCDay(bars15){
+   if(!Array.isArray(bars15)||bars15.length<97)return null;
+   const last=bars15.at(-1);
+   if(!last||!ok(last.t))return null;
+   const today=Math.floor(last.t/DAY)*DAY,prev=today-DAY;
+   const day=bars15.filter(k=>k.t>=prev&&k.t<today);
+   if(day.length!==96||day[0].t!==prev||
+      day.at(-1).t!==prev+95*900000)return null;
+   if(!day.every(k=>[k.o,k.h,k.l,k.c].every(ok)))return null;
+   return {start:prev,end:today-1,high:Math.max(...day.map(k=>k.h)),
+     low:Math.min(...day.map(k=>k.l)),count:96,timeZone:'UTC'};
+ }
+ function gautamTwoLine(bars15,bars5,dir){
+   const day=priorUTCDay(bars15),sg=dir==='long'?1:-1;
+   const empty={ok:false,dir,day,variant:'5m crypto adaptation',
+     reason:day?'No confirmed previous-day liquidity reversal':
+       'Previous completed UTC day unavailable — need 210 closed 15m candles'};
+   if(!day||!Array.isArray(bars5)||bars5.length<30)return empty;
+   const n=bars5.length,b=bars5[n-2],c=bars5[n-1];
+   const boundary=sg===1?day.low:day.high;
+   const base=bars5.slice(n-24,n-4);
+   const avg=base.reduce((sum,k)=>sum+k.v,0)/base.length;
+   if(!(avg>0))return empty;
+   const barLength=c.h-c.l,body=Math.abs(b.c-b.o);
+   const atr=Math.max(1e-12,base.reduce((sum,k)=>sum+k.h-k.l,0)/base.length);
+   const fresh=sg*(b.c-b.o)>0&&body>0&&
+     sg*(c.c-c.o)>0&&
+     (sg===1?c.c>b.h:c.c<b.l);
+   if(!fresh)return {...empty,reason:'Waiting for reversal candle + next closed candle break'};
+   // A candle must have actually traded through yesterday's liquidity line;
+   // a candle still trapped between the two lines does not qualify.
+   let breach=-1;
+   for(let i=n-2;i>=Math.max(2,n-25);i--){
+     if(sg===1?bars5[i].l<boundary:bars5[i].h>boundary){
+       breach=i;break;
+     }
+   }
+   if(breach<0)return {...empty,reason:'Previous day high/low not taken'};
+   // The signal candle must be reasonably near the traded liquidity zone:
+   // prevents entering hours later after a large completed displacement.
+   const closeEnough=Math.abs(b.c-boundary)<=Math.max(atr*4,b.c*.008);
+   if(!closeEnough)return {...empty,reason:'Signal too far from prior-day liquidity'};
+   const sample=bars5.slice(Math.max(0,breach),n);
+   const extreme=sg===1?Math.min(...sample.map(k=>k.l)):
+     Math.max(...sample.map(k=>k.h));
+   const volRatio=Math.min(b.v,c.v)/avg;
+   const referenceSwing=sg===1?
+     Math.max(...bars5.slice(-25,-2).map(k=>k.h)):
+     Math.min(...bars5.slice(-25,-2).map(k=>k.l));
+   return {ok:true,dir,day,level:boundary,breachTime:bars5[breach].t,
+     triggerTime:c.t,triggerPrice:c.c,signalTime:b.t,
+     extreme,volRatio,patternVolRatio:b.v/avg,confirmVolRatio:c.v/avg,
+     atr,referenceSwing,variant:'5m crypto adaptation',
+     name:sg===1?'PDL taken → bullish candle high broken':
+       'PDH taken → bearish candle low broken',
+     reason:'Previous-day liquidity taken, fresh reversal candle and next-candle break'};
+ }
  function evaluate({bars15,bars5,mark,fundingPct,maxFunding=0.05,
                     account=2000,risk=0.5}){
    const insufficient=!(bars15?.length>=64&&bars5?.length>=40&&ok(mark)&&mark>0);
@@ -201,7 +266,14 @@
    const rsi=mapRSI(bars15,bars5);
    const evaluated=['long','short'].map(side=>{
      const sg=side==='long'?1:-1;
-     const pattern=candlestick(bars5,side);
+     const originalPattern=candlestick(bars5,side);
+     const gautam=gautamTwoLine(bars15,bars5,side);
+     const pattern=originalPattern||(gautam.ok?{
+       name:gautam.name,confirmTime:gautam.triggerTime,
+       confirmClose:gautam.triggerPrice,patternTime:gautam.signalTime,
+       patternVolRatio:gautam.patternVolRatio,confirmVolRatio:gautam.confirmVolRatio,
+       volumeRatio:gautam.volRatio,extreme:gautam.extreme,atr:gautam.atr
+     }:null);
      const rsiOK=rsiAligned(rsi,side);
      const volOK=!!pattern&&pattern.volumeRatio>=1.30&&pattern.patternVolRatio>=1.30;
      const fundingOK=ok(fundingPct)&&Math.abs(fundingPct)<=Math.max(0,maxFunding)&&
@@ -213,10 +285,12 @@
      // Neither stop distance nor projected leverage may reject an otherwise
      // qualified confluence signal. Estimated exposure is INFORMATIONAL only.
      const extreme=pattern?
-       (structure.sweep?.ok?
-         (sg===1?Math.min(pattern.extreme,structure.sweep.extreme):
-           Math.max(pattern.extreme,structure.sweep.extreme)):
-         pattern.extreme):null;
+       (gautam.ok?(sg===1?Math.min(pattern.extreme,gautam.extreme):
+         Math.max(pattern.extreme,gautam.extreme)):
+         structure.sweep?.ok?
+          (sg===1?Math.min(pattern.extreme,structure.sweep.extreme):
+            Math.max(pattern.extreme,structure.sweep.extreme)):
+          pattern.extreme):null;
      const stop=pattern?extreme-sg*Math.max(mark*.00035,pattern.atr*.12):null;
      const structureCorrect=pattern&&Number.isFinite(stop)&&sg*(mark-stop)>0;
      const riskDistance=structureCorrect?Math.abs(mark-stop):null;
@@ -239,19 +313,31 @@
        {ok:candleOK,t:'Closed candlestick pattern + confirmation'},
        {ok:volOK,t:'Volume at least 1.30x recent baseline'},
        {ok:fundingOK,t:'Funding rate within risk limits'},
-       {ok:structureOK,t:'Liquidity sweep or mitigated imbalance + 15m structure confirmation'},
+       {ok:structureOK||gautam.ok,
+        t:'Existing liquidity/15m structure OR previous-day high/low two-line confirmation'},
        {ok:priceOK,t:'Price close enough to confirmed candle and stop on correct side'}
      ];
      const qualified=checkItems.every(x=>x.ok);
+     // Preserve the previously authorized live-trading model. A signal that
+     // qualifies *only* through the newly researched Gautam path is enrolled
+     // for SIMULATED tracking, but is not eligible to place real Binance orders.
+     const executionReady=qualified&&structureOK;
+     const confirmationMode=qualified?
+       (structureOK?(gautam.ok?'Unified + previous-day confluence':'Unified liquidity'):
+         'Gautam-inspired two-line (5m adaptation; simulated only)'):
+       gautam.ok?'Previous-day reversal candidate':'Unconfirmed';
      const score=Math.min(100,Math.round(20*Number(rsiOK)+20*Number(candleOK)+
        20*Number(volOK)+10*Number(fundingOK)+20*Number(structureOK)+10*Number(priceOK)));
      const plan=pattern&&structureCorrect?{en:entry,stop,tp1,tp2,sp:stopPct,r$:cashRisk,nt,
        lev:leverage,ck:pattern.confirmTime,rr,tp1pct:targetPct,tp2pct:targetPct,
-       targetMode:'fixed3r',setupType:'RSI + Candle + Volume + Funding + Liquidity / FVG',
-       structureExtreme:extreme,structureContext:structure.kind}:null;
-     return {side,status:qualified?'confirm':rsiOK?'watch':'none',
-       score,rsi,pattern,structure,fundingPct,volumeRatio:pattern?.volumeRatio??null,
-       checks:checkItems,G:checkItems,plan,setupType:'Liquidity-confirmed confluence',ok:qualified,
+       targetMode:'fixed3r',setupType:confirmationMode,
+       structureExtreme:extreme,structureContext:structure.kind,
+       previousDayLevel:gautam.day||null,
+       researchOnly:!executionReady}:null;
+     return {side,status:qualified?'confirm':rsiOK||gautam.ok?'watch':'none',
+       score,rsi,pattern,structure,gautam,confirmationMode,executionReady,
+       fundingPct,volumeRatio:pattern?.volumeRatio??null,
+       checks:checkItems,G:checkItems,plan,setupType:confirmationMode,ok:qualified,
        reason:qualified?'Confluence confirmed':checkItems.filter(x=>!x.ok).map(x=>x.t).join('; ')};
    });
    evaluated.sort((a,b)=>
@@ -263,6 +349,7 @@
  }
  root.UnifiedStrategy=Object.freeze({
    rsiSeries,mapRSI,candlestick,rsiAligned,emaSeries,marketTrend,
-   liquiditySweep,mitigatedImbalance,structureContext,evaluate
+   liquiditySweep,mitigatedImbalance,structureContext,
+   priorUTCDay,gautamTwoLine,evaluate
  });
 })(window);
