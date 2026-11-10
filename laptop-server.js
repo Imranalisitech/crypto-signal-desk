@@ -6,6 +6,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
 const {BinanceLiveBroker,liveConfig}=require('./binance-live.js');
+const {ProfitLock}=require('./profit-lock.js');
 
 if(typeof fetch!=='function')throw Error('Node.js 20 or newer required.');
 const BASE=__dirname,STATE_FILE=path.join(BASE,'laptop-state.json'),
@@ -267,6 +268,7 @@ function register(r){
   if(Math.abs(rr-3)>.01)return false;
   const trade={id:now+'-'+Math.random().toString(36).slice(2,8),signalKey:key,
     sym:r.sym,dir:r.dir,en:p.en,stop:p.stop,stop0:p.stop,
+    profitLockStage:0,
     tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,source:config.exchange,
     signalCandle:p.ck,open:now,realizedR:null,targetMode:'fixed3r',
     confirmationMode:r.confirmationMode||'Dual Liquidity Reclaim · strong 1m crypto futures',
@@ -293,6 +295,7 @@ function settle(t,reason,price,grossR){
     breakLevel:t.breakLevel??null,
     strength:t.strength??null,
     timeframe:t.timeframe||'5m',researchOnly:!!t.researchOnly,
+    finalManagedStop:t.stop,profitLockStage:t.profitLockStage||0,
     previousDayLevel:t.previousDayLevel||null,
     ex:price,r,pnl:r*t.r$,why:reason});
   state.open=state.open.filter(x=>x.id!==t.id);
@@ -308,10 +311,26 @@ function monitor(){
     const price=mark.p,dir=trade.dir==='long'?1:-1,unit=Math.abs(trade.en-trade.stop0);
     if(!(unit>0))continue;
     const currentR=dir*(price-trade.en)/unit;
-    if(dir*(price-trade.stop)<=0)settle(trade,'Stop loss (1R)',price,-1);
-    else if(dir*(price-trade.tp2)>=0)settle(trade,'Final target reached (3R)',price,3);
-    // No time stop: only structural SL, final TP, or explicit local manual close
-    // can settle an open simulated trade. Never infer a fill from elapsed time.
+    if(dir*(price-trade.stop)<=0){
+      settle(trade,trade.profitLockStage>0?
+        'Profit-lock stop reached (stage '+trade.profitLockStage+')':
+        'Stop loss reached',price,currentR);
+    }else if(dir*(price-trade.tp2)>=0){
+      settle(trade,'Final target reached (3R)',price,currentR);
+    }else{
+      const next=ProfitLock.next({side:trade.dir,entry:trade.en,
+        stop:trade.stop,initialStop:trade.stop0,tp:trade.tp2,
+        mark:price,stage:trade.profitLockStage||0});
+      if(next.valid&&next.changed&&next.canApply){
+        trade.stop=next.stop;trade.profitLockStage=next.stage;
+        trade.profitLockProgress=next.progress;
+        persist();
+        log('SIMULATED PROFIT LOCK '+trade.sym+' stage '+next.stage+
+          ' SL '+next.stop+' TP progress '+(next.progress*100).toFixed(1)+'%');
+      }
+    }
+    // Simulated monitoring observes sampled exchange prices; a fast touch
+    // and reversal between polling intervals can be missed. No time stop.
   }
 }
 function closeTrackedManually(id){
@@ -720,6 +739,7 @@ const server=http.createServer((req,res)=>{
   const name=url.pathname==='/'?'/index.html':url.pathname;
   const fileAllowed={'/index.html':'index.html','/trade-chart.js':'trade-chart.js',
     '/unified-strategy.js':'unified-strategy.js',
+    '/profit-lock.js':'profit-lock.js',
     '/binance-live-ui.js':'binance-live-ui.js'};
   if(req.method!=='GET'||!fileAllowed[name])return respond(res,404,{error:'Not found'});
   try{
