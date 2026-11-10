@@ -37,6 +37,7 @@ const strategy=ctx.window.UnifiedStrategy;
 if(!strategy||typeof strategy.evaluate!=='function')throw Error('Missing unified-strategy.js');
 
 const loaded=readFile(STATE_FILE,{});
+const ACTIVE_STRATEGY='GAUTAM_TWO_LINE_1M_CRYPTO';
 // Keep old demo results in a local archive; no more paper orders run.
 if(loaded.paper&&typeof loaded.paper==='object'){
   const archive=path.join(BASE,'binance-paper-archive.json');
@@ -48,7 +49,9 @@ if(loaded.paper&&typeof loaded.paper==='object'){
 const state={
   version:1,
   createdAt:loaded.createdAt||Date.now(),
-  results:loaded.results&&typeof loaded.results==='object'?loaded.results:{},
+  strategyVersion:ACTIVE_STRATEGY,
+  results:loaded.strategyVersion===ACTIVE_STRATEGY&&loaded.results&&
+    typeof loaded.results==='object'?loaded.results:{},
   live:loaded.live&&typeof loaded.live==='object'?loaded.live:null,
   markets:{},open:Array.isArray(loaded.open)?loaded.open:[],
   history:Array.isArray(loaded.history)?loaded.history:[],
@@ -174,7 +177,7 @@ async function getJson(url){
   }
   throw Error('Market request failed');
 }
-const EXCHANGE_INTERVALS={'5m':'5','15m':'15'};
+const EXCHANGE_INTERVALS={'1m':'1','5m':'5','15m':'15'};
 async function candles(symbol,interval,count){
   if(config.exchange==='bybit'){
     const data=await getJson('https://api.bybit.com/v5/market/kline?category=linear&symbol='+
@@ -247,7 +250,7 @@ function register(r){
   const timestamp=Number(p.ck),now=Date.now();
   // Never open a simulated position on stale confirmation candles after
   // an offline period or several minutes of scanning backlog.
-  if(now-timestamp<0||now-(timestamp+300_000)>12*60_000)return false;
+  if(now-timestamp<0||now-(timestamp+60000)>4*60_000)return false;
   if(![p.en,p.stop,p.tp2,p.sp].every(x=>Number.isFinite(x)&&x>0))return false;
   const dir=r.dir==='long'?1:-1;
   if(dir*(p.en-p.stop)<=0||dir*(p.tp2-p.en)<=0)return false;
@@ -257,7 +260,7 @@ function register(r){
     sym:r.sym,dir:r.dir,en:p.en,stop:p.stop,stop0:p.stop,
     tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,source:config.exchange,
     signalCandle:p.ck,open:now,realizedR:null,targetMode:'fixed3r',
-    confirmationMode:r.confirmationMode||'Unified liquidity',
+    confirmationMode:r.confirmationMode||'Gautam two-line · 1m crypto futures',
     researchOnly:p.researchOnly===true,
     previousDayLevel:p.previousDayLevel||null};
   state.open.push(trade);
@@ -308,11 +311,10 @@ function closeTrackedManually(id){
 function compactResult(r){
   return {sym:r.sym,status:r.status,dir:r.dir,side:r.dir,
     price:r.price,analyzedAt:r.analyzedAt,
-    score:r.score,chg:r.chg,vol:r.vol,G:r.G||r.checks||[],
-    rsi:r.rsi,pattern:r.pattern,structure:r.structure,
-    gautam:r.gautam,confirmationMode:r.confirmationMode,
-    executionReady:r.executionReady,
-    reason:r.reason,fundingPct:r.fundingPct,
+    score:r.score,chg:r.chg,G:r.G||r.checks||[],
+    pattern:r.pattern,gautam:r.gautam,
+    confirmationMode:r.confirmationMode,executionReady:r.executionReady,
+    reason:r.reason,
     plan:r.plan,ok:r.ok};
 }
 let scanning=false;
@@ -352,28 +354,26 @@ async function scan(){
       while(index<scanUniverse.length){
         if(Date.now()<cooldownUntil)break;
         const item=scanUniverse[index++],sym=item.symbol;
-        let record={sym,price:item.price,chg:item.change,vol:item.vol,dir:null,status:'none',
-          score:0,reason:'No qualifying signal',fundingPct:item.fundingPct,
+        let record={sym,price:item.price,chg:item.change,dir:null,status:'none',
+          score:0,reason:'Waiting for previous-day liquidity',
           analyzedAt:Date.now()};
         try{
-          const [raw15,raw5]=await Promise.all([
-            // 210 closed 15m candles cover an entire prior UTC day without
-            // adding another API request (keeps Bybit rate limiting stable).
-            candles(sym,'15m',210),candles(sym,'5m',220)]);
-          const bars15=closed(raw15,15),bars5=closed(raw5,5);
-          if(bars15.length<64||bars5.length<40){
+          const [raw15,raw1]=await Promise.all([
+            // Previous UTC day from 15m bars; Gautam two-line trigger on 1m.
+            candles(sym,'15m',210),candles(sym,'1m',240)]);
+          const bars15=closed(raw15,15),bars1=closed(raw1,1);
+          if(bars15.length<97||bars1.length<35){
             record.status='insufficient';
             record.reason='Insufficient closed candles (15m '+bars15.length+
-              ', 5m '+bars5.length+')';
+              ', 1m '+bars1.length+')';
             state.scanInsufficient++;
           }else{
             const mark=state.markets[sym]?.p||item.price;
             const decision=strategy.evaluate({
-              bars15,bars5,mark,fundingPct:item.fundingPct,
-              maxFunding:config.fundingLimitPct,account:config.account,risk:config.riskPct
+              bars15,bars1,mark,account:config.account,risk:config.riskPct
             });
             const result={...decision,sym,price:mark,dir:decision.side,
-              chg:item.change,vol:item.vol,G:decision.checks||[]};
+              chg:item.change,G:decision.checks||[]};
             record=compactResult(result);
             record.analyzedAt=Date.now();
             state.scanAnalyzed++;
@@ -479,7 +479,7 @@ function snapshot(fullHistory=false){
     lastScanAt:state.lastScanAt,lastScanDurationSec:state.lastScanDurationSec,
     lastPriceAt:state.lastPriceAt,errors:state.errors.slice(-8),
     connection:state.connection,nextScanAt:state.nextScanAt,
-    markets,results:Object.values(state.results),
+    markets,results:Object.values(state.results),strategyVersion:ACTIVE_STRATEGY,
     open:state.open,history,historyTotal:totalHistory,
     trackedKeys:state.trackedKeys};
   while(!fullHistory&&Buffer.byteLength(JSON.stringify(out))>1_900_000&&history.length>100){
