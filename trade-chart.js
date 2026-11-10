@@ -113,17 +113,21 @@
     if(!Array.isArray(records))return;
     const trade=records.find(x=>String(x.id)===String(id));
     if(!trade||!trade.sym||!['long','short'].includes(trade.dir))return;
-    const en=Number(trade.en),stop=Number(trade.stop0??trade.stop);
+    const en=Number(trade.en);
+    const originalStop=Number(trade.stop0??trade.stop);
+    const stop=Number(kind==='open'?trade.stop:(trade.finalManagedStop??trade.stop0??trade.stop));
     const tp=Number(trade.tp2??trade.tp);
-    if(![en,stop,tp].every(x=>Number.isFinite(x)&&x>0))return;
-    const risk=Math.abs(en-stop),rr=risk?Math.abs(tp-en)/risk:0;
+    if(![en,stop,originalStop,tp].every(x=>Number.isFinite(x)&&x>0))return;
+    const risk=Math.abs(en-originalStop),rr=risk?Math.abs(tp-en)/risk:0;
     if(!(risk>0))return;
     const record={
       status:'confirm',dir:trade.dir,source:trade.source||EX(),
       tradeKind:kind,
       openedAt:trade.open,closedAt:trade.close,
       outcome:trade.why||null,exitPrice:Number(trade.ex),
-      plan:{en,stop,tp2:tp,sp:risk/en*100,rr,structureExtreme:null,
+      plan:{en,stop,originalStop,
+        profitLockStage:trade.profitLockStage||0,
+        tp2:tp,sp:risk/en*100,rr,structureExtreme:null,
         timeframe:trade.timeframe||'5m',
         firstSweepPrice:trade.firstSweepPrice??null,
         secondSweepPrice:trade.secondSweepPrice??null,
@@ -154,6 +158,8 @@
       Number.isFinite(previousDay.high)&&previousDay.high>0&&
       Number.isFinite(previousDay.low)&&previousDay.low>0;
     const pattern=result.pattern?.name||'Confirmed candle';
+    const movedStop=Number(setup.originalStop)>0&&
+      Math.abs(setup.originalStop-setup.stop)>Math.max(setup.en*.00000001,1e-12);
     if(![setup.en,setup.stop,setup.tp2].every(v=>Number.isFinite(v)&&v>0))return;
     close();
     const session=++activeSession;
@@ -176,6 +182,10 @@
       if(result.outcome)levels.push(['Result ',result.outcome,'good']);
       if(Number.isFinite(result.exitPrice)&&result.exitPrice>0)
         levels.push(['Recorded exit ',result.exitPrice,'entry']);
+    }
+    if(movedStop){
+      levels.push(['Original SL ',setup.originalStop,'bad']);
+      levels.push(['Protected profit stage ',String(setup.profitLockStage||'?'),'good']);
     }
     if(structure!==null)levels.push([isDoubleSweep?'Final sweep wick ':'Candle structure ',structure,'bad']);
     if(isDoubleSweep){
@@ -225,6 +235,9 @@
         {price:setup.stop,color:'#fa687a',width:2,title:'STOP LOSS'},
         {price:setup.tp2,color:'#24d6a3',width:2,title:'FINAL TP (3R)'}
       ];
+      if(movedStop)lines.push({
+        price:setup.originalStop,color:'#e58f7b',width:1,title:'ORIGINAL SL'
+      });
       if(structure!==null)lines.push({
         price:structure,color:'#f4ab64',width:1,
         title:isDoubleSweep?'FINAL SWEEP WICK':'CANDLE STRUCTURE'
