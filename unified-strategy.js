@@ -126,7 +126,7 @@
      // Do not buy/sell if the confirmation has failed back into the pool.
      if(!(sg*(last.c-level)>atr*.07))continue;
      const laterExtreme=sg===1?Math.min(...next.map(x=>x.l)):Math.max(...next.map(x=>x.h));
-     if(sg*(extreme-laterExtreme)<-atr*.13)continue;
+     if(sg*(extreme-laterExtreme)>atr*.13)continue;
      const localShift=sg===1?Math.max(...bars.slice(Math.max(0,i-5),i).map(x=>x.h)):
        Math.min(...bars.slice(Math.max(0,i-5),i).map(x=>x.l));
      return {ok:true,level,extreme,time:k.t,confirmedAt:next[reclaim]?.t,
