@@ -132,7 +132,7 @@
         previousDayLevel:trade.previousDayLevel||null},
       confirmationMode:trade.confirmationMode||null,
       researchOnly:trade.researchOnly===true,
-      pattern:{name:trade.confirmationMode||'Saved trade'}
+      pattern:{name:(trade.confirmationMode||'Saved trade').replace(/Gautam(?: Jha)?/gi,'Dual Liquidity Reclaim')}
     };
     return window.openPositionChart(trade.sym,record);
   };
