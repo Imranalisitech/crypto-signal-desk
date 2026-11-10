@@ -716,6 +716,29 @@ $('watchSearch').addEventListener('input',()=>{watchQuery=$('watchSearch').value
 $('scanSearch').addEventListener('input',()=>{scanQuery=$('scanSearch').value.trim().toLowerCase();scanLimit=80;renderScanInspector()});
 $('scanFilter').addEventListener('change',()=>{scanFilter=$('scanFilter').value;scanLimit=80;renderScanInspector()});
 $('scanMore').addEventListener('click',()=>{scanLimit+=100;renderScanInspector()});
+$('refreshScan').addEventListener('click',async()=>{
+ const button=$('refreshScan'),label=button.textContent;
+ button.disabled=true;button.textContent='↻ Refreshing…';
+ try{
+   if(remoteMode&&remoteSource==='cloud'){
+     await remotePoll();
+     window.alert('Updated the online display. New scans are started by the Windows laptop app, not from the website.');
+   }else if(remoteMode&&remoteSource==='local'){
+     if(!remoteOnline)throw Error('Laptop server unavailable. Use the desktop tray icon to reconnect the scanner.');
+     const response=await fetch('/api/refresh',{method:'POST',
+       headers:{'Content-Type':'application/json'},body:'{}'});
+     const result=await response.json();
+     if(!response.ok)throw Error(result.error||'Unable to refresh scanner');
+     await remotePoll();
+     $('scanDescription').textContent=result.message||'Refresh requested';
+   }else{
+     if(busy)await Promise.resolve();else scan();
+     render();
+   }
+ }catch(e){window.alert('Refresh: '+String(e.message||e))}
+ finally{button.disabled=false;button.textContent=label;}
+});
+
 $('wl').addEventListener('scroll',()=>{const el=$('wl');if(el.scrollTop+el.clientHeight>=el.scrollHeight-90){const all=Object.values(R).filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).filter(r=>r.sym.toLowerCase().includes(watchQuery));if(watchLimit<all.length){const pos=el.scrollTop;watchLimit+=50;render();el.scrollTop=pos}}});
 $('allResults').addEventListener('click',()=>{showAllHistory=!showAllHistory;render()});
 $('clearHistory').addEventListener('click',()=>{if(remoteMode)return;if(!confirm('Permanently clear all saved trade result history? Open tracked trades will be kept.'))return;st.hist=[];save();render()});
