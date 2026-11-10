@@ -125,6 +125,10 @@
       outcome:trade.why||null,exitPrice:Number(trade.ex),
       plan:{en,stop,tp2:tp,sp:risk/en*100,rr,structureExtreme:null,
         timeframe:trade.timeframe||'5m',
+        firstSweepPrice:trade.firstSweepPrice??null,
+        secondSweepPrice:trade.secondSweepPrice??null,
+        breakLevel:trade.breakLevel??null,
+        bodyMultiple:trade.strength??null,
         previousDayLevel:trade.previousDayLevel||null},
       confirmationMode:trade.confirmationMode||null,
       researchOnly:trade.researchOnly===true,
@@ -139,6 +143,12 @@
     const source=result.source==='bybit'||result.source==='binance'?result.source:EX();
     const setup={...result.plan};
     const structure=Number.isFinite(setup.structureExtreme)?setup.structureExtreme:null;
+    const firstSweep=Number(setup.firstSweepPrice);
+    const secondSweep=Number(setup.secondSweepPrice);
+    const breakPrice=Number(setup.breakLevel);
+    const isDoubleSweep=Number.isFinite(firstSweep)&&firstSweep>0&&
+      Number.isFinite(secondSweep)&&secondSweep>0&&
+      Number.isFinite(breakPrice)&&breakPrice>0;
     const previousDay=setup.previousDayLevel;
     const hasPreviousDay=previousDay&&
       Number.isFinite(previousDay.high)&&previousDay.high>0&&
@@ -167,7 +177,16 @@
       if(Number.isFinite(result.exitPrice)&&result.exitPrice>0)
         levels.push(['Recorded exit ',result.exitPrice,'entry']);
     }
-    if(structure!==null)levels.push(['Candle structure ',structure,'bad']);
+    if(structure!==null)levels.push([isDoubleSweep?'Final sweep wick ':'Candle structure ',structure,'bad']);
+    if(isDoubleSweep){
+      levels.push(['First stop run ',firstSweep,'']);
+      levels.push(['Second stop run ',secondSweep,'bad']);
+      levels.push(['Broken swing ',breakPrice,'good']);
+      const strength=Number(setup.bodyMultiple);
+      if(Number.isFinite(strength)&&strength>0)
+        levels.push([result.dir==='long'?'BUY candle strength ':'SELL candle strength ',
+          strength.toFixed(2)+'× typical 1m body','good']);
+    }
     if(hasPreviousDay){
       levels.push(['Previous day high ',previousDay.high,'']);
       levels.push(['Previous day low ',previousDay.low,'']);
@@ -207,8 +226,14 @@
         {price:setup.tp2,color:'#24d6a3',width:2,title:'FINAL TP (3R)'}
       ];
       if(structure!==null)lines.push({
-        price:structure,color:'#f4ab64',width:1,title:'CANDLE STRUCTURE'
+        price:structure,color:'#f4ab64',width:1,
+        title:isDoubleSweep?'FINAL SWEEP WICK':'CANDLE STRUCTURE'
       });
+      if(isDoubleSweep){
+        lines.push({price:firstSweep,color:'#edc17c',width:1,title:'FIRST STOP RUN'});
+        lines.push({price:secondSweep,color:'#e78062',width:1,title:'SECOND STOP RUN'});
+        lines.push({price:breakPrice,color:'#84d2ed',width:1,title:'SWING BREAK'});
+      }
       if(hasPreviousDay){
         lines.push({price:previousDay.high,color:'#ba91ed',width:1,title:'PREV DAY HIGH'});
         lines.push({price:previousDay.low,color:'#9d8dee',width:1,title:'PREV DAY LOW'});
