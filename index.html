@@ -160,7 +160,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
     <label>Data source<select id="ex"><option value="bybit">Bybit (recommended)</option><option value="binance">Binance</option></select></label>
     <label>Account ($)<input id="acct" type="number" value="2000"></label>
     <label>Risk % per trade<input id="risk" type="number" step="0.1" value="0.5"></label>
-    <span class="mut" style="font-size:12px">Gautam Jha two-line only: previous UTC day high/low, 1m reversal and next-candle break. Stop beyond liquidity; TP at 3R.</span>
+    <span class="mut" style="font-size:12px">Gautam two-line extended: two distinct liquidity grabs, previous-day reclaim, swing break and strong closed 1m buying/selling. Stop beyond second wick; TP at 3R.</span>
     <label>Fees maker+taker %<input id="fee" type="number" step="0.005" value="0.075"></label>
     <label>Min 24h volume ($M)<input id="minvol" type="number" value="0"></label>
     <label>Max coins to scan<input id="topn" type="number" value="600"></label>
@@ -203,7 +203,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   <h2 style="color:#ffc1c1">Binance Futures — REAL Account</h2>
   <b class="paper-only" style="background:#75232e;border-color:#e46666">REAL FUNDS · OFF UNTIL YOU ACTIVATE</b>
  </div>
- <p class="paper-note">Live Binance USDⓈ-M Futures. Only Gautam Jha two-line liquidity signals qualify. Your laptop can place actual futures orders <b>only after you explicitly enable live trading</b>. Futures trading can cause rapid losses and liquidation.</p>
+ <p class="paper-note">Live Binance USDⓈ-M Futures. New Gautam double-sweep strategy signals are currently research-only and cannot place live orders. Your laptop can place actual futures orders <b>only after you explicitly enable live trading</b>. Futures trading can cause rapid losses and liquidation.</p>
  <div id="liveStatus" class="paper-status">Live trading DISABLED. The real account is not connected.</div>
  <div id="liveBalance" class="paper-metrics"></div>
  <details class="paper-details" id="liveCredentials">
@@ -249,12 +249,12 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
  <p class="paper-note"><b>Important:</b> Emergency Pause blocks future entries; it does not close already-open Binance positions. Existing Binance-side protective orders stay on the exchange. Realized P&L must be verified from Binance account history. This desktop software is not a replacement for monitoring your exchange account.</p>
 </section>
 
-<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins have crossed a previous-day liquidity level and await a fresh 1m reversal candle and next-candle break. Final TP is 3R; targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
+<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins are awaiting the second liquidity grab, previous-day level reclaim, swing break or strong 1m confirmation. Final TP is 3R; targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 <section id="sot"><h2>Automatically tracked trades <small>every new confirmed signal is recorded without clicking</small></h2><div class="tw" id="ot"></div></section>
 <section><h2>All automatic trade results <span><button id="allResults" type="button" hidden>Show all results</button> <button id="clearHistory" type="button">Clear history</button> <button id="csv" type="button">Export all CSV</button></span></h2>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
 
-<p class="mut" style="font-size:12px">The laptop server tracks confirmed signals while running. Previous trade history remains saved. New signals use only the previous UTC day high/low and the 1m two-candle reversal break; RSI, volume, funding, EMA and FVG are not active indicators. The fixed 3R TP is your risk management rule. Live Binance execution requires separate local activation and additional broker safety limits.</p>
+<p class="mut" style="font-size:12px">The laptop server tracks confirmed signals while running. Previous trade history remains saved. New signals require TWO liquidity grabs, previous-day reclaim, a 1m swing break and strong directional candles; RSI, volume, funding, EMA and FVG are not used. TP remains 3R. New double-sweep signals are SIMULATED ONLY pending testing, even if the Binance connector is enabled.</p>
 </main>
 <div id="tradeChartModal" class="trade-chart-modal" hidden>
   <div id="tradeChartDialog" class="trade-chart-dialog" role="dialog" aria-modal="true" aria-labelledby="tradeChartTitle" tabindex="-1">
@@ -419,7 +419,9 @@ function registerConfirmedTrade(r){
     open:now,signalCandle:p.ck,source:EX(),
     tp1h:false,targetMode:'fixed3r',
     timeframe:p.timeframe||'1m',
-    confirmationMode:r.confirmationMode||'Gautam two-line · 1m crypto futures',
+    confirmationMode:r.confirmationMode||'Gautam double liquidity sweep · 1m',
+    firstSweepPrice:p.firstSweepPrice??null,secondSweepPrice:p.secondSweepPrice??null,
+    breakLevel:p.breakLevel??null,strength:p.bodyMultiple??null,
     researchOnly:p.researchOnly===true,
     previousDayLevel:p.previousDayLevel||null
   };
@@ -434,6 +436,8 @@ function closeT(t,why,px,gross){
     signalCandle:t.signalCandle||null,source:t.source||null,close:Date.now(),
     en:t.en,stop:t.stop0,tp:t.tp2,ex:px,r:net,pnl:net*t.r$,why,
     confirmationMode:t.confirmationMode||null,
+    firstSweepPrice:t.firstSweepPrice??null,secondSweepPrice:t.secondSweepPrice??null,
+    breakLevel:t.breakLevel??null,strength:t.strength??null,
     timeframe:t.timeframe||'5m',researchOnly:!!t.researchOnly,
     previousDayLevel:t.previousDayLevel||null});
   st.open=st.open.filter(x=>x.id!==t.id);save();
@@ -477,13 +481,15 @@ function card(r){
  const checks=[
   ['Entry',fp(p.en)],['SL ('+f(p.sp,2)+'%)',fp(p.stop)],
   ['Final TP (3R / '+f(p.tp2pct,2)+'%)',fp(p.tp2)],['Target R:R','1 : '+f(p.rr,1)],
-  ['Strategy','Gautam Jha — previous-day two-line'],
+  ['Strategy','Gautam-inspired double liquidity grab (1m)'],
   ['Previous day high',fp(day.high)],['Previous day low',fp(day.low)],
-  ['Liquidity',g.dir==='long'?'PDL breached':'PDH breached'],
-  ['1m confirmation',g.name||'Reversal candle + next candle break'],
-  ['Stop placement','Beyond swept liquidity wick'],
-  ['Live execution',r.executionReady===true?
-      'Eligible after separate Binance account activation':'Not eligible']
+  ['First stop run',fp(g.firstExtreme)],['Second deeper stop run',fp(g.secondExtreme)],
+  ['Previous-day level reclaimed',g.levelReclaimed?'Yes':'No'],
+  ['Intervening swing broken',fp(g.structureBreakLevel)],
+  ['Strong '+(r.dir==='long'?'buying':'selling')+' candles',
+    g.strongPressure?'2 consecutive closed 1m · '+f(g.bodyMultiple,2)+'× typical body':'Waiting'],
+  ['Stop placement','Beyond SECOND swept wick'],
+  ['Execution','SIMULATED ONLY · New method not live-enabled']
  ];
  return '<div class="card '+r.dir+'" data-a="chart" data-s="'+r.sym+
   '" role="button" tabindex="0"><div class="ch"><button class="coin-chart" type="button" data-a="chart" data-s="'+r.sym+'">'+
@@ -592,9 +598,11 @@ function renderScanInspector(){
     const priceCell=Number.isFinite(livePrice)&&livePrice>0?fp(livePrice):
       Number.isFinite(storedPrice)&&storedPrice>0?
         '<span title="Last analyzed price — NOT live">'+fp(storedPrice)+' (saved)</span>':'—';
-    const jha=r.gautam?.ok?r.gautam.name:
-      r.gautam?.boundaryCrossed?'Previous-day level taken — awaiting 1m break':
-      r.gautam?.day?'Not triggered':'Previous UTC day unavailable';
+    const jha=r.gautam?.ok?
+      '2 grabs + reclaim + swing break + strong '+(r.dir==='long'?'BUY':'SELL'):
+      r.gautam?.secondSweep?'Second grab · awaiting reclaim/structure/strong 1m closes':
+      r.gautam?.firstSweep?'First grab only — second grab required':
+      r.gautam?.day?'No liquidity event':'Previous UTC day unavailable';
     return '<tr><td>'+link+'</td><td>'+safe(r.dir||'—')+'</td><td>'+
       priceCell+'</td><td>'+safe(c.name||'—')+
       '</td><td>'+safe(r.gautam?.day?.high!=null?fp(r.gautam.day.high):'—')+
@@ -605,14 +613,14 @@ function renderScanInspector(){
   });
   const scroll=$('scanCoinTable').scrollTop;
   $('scanCoinTable').innerHTML=tbl(
-    ['Coin','Side','Price','1m reversal','Prev day high','Prev day low','Gautam trigger','Score','Result','Analysis / reason'],rows,
+    ['Coin','Side','Price','1m candles','Prev day high','Prev day low','Double sweep confirmation','Score','Result','Analysis / reason'],rows,
     running?'Scan in progress; previous results remain visible until analysis completes.':
     'No stored coin results yet. Check the scanner diagnostics above.');
   $('scanCoinTable').scrollTop=scroll;
   const recent=Array.isArray(meta.scanRecent)?meta.scanRecent.slice(0,4):[];
   $('scanHelp').textContent=(running?'Current scan is processing markets. ':'')+
-    'Only Gautam two-line checks are used: yesterday high/low, liquidity breach, fresh 1m reversal and next closed candle break. '+
-    'Real Binance execution requires manual account activation and independent risk limits. TP stays 3R.'+
+    'New confirmation requires a second deeper stop run, reclaim of yesterday high/low, a break of the intervening swing and two strong closed 1m candles. '+
+    'New strategy signals are SIMULATED ONLY pending validation; no automatic real Binance orders. TP stays 3R.'+
     (recent.length?' · Recently scanned: '+recent.map(x=>x.sym).join(', '):'');
 }
 function render(){
@@ -656,7 +664,7 @@ function render(){
 const wl=wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).slice(0,watchLimit);
 $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).length+' coins · scroll for more';
   $('wl').innerHTML=tbl(
- ['','Coin','Side','Price','Previous day level','1m status','Score','Waiting for'],
+ ['','Coin','Side','Price','Previous day level','Double grab status','Score','Waiting for'],
  wl.map(r=>{
   const missing=r.G?r.G.filter(x=>!x.ok).map(x=>x.t):[];
   const g=r.gautam||{};
@@ -665,7 +673,7 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
    (r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'—')+
    '</td><td>'+fp(M[r.sym]?.p||r.price)+
    '</td><td>'+boundary+'</td><td>'+
-   (g.signalCandle?'Signal candle seen':'Waiting for reversal')+'</td><td>'+
+   (g.secondSweep?'Second sweep seen':g.firstSweep?'First sweep only':'Awaiting first grab')+'</td><td>'+
    f(r.score,0)+'</td><td class="mut">'+(missing.join('; ')||r.reason||'—')+'</td></tr>';
  }), 'No candidates near yesterday high/low.');
  $('wl').scrollTop=watchScroll;
@@ -791,12 +799,12 @@ function adoptLaptop(snapshot,source,online,lastSeen){
  remoteHistoryTruncated=!!snapshot.historyTruncated;
  scanMeta=snapshot;
  if(['bybit','binance'].includes(snapshot.exchange))$('ex').value=snapshot.exchange;
- const strategyMatches=snapshot.strategyVersion==='GAUTAM_TWO_LINE_1M_CRYPTO';
+ const strategyMatches=snapshot.strategyVersion==='GAUTAM_DOUBLE_SWEEP_1M_CRYPTO_V2';
  R=strategyMatches?
     Object.fromEntries(snapshot.results.filter(x=>x&&x.sym).map(x=>[x.sym,x])):{};
  if(!strategyMatches){
    scanMeta={...snapshot,scanPhase:'UPDATE_REQUIRED',
-     scanMessage:'Your laptop is still running the previous mixed strategy. Install the Gautam-only desktop update; old signals are hidden.'};
+     scanMessage:'Desktop scanner update required: install the Double Liquidity confirmation update. Existing trade history is preserved; older signals are hidden.'};
  }
  M=snapshot.markets||{};
  st.open=snapshot.open;st.hist=snapshot.history;
