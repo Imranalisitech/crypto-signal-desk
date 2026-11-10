@@ -550,6 +550,45 @@ const server=http.createServer((req,res)=>{
     return respond(res,202,{ok:true,scanning:true,
       message:'New scan requested. Existing coin results are retained until it completes.'});
   }
+  if(url.pathname==='/api/trades/clear-history'){
+    const remote=(req.socket.remoteAddress||'').replace(/^::ffff:/,'');
+    const host=req.headers.host,origin=req.headers.origin;
+    const localHosts=['127.0.0.1:'+config.port,'localhost:'+config.port];
+    if(req.method!=='POST')return respond(res,405,{error:'POST only'});
+    if(!['127.0.0.1','::1'].includes(remote)||!localHosts.includes(host)||
+       (origin&&!localHosts.some(x=>origin==='http://'+x)))
+      return respond(res,403,{error:'Clear history requires local desktop access'});
+    if(!String(req.headers['content-type']||'').startsWith('application/json'))
+      return respond(res,415,{error:'JSON required'});
+    let raw='',size=0;
+    req.on('data',part=>{size+=part.length;
+      if(size<1000)raw+=part;else req.destroy()});
+    req.on('end',()=>{
+      try{
+        const request=JSON.parse(raw||'{}');
+        if(request.phrase!=='CLEAR CLOSED HISTORY')
+          throw Error('Exact confirmation phrase CLEAR CLOSED HISTORY required');
+        const count=state.history.length;
+        // An immutable on-disk archive is written before history is cleared.
+        // It does not contain Binance API credentials or the real order ledger.
+        if(count>0){
+          const archive=path.join(BASE,
+            'closed-trade-history-backup-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json');
+          fs.writeFileSync(archive,JSON.stringify({
+            backupAt:new Date().toISOString(),type:'simulated-closed-trade-history',
+            count,history:state.history
+          },null,2),{encoding:'utf8',flag:'wx'});
+          state.history=[];
+          persistImmediate();
+          log('CLOSED SIMULATED HISTORY CLEARED '+count+
+              ' entries; archived locally; open trades and real orders retained');
+        }
+        respond(res,200,{ok:true,cleared:count,
+          message:'Closed simulated trade history cleared and backed up locally. Open positions preserved.'});
+      }catch(e){respond(res,400,{error:String(e.message).slice(0,200)})}
+    });
+    return;
+  }
   if(url.pathname==='/api/trades/manual-close'){
     const remote=(req.socket.remoteAddress||'').replace(/^::ffff:/,'');
     const host=req.headers.host;
