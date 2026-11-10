@@ -403,7 +403,7 @@ class BinanceLiveBroker{
       if(!found||Math.abs(Number(found.positionAmt)||0)===0){
         t.status='CLOSED';t.closedAt=Date.now();
         t.outcome='Binance confirms position flat; inspect real trade history for realized P&L';
-        for(const algo of [t.slAlgoId,t.tpAlgoId]){
+        for(const algo of [t.slAlgoId,t.tpAlgoId,t.previousSLAlgoId]){
           if(algo!=null){
             try{await this.api.call('DELETE','/fapi/v1/algoOrder',{algoId:algo,symbol:t.sym})}
             catch(_){}
@@ -411,6 +411,15 @@ class BinanceLiveBroker{
         }
         this.record('POSITION_CLOSED',{sym:t.sym});
       }else{
+        // Do not mutate existing REAL exchange orders unless a human has
+        // explicitly re-armed this session. Prior Binance stop remains active.
+        if(!this.state.armed)continue;
+        // Never stage another replacement while a previous cancellation
+        // is ambiguous; leave both protective stops and require review.
+        if(t.previousSLAlgoId!=null){
+          this.disarm('Old stop cancellation unresolved; check Binance algo orders');
+          continue;
+        }
         // No time-based forced close. If the laptop has connectivity,
         // manage existing Binance-side SL orders based on Binance mark price.
         // NEVER remove the old protective stop before the new one is accepted.
