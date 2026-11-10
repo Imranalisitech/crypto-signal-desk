@@ -322,6 +322,8 @@ IDS.forEach(i=>{if(st.set[i]!=null)$(i).value=st.set[i]});
 try{banUntil=+localStorage.getItem('ban_'+EX())||0}catch(e){}
 let R={},M={},audio=null,notif=false,busy=false,lastScan=null,err='',prog='';
 let watchLimit=50,watchQuery='',showAllHistory=false,scanMeta=null,scanQuery='',scanFilter='all',scanLimit=80;
+let historyClearEpoch=0;
+try{historyClearEpoch=Math.max(0,Number(localStorage.getItem('cryptoClosedHistoryClearEpoch'))||0)}catch(_){}
 let lim=false,dur=0,scanFailures=0,liveRenderTimer=null;
 function queueLiveRender(){
   if(liveRenderTimer!==null)return;
@@ -804,6 +806,10 @@ $('clearHistory').addEventListener('click',async()=>{
       });
       const out=await response.json();
       if(!response.ok)throw Error(out.error||'Unable to clear history');
+      historyClearEpoch=Math.max(historyClearEpoch,Number(out.historyClearEpoch)||Date.now());
+      try{localStorage.setItem('cryptoClosedHistoryClearEpoch',String(historyClearEpoch))}catch(_){}
+      st.hist=[];
+      render();
       await remotePoll();
       window.alert(out.cleared+' closed simulated records cleared. Local backup saved. Open trades remain.');
     }else{
@@ -813,6 +819,8 @@ $('clearHistory').addEventListener('click',async()=>{
       const url=URL.createObjectURL(archive),link=document.createElement('a');
       link.href=url;link.download='simulated-trade-history-backup-'+Date.now()+'.json';link.click();
       setTimeout(()=>URL.revokeObjectURL(url),10000);
+      historyClearEpoch=Math.max(historyClearEpoch,Date.now());
+      try{localStorage.setItem('cryptoClosedHistoryClearEpoch',String(historyClearEpoch))}catch(_){}
       st.hist=[];save();render();
       window.alert('Browser-only closed history cleared. Keep the downloaded backup.');
     }
@@ -866,7 +874,15 @@ function adoptLaptop(snapshot,source,online,lastSeen){
      scanMessage:'Desktop scanner update required: install the Double Liquidity confirmation update. Existing trade history is preserved; older signals are hidden.'};
  }
  M=snapshot.markets||{};
- st.open=snapshot.open;st.hist=snapshot.history;
+ const serverClearEpoch=Number(snapshot.historyClearEpoch)||0;
+ if(serverClearEpoch>historyClearEpoch){
+   historyClearEpoch=serverClearEpoch;
+   try{localStorage.setItem('cryptoClosedHistoryClearEpoch',String(historyClearEpoch))}catch(_){}
+ }
+ st.open=snapshot.open;
+ // Ignore old cached/remote snapshots after the user has cleared history.
+ // Newly closed trades still appear because their close time is later.
+ st.hist=snapshot.history.filter(item=>Number(item.close)>historyClearEpoch);
  st.trackedKeys=snapshot.trackedKeys||{};
  scanFailures=snapshot.scanFailures||0;
  lastScan=snapshot.lastScanAt?new Date(snapshot.lastScanAt):null;
