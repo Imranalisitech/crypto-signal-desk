@@ -508,7 +508,8 @@ function renderScanInspector(){
   const labels={RUNNING:'SCANNING',COMPLETE:'COMPLETE',
     COMPLETE_WITH_ERRORS:'COMPLETED WITH ERRORS',RATE_LIMITED:'RATE LIMITED',
     PARTIAL:'PARTIAL SCAN',NO_DATA:'NO MARKET DATA',ERROR:'SCAN ERROR',
-    UNKNOWN:'STATUS NOT YET AVAILABLE',IDLE:'NOT STARTED'};
+    UNKNOWN:'STATUS NOT YET AVAILABLE',IDLE:'NOT STARTED',
+    UPDATE_REQUIRED:'DESKTOP UPDATE REQUIRED'};
   const scanBadge=remoteMode&&!remoteOnline?'SERVER DISCONNECTED':
     remoteMode&&!remoteMarketFresh&&phase==='RUNNING'?'WAITING FOR EXCHANGE PRICES':
     labels[phase]||phase;
@@ -589,28 +590,27 @@ function renderScanInspector(){
     const priceCell=Number.isFinite(livePrice)&&livePrice>0?fp(livePrice):
       Number.isFinite(storedPrice)&&storedPrice>0?
         '<span title="Last analyzed price — NOT live">'+fp(storedPrice)+' (saved)</span>':'—';
-    const jha=r.gautam?.ok?
-      'PDH/PDL reversal'+(r.executionReady===false?' · simulated only':''):
-      r.gautam?.day?'Not triggered':'No full prior UTC day';
+    const jha=r.gautam?.ok?r.gautam.name:
+      r.gautam?.boundaryCrossed?'Previous-day level taken — awaiting 1m break':
+      r.gautam?.day?'Not triggered':'Previous UTC day unavailable';
     return '<tr><td>'+link+'</td><td>'+safe(r.dir||'—')+'</td><td>'+
       priceCell+'</td><td>'+safe(c.name||'—')+
-      '</td><td>'+(Number.isFinite(c.volumeRatio)?f(c.volumeRatio,2)+'×':'—')+
-      '</td><td>'+(Number.isFinite(r.fundingPct)?f(r.fundingPct,4)+'%':'—')+
+      '</td><td>'+safe(r.gautam?.day?.high!=null?fp(r.gautam.day.high):'—')+
+      '</td><td>'+safe(r.gautam?.day?.low!=null?fp(r.gautam.day.low):'—')+
       '</td><td>'+safe(jha)+'</td>'+
       '<td>'+(Number.isFinite(r.score)?f(r.score,0):'—')+
       '</td><td>'+status+'</td><td class="mut">'+reason+'</td></tr>';
   });
   const scroll=$('scanCoinTable').scrollTop;
   $('scanCoinTable').innerHTML=tbl(
-    ['Coin','Side','Price','Candle','Volume','Funding','Previous day','Score','Result','Analysis / reason'],rows,
+    ['Coin','Side','Price','1m reversal','Prev day high','Prev day low','Gautam trigger','Score','Result','Analysis / reason'],rows,
     running?'Scan in progress; previous results remain visible until analysis completes.':
     'No stored coin results yet. Check the scanner diagnostics above.');
   $('scanCoinTable').scrollTop=scroll;
   const recent=Array.isArray(meta.scanRecent)?meta.scanRecent.slice(0,4):[];
   $('scanHelp').textContent=(running?'Current scan is processing markets. ':'')+
-    'The previous-day two-line setup is Gautam-inspired and adapted to closed 5m crypto candles. '+
-    'New confirmation-mode-only signals are SIMULATED; real Binance auto-entry is disabled for them. '+
-    'The original strategy and 3R targets are preserved.'+
+    'Only Gautam two-line checks are used: yesterday high/low, liquidity breach, fresh 1m reversal and next closed candle break. '+
+    'Real Binance execution requires manual account activation and independent risk limits. TP stays 3R.'+
     (recent.length?' · Recently scanned: '+recent.map(x=>x.sym).join(', '):'');
 }
 function render(){
@@ -654,17 +654,19 @@ function render(){
 const wl=wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).slice(0,watchLimit);
 $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).length+' coins · scroll for more';
   $('wl').innerHTML=tbl(
- ['','Coin','Side','Price','Candle','Volume x','Funding %','Score','Status','Still missing'],
+ ['','Coin','Side','Price','Previous day level','1m status','Score','Waiting for'],
  wl.map(r=>{
-  const c=r.pattern||{},miss=r.G?r.G.filter(x=>!x.ok).map(x=>x.t):[];
+  const missing=r.G?r.G.filter(x=>!x.ok).map(x=>x.t):[];
+  const g=r.gautam||{};
+  const boundary=g.level!=null?fp(g.level):'—';
   return '<tr><td>'+star(r.sym)+'</td><td>'+tv(r.sym)+'</td><td>'+
-   (r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'—')+'</td><td>'+fp(M[r.sym].p)+
-   '</td><td>'+(c.name||'—')+'</td><td>'+f(c.volumeRatio,2)+'</td><td>'+f(r.fundingPct,4)+
-   '</td><td>'+f(r.score,0)+'</td><td>'+
-   (r.status==='confirm'?'CONFIRMED':r.status==='watch'?'Watchlist':'Not confirmed')+
-   '</td><td class="mut">'+(r.status==='confirm'?'Nothing missing':miss.join(', ')||'—')+'</td></tr>';
- }), 'No candidates yet.');
-    $('wl').scrollTop=watchScroll;
+   (r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'—')+
+   '</td><td>'+fp(M[r.sym]?.p||r.price)+
+   '</td><td>'+boundary+'</td><td>'+
+   (g.signalCandle?'Signal candle seen':'Waiting for reversal')+'</td><td>'+
+   f(r.score,0)+'</td><td class="mut">'+(missing.join('; ')||r.reason||'—')+'</td></tr>';
+ }), 'No candidates near yesterday high/low.');
+ $('wl').scrollTop=watchScroll;
   $('ot').innerHTML=tbl(['Coin','Side','Entry','Now','Stop','Final TP','Live R','Age','View trade chart',''],st.open.map(o=>{
     const market=M[o.sym];
     const fresh=!remoteMode||(
@@ -756,7 +758,7 @@ document.addEventListener('input',()=>{
    clearTimeout(sendConfigTimeout);
    sendConfigTimeout=setTimeout(()=>{
      const body={exchange:$('ex').value,account:n('acct'),riskPct:n('risk'),
-       fundingLimitPct:n('fundlim'),feePct:n('fee'),
+       feePct:n('fee'),
        minTurnoverMillions:n('minvol'),scanMax:n('topn')};
      fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
        body:JSON.stringify(body)}).catch(()=>{});
@@ -787,7 +789,13 @@ function adoptLaptop(snapshot,source,online,lastSeen){
  remoteHistoryTruncated=!!snapshot.historyTruncated;
  scanMeta=snapshot;
  if(['bybit','binance'].includes(snapshot.exchange))$('ex').value=snapshot.exchange;
- R=Object.fromEntries(snapshot.results.filter(x=>x&&x.sym).map(x=>[x.sym,x]));
+ const strategyMatches=snapshot.strategyVersion==='GAUTAM_TWO_LINE_1M_CRYPTO';
+ R=strategyMatches?
+    Object.fromEntries(snapshot.results.filter(x=>x&&x.sym).map(x=>[x.sym,x])):{};
+ if(!strategyMatches){
+   scanMeta={...snapshot,scanPhase:'UPDATE_REQUIRED',
+     scanMessage:'Your laptop is still running the previous mixed strategy. Install the Gautam-only desktop update; old signals are hidden.'};
+ }
  M=snapshot.markets||{};
  st.open=snapshot.open;st.hist=snapshot.history;
  st.trackedKeys=snapshot.trackedKeys||{};
