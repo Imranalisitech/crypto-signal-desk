@@ -149,7 +149,10 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 <main>
 <header>
   <div><h1>Crypto Signal Desk — Futures Scalp Scanner</h1><div class="st"><span class="dot" id="dot"></span><span id="stat">Starting…</span></div></div>
-  <div><button id="alert" type="button">Enable sound + notifications</button></div>
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <button id="refreshScan" type="button" title="Refresh scanner data and dashboard">↻ Refresh scan</button>
+    <button id="alert" type="button">Enable sound + notifications</button>
+  </div>
 </header>
 <div id="serverMode" class="server-mode" hidden>Checking laptop scanner…</div>
 <details id="settingsPanel" style="margin-bottom:12px"><summary style="cursor:pointer;font-weight:600">Settings</summary>
@@ -417,7 +420,7 @@ function registerConfirmedTrade(r){
     signalKey:key,sym:r.sym,dir:r.dir,en:p.en,stop:p.stop,
     stop0:p.stop,tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,
     open:now,signalCandle:p.ck,source:EX(),
-    tp1h:false,targetMode:'fixed3r',horizonMs:4*3600000
+    tp1h:false,targetMode:'fixed3r'
   };
   st.open.push(track);
   st.trackedKeys[key]=now;
@@ -441,16 +444,14 @@ function monitor(){
     if(t.targetMode==='fixed3r'){
       if((px-t.stop)*dir<=0)closeT(t,'Stop loss (1R)',px,-1);
       else if((px-t.tp2)*dir>=0)closeT(t,'Final target reached (3R)',px,3);
-      else if(Date.now()-t.open>(t.horizonMs||4*3600000))closeT(t,'Time stop (4 hours)',px,currentR);
+      // No time exit: SL, TP or explicit manual close only.
       continue;
     }
     const firstR=(t.tp1-t.en)*dir/unit,lastR=(t.tp2-t.en)*dir/unit;
-    const limit=extended?(t.horizonMs||4*3600000):15*60000;
-    const partialR=t.tp1h?(extended?0.5*firstR+0.5*currentR:0.5+0.5*currentR):currentR;
     if((px-t.stop)*dir<=0)closeT(t,t.tp1h?'Stopped at breakeven after TP1':'Stop loss',px,t.tp1h?(extended?0.5*firstR:0.5):-1);
     else if((px-t.tp2)*dir>=0)closeT(t,extended?'Final TP reached':'TP2 hit',px,extended?0.5*(firstR+lastR):1.5);
     else if((px-t.tp1)*dir>=0&&!t.tp1h){t.tp1h=true;t.stop=t.en;save()}
-    else if(Date.now()-t.open>limit)closeT(t,extended?'Time stop (4 hours)':'Time stop (15 min)',px,partialR);
+    // Legacy tracked trades also have no automatic time close.
   }
 }
 function ws(){const w=new WebSocket('wss://fstream.binance.com/ws/!markPrice@arr@1s');w.onmessage=e=>{try{for(const x of JSON.parse(e.data)){const m=M[x.s]||(M[x.s]={});m.p=+x.p;m.fr=+x.r*100}}catch(_){}};w.onclose=()=>setTimeout(ws,5000);w.onerror=()=>w.close()}
@@ -475,7 +476,11 @@ function card(r){
   ['Candlestick',pat.name||'—'],['Volume',f(pat.volumeRatio,2)+'x'],
   ['RSI 5m/15m/1h',[rsi.r5,rsi.r15,rsi.r1h].map(x=>f(x,1)).join(' / ')],
   ['Funding',f(r.fundingPct,4)+'%'],
-  ['Setup','Unified confluence'],['Position value','$'+f(p.nt,0)],['Estimated leverage (not a signal filter)',f(p.lev,2)+'x']
+  ['Setup',r.structure?.kind||'Liquidity-confirmed confluence'],
+  ['15m trend',r.structure?.trend?.direction||'—'],
+  ['Liquidity sweep',r.structure?.sweep?.ok?'Reclaimed previous high/low':'Not confirmed'],
+  ['Imbalance',r.structure?.imbalance?.ok?'Revisited and reclaimed':'Not confirmed'],
+  ['Position value','$'+f(p.nt,0)],['Estimated leverage (not a signal filter)',f(p.lev,2)+'x']
  ];
  return '<div class="card '+r.dir+'" data-a="chart" data-s="'+r.sym+
   '" role="button" tabindex="0"><div class="ch"><button class="coin-chart" type="button" data-a="chart" data-s="'+r.sym+'">'+
@@ -662,7 +667,9 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
     const px=fresh&&Number.isFinite(Number(market?.p))&&Number(market.p)>0?Number(market.p):null;
     const sg=o.dir==='long'?1:-1,risk=Math.abs(o.en-o.stop0);
     const rn=px!=null&&risk>0?(px-o.en)*sg/risk:null;
-    return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${px==null?'— (stale)':fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp2)}</td><td class="${rn==null?'mut':rn>=0?'long-t':'short-t'}">${rn==null?'—':f(rn)+' R'}</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td>${trackedChartButton(o,'open')}</td><td>${remoteMode?'Auto':'<button data-a="close" data-s="'+o.id+'">Close</button>'}</td></tr>`}),'No open trades yet. Every new confirmed signal is enrolled automatically while this dashboard is running.');
+    return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${px==null?'— (stale)':fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp2)}</td><td class="${rn==null?'mut':rn>=0?'long-t':'short-t'}">${rn==null?'—':f(rn)+' R'}</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td>${trackedChartButton(o,'open')}</td><td>${remoteMode&&remoteSource!=='local'?
+    'Close on laptop':
+    '<button type="button" data-a="close" data-s="'+o.id+'" '+(remoteMode&&!remoteMarketFresh?'disabled title="Fresh exchange price required"':'')+'>Close manually</button>'}</td></tr>`}),'No open trades yet. Every new confirmed signal is enrolled automatically while this dashboard is running.');
   const H=st.hist,w=H.filter(x=>x.r>0),lo=H.filter(x=>x.r<=0),tr=H.reduce((a,x)=>a+x.r,0),gl=Math.abs(lo.reduce((a,x)=>a+x.r,0));
   $('stats').innerHTML=[['Total registered',Object.keys(st.trackedKeys).length],['Closed results',H.length],['Auto-tracked open',st.open.length],['Win rate',H.length?f(w.length/H.length*100,0)+'%':'–'],['Total R',f(tr)],['Total P&L','$'+f(H.reduce((a,x)=>a+x.pnl,0))],['Avg R',H.length?f(tr/H.length):'–'],['Profit factor',gl?f(w.reduce((a,x)=>a+x.r,0)/gl):'–']].map(x=>`<span>${x[0]}: <b>${x[1]}</b></span>`).join('');
   $('allResults').hidden=H.length<=100;
@@ -682,7 +689,28 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b
   if(a==='pin'){st.pins=st.pins.includes(s)?st.pins.filter(x=>x!==s):[...st.pins,s];save();render()}
   else if(a==='chart')window.openPositionChart(s);
   else if(a==='tracked-chart')window.openTrackedTradeChart(b.dataset.kind,b.dataset.id);
-  else if(a==='close'&&!remoteMode){const t=st.open.find(x=>x.id==s),px=t&&M[t.sym]&&M[t.sym].p;if(t&&px){const sg=t.dir==='long'?1:-1,g=(px-t.en)*sg/Math.abs(t.en-t.stop0),r1=(t.tp1-t.en)*sg/Math.abs(t.en-t.stop0),net=t.tp1h?(t.targetMode==='extended'?0.5*r1+0.5*g:0.5+0.5*g):g;closeT(t,'Closed manually',px,net);render()}}
+  else if(a==='close'){
+    const trade=st.open.find(x=>String(x.id)===String(s));
+    if(!trade)return;
+    if(!window.confirm('Close this SIMULATED tracked trade at the latest market price? This will NOT close a real Binance Futures position.'))return;
+    if(remoteMode){
+      if(remoteSource!=='local'||!remoteOnline){window.alert('Manual simulated closes are available only on the running laptop desktop application.');return;}
+      fetch('/api/trades/manual-close',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({id:String(trade.id),confirm:true})
+      }).then(async response=>{
+        const data=await response.json();
+        if(!response.ok)throw Error(data.error||'Could not close simulated trade');
+        return remotePoll();
+      }).catch(error=>window.alert(error.message));
+    }else{
+      const price=M[trade.sym]&&M[trade.sym].p,risk=Math.abs(trade.en-trade.stop0);
+      if(!(price>0&&risk>0)){window.alert('Market price unavailable. Close after the feed resumes.');return;}
+      const sign=trade.dir==='long'?1:-1;
+      closeT(trade,'Closed manually (simulated only)',price,sign*(price-trade.en)/risk);
+      render();
+    }
+  }
 });
 $('watchSearch').addEventListener('input',()=>{watchQuery=$('watchSearch').value.trim().toLowerCase();watchLimit=50;$('wl').scrollTop=0;render()});
 $('scanSearch').addEventListener('input',()=>{scanQuery=$('scanSearch').value.trim().toLowerCase();scanLimit=80;renderScanInspector()});
