@@ -164,7 +164,6 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
     <label>Fees maker+taker %<input id="fee" type="number" step="0.005" value="0.075"></label>
     <label>Min 24h volume ($M)<input id="minvol" type="number" value="0"></label>
     <label>Max coins to scan<input id="topn" type="number" value="600"></label>
-    <label class="c"><input type="checkbox" id="showot"> Show Open trades panel</label>
   </div>
 </details>
 <div id="ban"></div>
@@ -250,8 +249,8 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 </section>
 
 <section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins are awaiting the second liquidity grab, previous-day level reclaim, swing break or strong 1m confirmation. Final TP is 3R; targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
-<section id="sot"><h2>Automatically tracked trades <small>every new confirmed signal is recorded without clicking</small></h2><div class="tw" id="ot"></div></section>
-<section><h2>All automatic trade results <span><button id="allResults" type="button" hidden>Show all results</button> <button id="clearHistory" type="button">Clear history</button> <button id="csv" type="button">Export all CSV</button></span></h2>
+<section id="tradeResultsPanel"><h2>Automatic trades & results <span><button id="allResults" type="button" hidden>Show all results</button> <button id="clearHistory" type="button">Clear closed history</button> <button id="csv" type="button">Export all CSV</button></span></h2>
+  <p class="mut" style="font-size:12px">Open simulated trades and closed simulated results appear together below. Use Close manually to close a tracked simulation; this does not close an actual Binance Futures position.</p>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
 
 <p class="mut" style="font-size:12px">The laptop server tracks confirmed signals while running. Previous trade history remains saved. New signals require TWO liquidity grabs, previous-day reclaim, a 1m swing break and strong directional candles; RSI, volume, funding, EMA and FVG are not used. TP remains 3R. New double-sweep signals are SIMULATED ONLY pending testing, even if the Binance connector is enabled.</p>
@@ -317,9 +316,6 @@ const IDS=['ex','acct','risk','fee','minvol','topn'];
 if(st.set.v!==4){st.set.v=4;st.set.topn=600;st.set.minvol=0;st.set.ex='bybit';save()}
 IDS.forEach(i=>{if(st.set[i]!=null)$(i).value=st.set[i]});
 try{banUntil=+localStorage.getItem('ban_'+EX())||0}catch(e){}
-// Auto-tracked trades are visible by default after this upgrade.
-if(!st.set.autoTrackV){st.set.showot=true;st.set.autoTrackV=1;save()}
-$('showot').checked=st.set.showot!==false;
 let R={},M={},audio=null,notif=false,busy=false,lastScan=null,err='',prog='';
 let watchLimit=50,watchQuery='',showAllHistory=false,scanMeta=null,scanQuery='',scanFilter='all',scanLimit=80;
 let lim=false,dur=0,scanFailures=0,liveRenderTimer=null;
@@ -625,7 +621,6 @@ function renderScanInspector(){
 }
 function render(){
   const watchScroll=$('wl').scrollTop,longScroll=$('cl').scrollTop,shortScroll=$('cs').scrollTop;
-  $('sot').hidden=!$('showot').checked;
   renderScanInspector();
   const L=Object.values(R),cf=L.filter(r=>r.status==='confirm'),cl=cf.filter(r=>r.dir==='long'),cs=cf.filter(r=>r.dir==='short'),t=today(),dr=t.reduce((a,x)=>a+x.r,0);
   $('dot').className='dot '+(err?'bad':lastScan?'ok':'');
@@ -645,8 +640,10 @@ function render(){
       (remoteLastSeen?' · last report '+new Date(remoteLastSeen).toLocaleString():'')+
       (remoteHistoryTruncated?' · online view shows recent history; full record stays on laptop':'');
     $('settingsPanel').hidden=remoteSource==='cloud';
-    $('clearHistory').disabled=true;
-    $('clearHistory').title='Trade records are stored on the laptop; history cannot be erased from the remote display';
+    $('clearHistory').disabled=remoteSource!=='local'||!remoteOnline;
+    $('clearHistory').title=remoteSource==='local'?
+      'Back up and clear closed simulated results; open trades remain active':
+      'Clear history from the Windows desktop app, not the remote website';
   }else{
     $('serverMode').hidden=true;$('settingsPanel').hidden=false;
     $('clearHistory').disabled=false;
@@ -677,23 +674,48 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
    f(r.score,0)+'</td><td class="mut">'+(missing.join('; ')||r.reason||'—')+'</td></tr>';
  }), 'No candidates near yesterday high/low.');
  $('wl').scrollTop=watchScroll;
-  $('ot').innerHTML=tbl(['Coin','Side','Entry','Now','Stop','Final TP','Live R','Age','View trade chart',''],st.open.map(o=>{
-    const market=M[o.sym];
-    const fresh=!remoteMode||(
-      remoteOnline&&remoteMarketFresh&&market&&Number(market.at)>0&&
-      Date.now()-Number(market.at)<45000);
-    const px=fresh&&Number.isFinite(Number(market?.p))&&Number(market.p)>0?Number(market.p):null;
-    const sg=o.dir==='long'?1:-1,risk=Math.abs(o.en-o.stop0);
-    const rn=px!=null&&risk>0?(px-o.en)*sg/risk:null;
-    return`<tr><td>${tv(o.sym)}</td><td>${pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())}</td><td>${fp(o.en)}</td><td>${px==null?'— (stale)':fp(px)}</td><td>${fp(o.stop)}${o.tp1h?' (BE)':''}</td><td>${fp(o.tp2)}</td><td class="${rn==null?'mut':rn>=0?'long-t':'short-t'}">${rn==null?'—':f(rn)+' R'}</td><td>${Math.round((Date.now()-o.open)/60000)}m</td><td>${trackedChartButton(o,'open')}</td><td>${remoteMode&&remoteSource!=='local'?
-    'Close on laptop':
-    '<button type="button" data-a="close" data-s="'+o.id+'" '+(remoteMode&&!remoteMarketFresh?'disabled title="Fresh exchange price required"':'')+'>Close manually</button>'}</td></tr>`}),'No open trades yet. Every new confirmed signal is enrolled automatically while this dashboard is running.');
+  // Open and closed simulated trades share one table; only closed rows
+  // count toward win rate / realized P&L.
   const H=st.hist,w=H.filter(x=>x.r>0),lo=H.filter(x=>x.r<=0),tr=H.reduce((a,x)=>a+x.r,0),gl=Math.abs(lo.reduce((a,x)=>a+x.r,0));
-  $('stats').innerHTML=[['Total registered',Object.keys(st.trackedKeys).length],['Closed results',H.length],['Auto-tracked open',st.open.length],['Win rate',H.length?f(w.length/H.length*100,0)+'%':'–'],['Total R',f(tr)],['Total P&L','$'+f(H.reduce((a,x)=>a+x.pnl,0))],['Avg R',H.length?f(tr/H.length):'–'],['Profit factor',gl?f(w.reduce((a,x)=>a+x.r,0)/gl):'–']].map(x=>`<span>${x[0]}: <b>${x[1]}</b></span>`).join('');
+  $('stats').innerHTML=[['Total shown',st.open.length+H.length],['Closed results',H.length],['Auto-tracked open',st.open.length],['Win rate',H.length?f(w.length/H.length*100,0)+'%':'–'],['Total R',f(tr)],['Total P&L','$'+f(H.reduce((a,x)=>a+x.pnl,0))],['Avg R',H.length?f(tr/H.length):'–'],['Profit factor',gl?f(w.reduce((a,x)=>a+x.r,0)/gl):'–']].map(x=>`<span>${x[0]}: <b>${x[1]}</b></span>`).join('');
   $('allResults').hidden=H.length<=100;
   $('allResults').textContent=showAllHistory?'Show latest 100':'Show all '+H.length+' results';
-  $('hs').innerHTML=tbl(['Closed','Coin','Side','Entry','Stop','TP (3R)','Exit','Result','P&L','Reason','View trade chart'],
-    (showAllHistory?[...H].reverse():[...H].reverse().slice(0,100)).map(x=>`<tr><td>${new Date(x.close).toLocaleString()}</td><td>${tv(x.sym)}</td><td>${pill(x.dir==='long'?'pl':'ps',x.dir.toUpperCase())}</td><td>${fp(x.en)}</td><td>${fp(x.stop)}</td><td>${fp(x.tp)}</td><td>${fp(x.ex)}</td><td class="${x.r>0?'long-t':'short-t'}">${f(x.r)} R</td><td class="${x.pnl>0?'long-t':'short-t'}">$${f(x.pnl)}</td><td class="mut">${x.why}</td><td>${trackedChartButton(x,'history')}</td></tr>`),'No closed trades yet.');
+  const openRows=[...st.open].sort((a,b)=>(b.open||0)-(a.open||0)).map(o=>{
+    const market=M[o.sym];
+    const fresh=!remoteMode||
+      remoteOnline&&remoteMarketFresh&&market&&Number(market.at)>0&&
+      Date.now()-Number(market.at)<45000;
+    const px=fresh&&Number.isFinite(Number(market?.p))&&Number(market.p)>0?
+      Number(market.p):null;
+    const sg=o.dir==='long'?1:-1,risk=Math.abs(o.en-o.stop0);
+    const liveR=px!==null&&risk>0?(px-o.en)*sg/risk:null;
+    const action=remoteMode&&remoteSource!=='local'?'Close from laptop':
+      '<button type="button" data-a="close" data-s="'+o.id+'" '+
+      (remoteMode&&!remoteMarketFresh?'disabled title="Fresh exchange price required"':'')+
+      '>Close manually</button>';
+    return '<tr><td><b>OPEN</b></td><td>'+new Date(o.open).toLocaleString()+
+      '</td><td>'+tv(o.sym)+'</td><td>'+
+      pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())+'</td><td>'+fp(o.en)+
+      '</td><td>'+(px===null?'— (stale)':fp(px))+'</td><td>'+fp(o.stop)+
+      '</td><td>'+fp(o.tp2)+'</td><td class="'+(liveR===null?'mut':liveR>=0?'long-t':'short-t')+
+      '">'+(liveR===null?'—':f(liveR)+' R (live)')+
+      '</td><td>—</td><td>'+Math.round((Date.now()-o.open)/60000)+'m open</td><td>'+
+      trackedChartButton(o,'open')+'</td><td>'+action+'</td></tr>';
+  });
+  const closed=(showAllHistory?[...H].reverse():[...H].reverse().slice(0,100)).map(x=>
+    '<tr><td>CLOSED</td><td>'+new Date(x.close).toLocaleString()+'</td><td>'+
+      tv(x.sym)+'</td><td>'+pill(x.dir==='long'?'pl':'ps',x.dir.toUpperCase())+
+      '</td><td>'+fp(x.en)+'</td><td>'+fp(x.ex)+'</td><td>'+fp(x.stop)+
+      '</td><td>'+fp(x.tp)+'</td><td class="'+(x.r>0?'long-t':'short-t')+'">'+f(x.r)+
+      ' R</td><td class="'+(x.pnl>0?'long-t':'short-t')+'">$'+f(x.pnl)+
+      '</td><td class="mut">'+x.why+'</td><td>'+
+      trackedChartButton(x,'history')+'</td><td>—</td></tr>');
+  const table=$('hs');
+  const beforeScroll=table.scrollTop;
+  table.innerHTML=tbl(['Status','Date','Coin','Side','Entry','Now / Exit','Stop',
+    'Final TP','R','P&L','Age / Reason','View trade chart','Manage'],
+    [...openRows,...closed],'No trades recorded yet.');
+  table.scrollTop=beforeScroll;
   eq();
 }
 function eq(){
@@ -759,11 +781,44 @@ $('refreshScan').addEventListener('click',async()=>{
 
 $('wl').addEventListener('scroll',()=>{const el=$('wl');if(el.scrollTop+el.clientHeight>=el.scrollHeight-90){const all=Object.values(R).filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).filter(r=>r.sym.toLowerCase().includes(watchQuery));if(watchLimit<all.length){const pos=el.scrollTop;watchLimit+=50;render();el.scrollTop=pos}}});
 $('allResults').addEventListener('click',()=>{showAllHistory=!showAllHistory;render()});
-$('clearHistory').addEventListener('click',()=>{if(remoteMode)return;if(!confirm('Permanently clear all saved trade result history? Open tracked trades will be kept.'))return;st.hist=[];save();render()});
+$('clearHistory').addEventListener('click',async()=>{
+  if(remoteMode&&remoteSource!=='local'){
+    window.alert('Clear history from the local Windows desktop app. The website only displays a copy.');
+    return;
+  }
+  if(remoteMode&&!remoteOnline){window.alert('Connect the local laptop scanner before clearing history.');return;}
+  const nClosed=st.hist.length;
+  if(!nClosed){window.alert('There are no closed simulated trades to clear. Open tracked trades are unchanged.');return;}
+  const phrase=window.prompt('Clear ALL '+nClosed+' CLOSED SIMULATED trade results?\n\nOpen trades and REAL Binance order records will be kept.\nA local archive is made before clearing on Windows.\n\nType CLEAR CLOSED HISTORY to confirm:');
+  if(phrase!=='CLEAR CLOSED HISTORY')return;
+  const button=$('clearHistory');button.disabled=true;
+  try{
+    if(remoteMode){
+      const response=await fetch('/api/trades/clear-history',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({phrase})
+      });
+      const out=await response.json();
+      if(!response.ok)throw Error(out.error||'Unable to clear history');
+      await remotePoll();
+      window.alert(out.cleared+' closed simulated records cleared. Local backup saved. Open trades remain.');
+    }else{
+      // Browser-only fallback: archive history into a local JSON download.
+      const archive=new Blob([JSON.stringify({archivedAt:new Date().toISOString(),
+        type:'simulated-closed-trade-history',history:st.hist},null,2)],{type:'application/json'});
+      const url=URL.createObjectURL(archive),link=document.createElement('a');
+      link.href=url;link.download='simulated-trade-history-backup-'+Date.now()+'.json';link.click();
+      setTimeout(()=>URL.revokeObjectURL(url),10000);
+      st.hist=[];save();render();
+      window.alert('Browser-only closed history cleared. Keep the downloaded backup.');
+    }
+  }catch(e){window.alert('Clear history failed: '+String(e.message||e))}
+  finally{button.disabled=false;}
+});
 let sendConfigTimeout=null;
 document.addEventListener('input',()=>{
  IDS.forEach(i=>st.set[i]=$(i).value);
- st.set.showot=$('showot').checked;save();render();
+ save();render();
  if(remoteSource==='local'){
    clearTimeout(sendConfigTimeout);
    sendConfigTimeout=setTimeout(()=>{
