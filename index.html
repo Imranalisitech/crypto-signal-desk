@@ -219,28 +219,21 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   <button id="liveDisconnect" type="button">Disconnect saved API key</button>
  </details>
  <details class="paper-details" id="liveRiskSettings">
-  <summary>2. Custom real-money risk settings — independent of signal confirmation</summary>
-  <p class="paper-note">Choose your own values within a broad supported range. These controls govern REAL order execution only; they never suppress a confirmed signal from the simulated tracking list. Exchange minimums, position checks, and a non-zero risk ceiling remain mandatory.</p>
+  <summary>2. Binance Futures account & trading preferences</summary>
+  <p class="paper-note">Wallet balance and available USDT are read directly from your verified Binance Futures account above. You cannot change the real Binance wallet balance in this software.</p>
   <div class="paper-settings">
-   <label>Risk per real trade (%)<input data-live-setting="riskPerTradePct" type="number" min="0.01" max="5" step="0.01" value="0.2" title="Percentage of real Futures wallet balance risked if SL is hit, before fees and slippage"/>
-     <small>Wallet balance at risk if the stop is hit. Example: 0.2% of $1,000 ≈ $2 before costs.</small></label>
-   <label>Maximum order notional (USDT)<input data-live-setting="maxNotionalUSDT" type="number" min="5" max="100000" step="any" value="75"/>
-     <small>Maximum position value including leverage, not the amount of cash you deposit.</small></label>
-   <label>Maximum leverage (×)<input data-live-setting="maxLeverage" type="number" min="1" max="20" step="1" value="2"/>
-     <small>Up to 20× supported by this app; Binance may allow less for a specific coin.</small></label>
-   <label>Maximum real entries per day<input data-live-setting="maxOrdersPerDay" type="number" min="1" max="200" step="1" value="2"/>
-     <small>Maximum new real-money orders sent in one UTC day. Tracked signals remain unlimited.</small></label>
-   <label>Daily wallet-loss cutoff (%)<input data-live-setting="maxDailyLossPct" type="number" min="0.1" max="20" step="0.1" value="0.75"/>
-     <small>Stops new real entries after wallet balance drops this much from the daily reference.</small></label>
-   <label>Maximum entry-price deviation (%)<input data-live-setting="maxChasePct" type="number" min="0.01" max="5" step="0.01" value="0.2"/>
-     <small>Do not chase a real entry if the current Binance mark price differs too far from the signal entry.</small></label>
-   <label>Maximum SL distance (%)<input data-live-setting="maxStopPct" type="number" min="0.1" max="50" step="0.1" value="5"/>
-     <small>Greatest allowed distance between real market entry and stop-loss. Does not move the strategy SL.</small></label>
-   <label>Minimum order notional (USDT)<input data-live-setting="minNotionalUSDT" type="number" min="1" max="1000" step="any" value="5"/>
-     <small>Trade must meet this minimum AND Binance's symbol-specific minimum. It never increases a too-small order automatically.</small></label>
+   <label>Leverage (×)
+     <input data-live-setting="maxLeverage" type="text" inputmode="numeric" autocomplete="off" value="2" placeholder="Enter leverage"/>
+     <small>Enter your preferred leverage (whole number). Actual leverage is limited by the coin's Binance Futures contract rules; the application rejects unsupported values instead of resetting them.</small>
+   </label>
+   <label>Maximum real trades per day
+     <input data-live-setting="maxOrdersPerDay" type="text" inputmode="numeric" autocomplete="off" value="2" placeholder="Number of daily entries"/>
+     <small>Choose the maximum number of NEW real Binance Futures entries per UTC day. This does not limit simulated signal tracking.</small>
+   </label>
   </div>
-  <button id="liveSaveRisk" type="button">Save my risk settings</button>
-  <p class="paper-note">Values are adjustable when live trading is paused. Unsupported or invalid values are rejected with an error instead of silently reset. Real Binance orders remain disabled for the unvalidated Dual Liquidity Reclaim strategy.</p>
+  <div id="liveRiskDraft" class="paper-note" aria-live="polite"></div>
+  <button id="liveSaveRisk" type="button">Save trading preferences</button>
+  <p class="paper-note">No number-spinner arrows or automatic field resets. Previous protective risk limits remain active internally (including position sizing, stop orders, and account-loss protection), and exchange rules still apply. The currently unvalidated Dual Liquidity Reclaim signals cannot place real Binance orders.</p>
  </details>
  <div class="paper-status" style="background:#3d2631">
   <strong>3. Live execution control</strong>
