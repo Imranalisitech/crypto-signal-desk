@@ -256,7 +256,10 @@ function register(r){
   const trade={id:now+'-'+Math.random().toString(36).slice(2,8),signalKey:key,
     sym:r.sym,dir:r.dir,en:p.en,stop:p.stop,stop0:p.stop,
     tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,source:config.exchange,
-    signalCandle:p.ck,open:now,realizedR:null,targetMode:'fixed3r'};
+    signalCandle:p.ck,open:now,realizedR:null,targetMode:'fixed3r',
+    confirmationMode:r.confirmationMode||'Unified liquidity',
+    researchOnly:p.researchOnly===true,
+    previousDayLevel:p.previousDayLevel||null};
   state.open.push(trade);
   state.trackedKeys[key]=now;persist();
   log('CONFIRMED '+r.dir.toUpperCase()+' '+r.sym+' entry='+p.en+' SL='+p.stop+' TP='+p.tp2);
@@ -267,6 +270,8 @@ function settle(t,reason,price,grossR){
   state.history.push({id:t.id,signalKey:t.signalKey,sym:t.sym,dir:t.dir,
     signalCandle:t.signalCandle,source:t.source,
     open:t.open,close:Date.now(),en:t.en,stop:t.stop0,tp:t.tp2,
+    confirmationMode:t.confirmationMode||null,researchOnly:!!t.researchOnly,
+    previousDayLevel:t.previousDayLevel||null,
     ex:price,r,pnl:r*t.r$,why:reason});
   state.open=state.open.filter(x=>x.id!==t.id);
   persist();
