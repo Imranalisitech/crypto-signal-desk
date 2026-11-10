@@ -356,7 +356,7 @@ async function scan(){
     R={};scanFailures=0;render();
     await pool(list,async x=>{
  const s=x.symbol,r=res[s];
- const x15=await K(s,'15m',99);
+ const x15=await K(s,'15m',210);
  if(x15.length<66)return;
  const x5=await K(s,'5m',220);
  if(x5.length<45)return;
@@ -480,6 +480,12 @@ function card(r){
   ['15m trend',r.structure?.trend?.direction||'—'],
   ['Liquidity sweep',r.structure?.sweep?.ok?'Reclaimed previous high/low':'Not confirmed'],
   ['Imbalance',r.structure?.imbalance?.ok?'Revisited and reclaimed':'Not confirmed'],
+  ['Previous-day two-line',r.gautam?.ok?
+    r.gautam.name+' (5m crypto adaptation)':
+    (r.gautam?.day?'Not triggered':'Previous UTC day unavailable')],
+  ['Signal category',r.confirmationMode||'Original unified signal'],
+  ['Real Binance execution',r.executionReady===false?
+    'BLOCKED — research-only confirmation':'Existing live safety controls'],
   ['Position value','$'+f(p.nt,0)],['Estimated leverage (not a signal filter)',f(p.lev,2)+'x']
  ];
  return '<div class="card '+r.dir+'" data-a="chart" data-s="'+r.sym+
@@ -588,23 +594,28 @@ function renderScanInspector(){
     const priceCell=Number.isFinite(livePrice)&&livePrice>0?fp(livePrice):
       Number.isFinite(storedPrice)&&storedPrice>0?
         '<span title="Last analyzed price — NOT live">'+fp(storedPrice)+' (saved)</span>':'—';
+    const jha=r.gautam?.ok?
+      'PDH/PDL reversal'+(r.executionReady===false?' · simulated only':''):
+      r.gautam?.day?'Not triggered':'No full prior UTC day';
     return '<tr><td>'+link+'</td><td>'+safe(r.dir||'—')+'</td><td>'+
       priceCell+'</td><td>'+safe(c.name||'—')+
       '</td><td>'+(Number.isFinite(c.volumeRatio)?f(c.volumeRatio,2)+'×':'—')+
       '</td><td>'+(Number.isFinite(r.fundingPct)?f(r.fundingPct,4)+'%':'—')+
-      '</td><td>'+(Number.isFinite(r.score)?f(r.score,0):'—')+
+      '</td><td>'+safe(jha)+'</td>'+
+      '<td>'+(Number.isFinite(r.score)?f(r.score,0):'—')+
       '</td><td>'+status+'</td><td class="mut">'+reason+'</td></tr>';
   });
   const scroll=$('scanCoinTable').scrollTop;
   $('scanCoinTable').innerHTML=tbl(
-    ['Coin','Side','Price','Candle','Volume','Funding','Score','Result','Analysis / reason'],rows,
+    ['Coin','Side','Price','Candle','Volume','Funding','Previous day','Score','Result','Analysis / reason'],rows,
     running?'Scan in progress; previous results remain visible until analysis completes.':
     'No stored coin results yet. Check the scanner diagnostics above.');
   $('scanCoinTable').scrollTop=scroll;
   const recent=Array.isArray(meta.scanRecent)?meta.scanRecent.slice(0,4):[];
   $('scanHelp').textContent=(running?'Current scan is processing markets. ':'')+
-    'This list includes scanned coins that did not qualify, not just confirmed trades. '+
-    'Zero watchlist candidates does not mean zero coins were analyzed.'+
+    'The previous-day two-line setup is Gautam-inspired and adapted to closed 5m crypto candles. '+
+    'New confirmation-mode-only signals are SIMULATED; real Binance auto-entry is disabled for them. '+
+    'The original strategy and 3R targets are preserved.'+
     (recent.length?' · Recently scanned: '+recent.map(x=>x.sym).join(', '):'');
 }
 function render(){
