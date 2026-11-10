@@ -305,6 +305,8 @@ function compactResult(r){
     price:r.price,analyzedAt:r.analyzedAt,
     score:r.score,chg:r.chg,vol:r.vol,G:r.G||r.checks||[],
     rsi:r.rsi,pattern:r.pattern,structure:r.structure,
+    gautam:r.gautam,confirmationMode:r.confirmationMode,
+    executionReady:r.executionReady,
     reason:r.reason,fundingPct:r.fundingPct,
     plan:r.plan,ok:r.ok};
 }
@@ -350,7 +352,9 @@ async function scan(){
           analyzedAt:Date.now()};
         try{
           const [raw15,raw5]=await Promise.all([
-            candles(sym,'15m',99),candles(sym,'5m',220)]);
+            // 210 closed 15m candles cover an entire prior UTC day without
+            // adding another API request (keeps Bybit rate limiting stable).
+            candles(sym,'15m',210),candles(sym,'5m',220)]);
           const bars15=closed(raw15,15),bars5=closed(raw5,5);
           if(bars15.length<64||bars5.length<40){
             record.status='insufficient';
@@ -371,7 +375,8 @@ async function scan(){
             if(result.status==='confirm'){
               register(result); // Existing simulated results are unchanged.
               // Real trading remains off until the user explicitly arms it.
-              if(liveBroker.state.armed&&config.exchange==='binance'){
+              if(liveBroker.state.armed&&config.exchange==='binance'&&
+                 result.executionReady===true){
                 const bmark=state.markets[sym];
                 if(bmark&&Number.isFinite(bmark.p)&&Date.now()-bmark.at<30000)
                   liveBroker.onSignal(result,'binance',bmark);
