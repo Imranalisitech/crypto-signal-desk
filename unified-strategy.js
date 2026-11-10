@@ -107,7 +107,7 @@
        tp2:mark+sg*3*riskDistance,sp,r$:cashRisk,nt:notional,
        lev:Number(account)>0&&notional!=null?notional/Number(account):null,
        ck:g.triggerTime,rr:3,tp1pct:sp*3,tp2pct:sp*3,
-       targetMode:'fixed3r',setupType:'Gautam two-line · 1m crypto futures',
+       targetMode:'fixed3r',timeframe:'1m',setupType:'Gautam two-line · 1m crypto futures',
        structureExtreme:g.extreme,previousDayLevel:g.day,
        researchOnly:false
      }:null;
