@@ -11,7 +11,7 @@
  const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
  const num=(v,d=2)=>Number.isFinite(Number(v))?Number(v).toLocaleString('en-US',{
    minimumFractionDigits:d,maximumFractionDigits:d}):'—';
- let status=null,busy=false,msg='';
+ let status=null,busy=false,msg='',settingsDirty=false;
  function update(){
   if(!status)return;
   const armed=status.armed===true,connected=status.connected===true;
@@ -31,8 +31,11 @@
     ['Tracked real orders',status.orders?.length||0]
   ].map(x=>'<div><small>'+x[0]+'</small><b>'+x[1]+'</b></div>').join('');
   for(const input of document.querySelectorAll('[data-live-setting]')){
-    if(document.activeElement!==input&&status.config?.[input.dataset.liveSetting]!=null)
-      input.value=status.config[input.dataset.liveSetting];
+    // Polls occur every 12 seconds. Never overwrite a pending user edit,
+    // even after the field loses focus.
+    if(!settingsDirty&&document.activeElement!==input&&
+       status.config?.[input.dataset.liveSetting]!=null)
+      input.value=String(status.config[input.dataset.liveSetting]);
     input.disabled=busy||armed;
   }
   $('liveArm').disabled=busy||armed||!connected;
@@ -80,8 +83,15 @@
       action==='disarm'?'New real orders paused':action==='connect'?'Credentials encrypted on your Windows account':
       action==='verify'?'Real Binance Futures account verified':action==='settings'?'Real-money risk settings saved':
       'Saved Binance connection removed';
+    if(action==='settings'){
+      settingsDirty=false;
+      $('liveRiskDraft').textContent='Saved. Values will remain until you change and save them again.';
+    }
     await poll();
-  }catch(e){msg=String(e.message).slice(0,210);}
+  }catch(e){
+    msg=String(e.message).slice(0,210);
+    if(action==='settings')$('liveRiskDraft').textContent='Not saved: '+msg;
+  }
   finally{busy=false;update();}
  }
  $('liveConnect').addEventListener('click',async()=>{
@@ -106,13 +116,30 @@
   if(window.confirm('Remove locally encrypted Binance API credentials? Real trading will be paused. This will not automatically close any open Binance positions.'))
     act('disconnect');
  });
+ for(const input of document.querySelectorAll('[data-live-setting]')){
+   input.addEventListener('input',()=>{
+     settingsDirty=true;
+     $('liveRiskDraft').textContent='Unsaved changes — press Save trading preferences.';
+   });
+ }
  $('liveSaveRisk').addEventListener('click',()=>{
-  const values={};
-  for(const el of document.querySelectorAll('[data-live-setting]')){
-    if(!el.checkValidity()){el.reportValidity();return;}
-    values[el.dataset.liveSetting]=Number(el.value);
-  }
-  act('settings',values);
+   const values={};
+   for(const el of document.querySelectorAll('[data-live-setting]')){
+     const raw=el.value.trim();
+     if(!/^[0-9]+$/.test(raw)){
+       $('liveRiskDraft').textContent='Enter a positive whole number without symbols or decimals.';
+       el.focus();return;
+     }
+     const number=Number(raw);
+     if(!Number.isSafeInteger(number)||number<1){
+       $('liveRiskDraft').textContent='Enter a positive whole number within supported numeric precision.';
+       el.focus();return;
+     }
+     values[el.dataset.liveSetting]=number;
+   }
+   // Only the two preferences shown here are sent. Previous internal
+   // protective risk controls are not silently changed.
+   act('settings',values);
  });
  poll();
  setInterval(()=>{if(!busy)poll()},12000);
