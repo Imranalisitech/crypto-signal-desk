@@ -48,10 +48,15 @@
   $('liveOrderCount').textContent=orders.length+' entries';
   const td=s=>'<td>'+h(s)+'</td>';
   $('liveOrders').innerHTML=orders.length?
-    '<table><tr><th>Time</th><th>Coin</th><th>Side</th><th>Status</th><th>Real entry</th><th>Stop</th><th>Final TP</th><th>Issue</th></tr>'+
+    '<table><tr><th>Time</th><th>Coin</th><th>Side</th><th>Status</th><th>Real entry</th><th>Current SL</th><th>Final TP</th><th>Lock stage</th><th>Margin allocated</th><th>Risk budget</th><th>Issue</th></tr>'+
     [...orders].reverse().map(x=>'<tr>'+td(x.createdAt?new Date(x.createdAt).toLocaleString():'—')+
       td(x.sym)+td(x.dir)+td(x.status)+td(x.entry==null?'—':num(x.entry,6))+
-      td(x.sl==null?'—':num(x.sl,6))+td(x.tp==null?'—':num(x.tp,6))+td(x.error||'—')+'</tr>').join('')+
+      td(x.sl==null?'—':num(x.sl,6))+td(x.tp==null?'—':num(x.tp,6))+
+      td((x.profitLockStage||0)===2?'75% of TP reached → 50% profit range locked':
+         (x.profitLockStage||0)===1?'50% of TP reached → 5% profit range locked':'Initial SL')+
+      td(x.allocationUSDT==null?'—':num(x.allocationUSDT)+' USDT')+
+      td(x.riskBudgetUSDT==null?'—':num(x.riskBudgetUSDT)+' USDT')+
+      td(x.error||'—')+'</tr>').join('')+
     '</table>':'<div class="empty">No real-money orders placed by this application.</div>';
   const events=Array.isArray(status.events)?status.events:[];
   $('liveEvents').innerHTML=events.length?
