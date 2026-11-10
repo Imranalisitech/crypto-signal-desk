@@ -90,6 +90,12 @@ const server = http.createServer(async (req,res) => {
          !Array.isArray(snap.results)||!Array.isArray(snap.open)||
          !Array.isArray(snap.history)||!snap.markets||typeof snap.markets!=='object')
         throw new Error('Invalid laptop snapshot');
+      // A delayed POST from a previous scan must never bring back CLOSED
+      // history that was already cleared in a newer laptop snapshot.
+      const cleared=Math.max(Number(laptopMirror?.historyClearEpoch)||0,
+        Number(snap.historyClearEpoch)||0,0);
+      snap.historyClearEpoch=cleared;
+      snap.history=snap.history.filter(t=>Number(t.close)>cleared);
       laptopMirror=snap;laptopLastSeen=Date.now();
       res.setHeader('Cache-Control','no-store');
       res.writeHead(200);return res.end(JSON.stringify({ok:true,receivedAt:laptopLastSeen}));
