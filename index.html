@@ -418,7 +418,8 @@ function registerConfirmedTrade(r){
     stop0:p.stop,tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,
     open:now,signalCandle:p.ck,source:EX(),
     tp1h:false,targetMode:'fixed3r',
-    confirmationMode:r.confirmationMode||'Unified liquidity',
+    timeframe:p.timeframe||'1m',
+    confirmationMode:r.confirmationMode||'Gautam two-line · 1m crypto futures',
     researchOnly:p.researchOnly===true,
     previousDayLevel:p.previousDayLevel||null
   };
@@ -432,7 +433,8 @@ function closeT(t,why,px,gross){
   st.hist.push({id:t.id,signalKey:t.signalKey||null,sym:t.sym,dir:t.dir,open:t.open,
     signalCandle:t.signalCandle||null,source:t.source||null,close:Date.now(),
     en:t.en,stop:t.stop0,tp:t.tp2,ex:px,r:net,pnl:net*t.r$,why,
-    confirmationMode:t.confirmationMode||null,researchOnly:!!t.researchOnly,
+    confirmationMode:t.confirmationMode||null,
+    timeframe:t.timeframe||'5m',researchOnly:!!t.researchOnly,
     previousDayLevel:t.previousDayLevel||null});
   st.open=st.open.filter(x=>x.id!==t.id);save();
 }
@@ -465,7 +467,7 @@ const tbl=(h,rows,e)=>rows.length?`<table><tr>${h.map(x=>`<th>${x}</th>`).join('
 const trackedChartButton=(trade,kind)=>{
   const tradeId=String(trade.id).replace(/[&<>"']/g,'');
   return '<button type="button" class="trade-view-chart" data-a="tracked-chart" data-kind="'+kind+
-    '" data-id="'+tradeId+'" title="Show saved Entry, Stop Loss and Take Profit on a 5-minute chart">View Entry / SL / TP chart</button>';
+    '" data-id="'+tradeId+'" title="Show saved Entry, Stop Loss and Take Profit on original chart timeframe">View Entry / SL / TP chart</button>';
 };
 function card(r){
  const p=r.plan,key=signalKey(r);
