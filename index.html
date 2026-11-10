@@ -219,21 +219,30 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   <button id="liveDisconnect" type="button">Disconnect saved API key</button>
  </details>
  <details class="paper-details" id="liveRiskSettings">
-  <summary>2. Binance Futures account & trading preferences</summary>
-  <p class="paper-note">Wallet balance and available USDT are read directly from your verified Binance Futures account above. You cannot change the real Binance wallet balance in this software.</p>
+  <summary>2. Binance Futures allocation, risk and trading preferences</summary>
+  <p class="paper-note">Wallet balance and available USDT are read from your verified Binance Futures account above. Enter how much USDT margin to allocate to each trade and how much of your FUTURES WALLET you are prepared to risk at the original stop-loss. Both limits apply to every order; actual margin used may be lower.</p>
   <div class="paper-settings">
    <label>Leverage (×)
      <input data-live-setting="maxLeverage" type="text" inputmode="numeric" autocomplete="off" value="2" placeholder="Enter leverage"/>
-     <small>Enter your preferred leverage (whole number). Actual leverage is limited by the coin's Binance Futures contract rules; the application rejects unsupported values instead of resetting them.</small>
+     <small>Whole-number leverage. Binance's symbol-specific leverage limits still apply.</small>
+   </label>
+   <label>Margin allocation per trade (USDT)
+     <input data-live-setting="tradeMarginUSDT" type="text" inputmode="decimal" autocomplete="off" value="25" placeholder="e.g. 25"/>
+     <small>Maximum USDT margin from available Futures funds per position. Notional is capped by margin × leverage and risk sizing.</small>
+   </label>
+   <label>Risk per trade (% of Futures wallet)
+     <input data-live-setting="riskPerTradePct" type="text" inputmode="decimal" autocomplete="off" value="0.2" placeholder="e.g. 0.5"/>
+     <small>Approximate wallet loss allowed at the original SL. Example: 0.5% of a 1,000 USDT wallet = 5 USDT before fees, slippage or liquidation.</small>
    </label>
    <label>Maximum real trades per day
      <input data-live-setting="maxOrdersPerDay" type="text" inputmode="numeric" autocomplete="off" value="2" placeholder="Number of daily entries"/>
-     <small>Choose the maximum number of NEW real Binance Futures entries per UTC day. This does not limit simulated signal tracking.</small>
+     <small>Maximum NEW real Binance Futures orders each UTC day. Simulated signal tracking is not limited.</small>
    </label>
   </div>
   <div id="liveRiskDraft" class="paper-note" aria-live="polite"></div>
   <button id="liveSaveRisk" type="button">Save trading preferences</button>
-  <p class="paper-note">No number-spinner arrows or automatic field resets. Previous protective risk limits remain active internally (including position sizing, stop orders, and account-loss protection), and exchange rules still apply. The currently unvalidated Dual Liquidity Reclaim signals cannot place real Binance orders.</p>
+  <p class="paper-note"><b>Automatic SL / TP:</b> The setup supplies the initial structural SL and a final 3R TP. For the profit-lock simulation: at <b>50% of TP distance</b> protect <b>5% of the total entry-to-TP price range</b>; at <b>75% of TP distance</b> protect <b>50% of that range</b>. This applies equally to LONG and SHORT. These are PRICE levels, not guaranteed realized returns. A moved Binance stop requires working connection, confirmed active position, Binance order acceptance and explicit live activation. Existing protection stays in place if the replacement fails.</p>
+  <p class="paper-note">No spinner controls or periodic reset of unsaved values. Invalid or unsupported choices are explicitly rejected. The unvalidated Dual Liquidity Reclaim strategy cannot submit live orders automatically.</p>
  </details>
  <div class="paper-status" style="background:#3d2631">
   <strong>3. Live execution control</strong>
