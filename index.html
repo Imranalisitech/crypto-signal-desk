@@ -160,8 +160,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
     <label>Data source<select id="ex"><option value="bybit">Bybit (recommended)</option><option value="binance">Binance</option></select></label>
     <label>Account ($)<input id="acct" type="number" value="2000"></label>
     <label>Risk % per trade<input id="risk" type="number" step="0.1" value="0.5"></label>
-    <span class="mut" style="font-size:12px">Stop-loss follows structure and final TP is 3R. Stop width and estimated leverage do not filter signals.</span>
-    <label>Funding limit %<input id="fundlim" type="number" step="0.01" value="0.05"></label>
+    <span class="mut" style="font-size:12px">Gautam Jha two-line only: previous UTC day high/low, 1m reversal and next-candle break. Stop beyond liquidity; TP at 3R.</span>
     <label>Fees maker+taker %<input id="fee" type="number" step="0.005" value="0.075"></label>
     <label>Min 24h volume ($M)<input id="minvol" type="number" value="0"></label>
     <label>Max coins to scan<input id="topn" type="number" value="600"></label>
@@ -204,7 +203,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   <h2 style="color:#ffc1c1">Binance Futures — REAL Account</h2>
   <b class="paper-only" style="background:#75232e;border-color:#e46666">REAL FUNDS · OFF UNTIL YOU ACTIVATE</b>
  </div>
- <p class="paper-note">Live Binance USDⓈ-M Futures. Your existing RSI, candle, volume and funding signal strategy is unchanged. Your laptop can place actual futures orders <b>only after you explicitly enable live trading</b>. Futures trading can cause rapid losses and liquidation.</p>
+ <p class="paper-note">Live Binance USDⓈ-M Futures. Only Gautam Jha two-line liquidity signals qualify. Your laptop can place actual futures orders <b>only after you explicitly enable live trading</b>. Futures trading can cause rapid losses and liquidation.</p>
  <div id="liveStatus" class="paper-status">Live trading DISABLED. The real account is not connected.</div>
  <div id="liveBalance" class="paper-metrics"></div>
  <details class="paper-details" id="liveCredentials">
@@ -250,12 +249,12 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
  <p class="paper-note"><b>Important:</b> Emergency Pause blocks future entries; it does not close already-open Binance positions. Existing Binance-side protective orders stay on the exchange. Realized P&L must be verified from Binance account history. This desktop software is not a replacement for monitoring your exchange account.</p>
 </section>
 
-<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins are not confirmed trades. Only active exchange-derived indicators contribute to signals. Final TP is three times the actual stop distance (1:3 R:R); targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
+<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins have crossed a previous-day liquidity level and await a fresh 1m reversal candle and next-candle break. Final TP is 3R; targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 <section id="sot"><h2>Automatically tracked trades <small>every new confirmed signal is recorded without clicking</small></h2><div class="tw" id="ot"></div></section>
 <section><h2>All automatic trade results <span><button id="allResults" type="button" hidden>Show all results</button> <button id="clearHistory" type="button">Clear history</button> <button id="csv" type="button">Export all CSV</button></span></h2>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
 
-<p class="mut" style="font-size:12px">Trades are registered automatically while the dashboard is open. Tracking is saved in this browser; when it is closed, no new signals can be detected and intraperiod price movements may be missed. Targets are planned levels, not guaranteed outcomes. RSI, candlesticks, trading volume and exchange funding are screening inputs, not forecasts. Signals and tracked trades are simulated: the dashboard never places orders. Results use mark-price polling and include your fee setting, so real fills can differ. Educational tool, not financial advice.</p>
+<p class="mut" style="font-size:12px">The laptop server tracks confirmed signals while running. Previous trade history remains saved. New signals use only the previous UTC day high/low and the 1m two-candle reversal break; RSI, volume, funding, EMA and FVG are not active indicators. The fixed 3R TP is your risk management rule. Live Binance execution requires separate local activation and additional broker safety limits.</p>
 </main>
 <div id="tradeChartModal" class="trade-chart-modal" hidden>
   <div id="tradeChartDialog" class="trade-chart-dialog" role="dialog" aria-modal="true" aria-labelledby="tradeChartTitle" tabindex="-1">
@@ -314,7 +313,7 @@ if(!Array.isArray(st.open))st.open=[];
 if(!Array.isArray(st.hist))st.hist=[];
 if(!st.trackedKeys||typeof st.trackedKeys!=='object'||Array.isArray(st.trackedKeys))st.trackedKeys={};
 const save=()=>{if(remoteMode)return;try{localStorage.setItem('scan1',JSON.stringify(st))}catch(e){}};
-const IDS=['ex','acct','risk','fundlim','fee','minvol','topn'];
+const IDS=['ex','acct','risk','fee','minvol','topn'];
 if(st.set.v!==4){st.set.v=4;st.set.topn=600;st.set.minvol=0;st.set.ex='bybit';save()}
 IDS.forEach(i=>{if(st.set[i]!=null)$(i).value=st.set[i]});
 try{banUntil=+localStorage.getItem('ban_'+EX())||0}catch(e){}
@@ -358,13 +357,11 @@ async function scan(){
  const s=x.symbol,r=res[s];
  const x15=await K(s,'15m',210);
  if(x15.length<66)return;
- const x5=await K(s,'5m',220);
- if(x5.length<45)return;
+ const x1=await K(s,'1m',240);
+ if(x1.length<36)return;
  const settings={
-  bars15:x15.slice(0,-1),bars5:x5.slice(0,-1),
-  mark:M[s].p,fundingPct:M[s].fr,
-  maxFunding:n('fundlim'),
-  account:n('acct'),risk:n('risk')
+  bars15:x15.slice(0,-1),bars1:x1.slice(0,-1),
+  mark:M[s].p,account:n('acct'),risk:n('risk')
  };
  const signal=UnifiedStrategy.evaluate(settings);
  Object.assign(r,signal);
@@ -474,31 +471,24 @@ function card(r){
  const p=r.plan,key=signalKey(r);
  const tracking=st.open.some(x=>x.signalKey===key);
  const recorded=st.hist.some(x=>x.signalKey===key);
- const rsi=r.rsi||{},pat=r.pattern||{};
+ const g=r.gautam||{},day=g.day||p.previousDayLevel||{};
  const checks=[
   ['Entry',fp(p.en)],['SL ('+f(p.sp,2)+'%)',fp(p.stop)],
   ['Final TP (3R / '+f(p.tp2pct,2)+'%)',fp(p.tp2)],['Target R:R','1 : '+f(p.rr,1)],
-  ['Candlestick',pat.name||'—'],['Volume',f(pat.volumeRatio,2)+'x'],
-  ['RSI 5m/15m/1h',[rsi.r5,rsi.r15,rsi.r1h].map(x=>f(x,1)).join(' / ')],
-  ['Funding',f(r.fundingPct,4)+'%'],
-  ['Setup',r.structure?.kind||'Liquidity-confirmed confluence'],
-  ['15m trend',r.structure?.trend?.direction||'—'],
-  ['Liquidity sweep',r.structure?.sweep?.ok?'Reclaimed previous high/low':'Not confirmed'],
-  ['Imbalance',r.structure?.imbalance?.ok?'Revisited and reclaimed':'Not confirmed'],
-  ['Previous-day two-line',r.gautam?.ok?
-    r.gautam.name+' (5m crypto adaptation)':
-    (r.gautam?.day?'Not triggered':'Previous UTC day unavailable')],
-  ['Signal category',r.confirmationMode||'Original unified signal'],
-  ['Real Binance execution',r.executionReady===false?
-    'BLOCKED — research-only confirmation':'Existing live safety controls'],
-  ['Position value','$'+f(p.nt,0)],['Estimated leverage (not a signal filter)',f(p.lev,2)+'x']
+  ['Strategy','Gautam Jha — previous-day two-line'],
+  ['Previous day high',fp(day.high)],['Previous day low',fp(day.low)],
+  ['Liquidity',g.dir==='long'?'PDL breached':'PDH breached'],
+  ['1m confirmation',g.name||'Reversal candle + next candle break'],
+  ['Stop placement','Beyond swept liquidity wick'],
+  ['Live execution',r.executionReady===true?
+      'Eligible after separate Binance account activation':'Not eligible']
  ];
  return '<div class="card '+r.dir+'" data-a="chart" data-s="'+r.sym+
   '" role="button" tabindex="0"><div class="ch"><button class="coin-chart" type="button" data-a="chart" data-s="'+r.sym+'">'+
-  nm(r.sym)+'</button>'+star(r.sym)+'<span class="m">'+fp(M[r.sym].p)+'</span></div><table class="kv">'+
+  nm(r.sym)+'</button>'+star(r.sym)+'<span class="m">'+fp(M[r.sym]?.p||r.price||p.en)+'</span></div><table class="kv">'+
   checks.map(x=>'<tr><td>'+x[0]+'</td><td>'+x[1]+'</td></tr>').join('')+'</table>'+
   '<div class="auto-track-state">'+(tracking?'● Automatically tracking this trade':
-    recorded?'✓ Result recorded automatically':'✓ Signal registered for automatic tracking')+'</div>'+
+    recorded?'✓ Result recorded automatically':'✓ Signal ready for automatic tracking')+'</div>'+
   '<button class="p" data-a="chart" data-s="'+r.sym+'" style="margin-top:7px">View Entry / SL / TP chart</button></div>';
 }
 function renderScanInspector(){
@@ -807,7 +797,7 @@ function adoptLaptop(snapshot,source,online,lastSeen){
  if(source==='local'&&snapshot.config){
   const c=snapshot.config;
   const mapping={ex:c.exchange,acct:c.account,risk:c.riskPct,
-    fundlim:c.fundingLimitPct,fee:c.feePct,minvol:c.minTurnoverMillions,topn:c.scanMax};
+    fee:c.feePct,minvol:c.minTurnoverMillions,topn:c.scanMax};
   for(const [id,v] of Object.entries(mapping))if(v!=null&&document.activeElement!==$(id))$(id).value=v;
  }
  render();return true;
