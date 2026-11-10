@@ -261,6 +261,7 @@ function register(r){
     tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,source:config.exchange,
     signalCandle:p.ck,open:now,realizedR:null,targetMode:'fixed3r',
     confirmationMode:r.confirmationMode||'Gautam two-line · 1m crypto futures',
+    timeframe:p.timeframe||'1m',
     researchOnly:p.researchOnly===true,
     previousDayLevel:p.previousDayLevel||null};
   state.open.push(trade);
@@ -273,7 +274,8 @@ function settle(t,reason,price,grossR){
   state.history.push({id:t.id,signalKey:t.signalKey,sym:t.sym,dir:t.dir,
     signalCandle:t.signalCandle,source:t.source,
     open:t.open,close:Date.now(),en:t.en,stop:t.stop0,tp:t.tp2,
-    confirmationMode:t.confirmationMode||null,researchOnly:!!t.researchOnly,
+    confirmationMode:t.confirmationMode||null,
+    timeframe:t.timeframe||'5m',researchOnly:!!t.researchOnly,
     previousDayLevel:t.previousDayLevel||null,
     ex:price,r,pnl:r*t.r$,why:reason});
   state.open=state.open.filter(x=>x.id!==t.id);
