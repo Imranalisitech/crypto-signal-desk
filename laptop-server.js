@@ -54,7 +54,10 @@ const state={
     typeof loaded.results==='object'?loaded.results:{},
   live:loaded.live&&typeof loaded.live==='object'?loaded.live:null,
   markets:{},open:Array.isArray(loaded.open)?loaded.open:[],
-  history:Array.isArray(loaded.history)?loaded.history:[],
+  historyClearEpoch:Number.isFinite(Number(loaded.historyClearEpoch))?
+    Number(loaded.historyClearEpoch):0,
+  history:Array.isArray(loaded.history)?
+    loaded.history.filter(x=>!(Number(x.close)>0&&Number(x.close)<=Number(loaded.historyClearEpoch||0))):[],
   trackedKeys:loaded.trackedKeys&&typeof loaded.trackedKeys==='object'?loaded.trackedKeys:{},
   lastScanAt:loaded.lastScanAt||null,lastPriceAt:null,
   lastScanDurationSec:loaded.lastScanDurationSec||null,
@@ -497,6 +500,7 @@ function snapshot(fullHistory=false){
     connection:state.connection,nextScanAt:state.nextScanAt,
     markets,results:Object.values(state.results),strategyVersion:ACTIVE_STRATEGY,
     open:state.open,history,historyTotal:totalHistory,
+    historyClearEpoch:state.historyClearEpoch,
     trackedKeys:state.trackedKeys};
   while(!fullHistory&&Buffer.byteLength(JSON.stringify(out))>1_900_000&&history.length>100){
     history=history.slice(Math.ceil(history.length/4));
@@ -585,12 +589,21 @@ const server=http.createServer((req,res)=>{
             count,history:state.history
           },null,2),{encoding:'utf8',flag:'wx'});
           state.history=[];
-          persistImmediate();
+        }
+        // Persistent tombstone: subsequent stale snapshots/cached histories
+        // must not repopulate earlier CLOSED simulations.
+        state.historyClearEpoch=Math.max(state.historyClearEpoch||0,Date.now());
+        persistImmediate();
+        if(count>0){
           log('CLOSED SIMULATED HISTORY CLEARED '+count+
               ' entries; archived locally; open trades and real orders retained');
         }
+        // Propagate cleared state to the online read-only mirror immediately
+        // where a relay has been configured. Failure must not undo local clear.
+        syncRemote().catch(e=>log('Clear-history mirror sync: '+e.message));
         respond(res,200,{ok:true,cleared:count,
-          message:'Closed simulated trade history cleared and backed up locally. Open positions preserved.'});
+          historyClearEpoch:state.historyClearEpoch,
+          message:'Closed simulated history cleared and backed up on this laptop. Open positions preserved.'});
       }catch(e){respond(res,400,{error:String(e.message).slice(0,200)})}
     });
     return;
