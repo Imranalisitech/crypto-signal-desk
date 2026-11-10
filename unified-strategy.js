@@ -42,46 +42,45 @@
        'A complete previous UTC day is unavailable',
      variant:'Gautam two-line · 1m crypto futures'};
    if(!sg||!day||!Array.isArray(bars1)||bars1.length<35)return state;
-   const n=bars1.length,b=bars1[n-2],c=bars1[n-1];
-   if(!b||!c||![b.o,b.h,b.l,b.c,c.o,c.h,c.l,c.c,b.t,c.t].every(ok))return state;
-   if(c.t-b.t!==60000)return {...state,reason:'Waiting for consecutive closed 1m candles'};
-   const previous=bars1.slice(Math.max(0,n-62),n);
-   const currentDay=Math.floor(c.t/DAY)*DAY;
-   const eligible=previous.filter(k=>k.t>=currentDay&&k.t<=c.t);
-   if(!eligible.length)return state;
-   const breached=eligible.filter(k=>sg===1?k.l<day.low:k.h>day.high);
-   if(!breached.length)return state;
-   const breach=breached.at(-1);
-   const crossed=true;
-   // The new reversal signal candle must be formed AT the liquidity line;
-   // an unrelated reversal far inside yesterday's range is not a setup.
-   const candleNear=sg===1?b.l<day.low:b.h>day.high;
-   if(!candleNear)return {...state,boundaryCrossed:crossed,breachTime:breach.t,
-     reason:'Previous-day line crossed; waiting for fresh reversal candle at the line'};
-   const direction=sg*(b.c-b.o)>0;
-   if(!direction)return {...state,boundaryCrossed:true,breachTime:breach.t,
-     reason:dir==='long'?'Waiting for a bullish signal candle below PDL':
-       'Waiting for a bearish signal candle above PDH'};
-   const confirmed=sg===1?c.c>b.h:c.c<b.l;
-   if(!confirmed)return {...state,boundaryCrossed:true,signalCandle:true,
-     breachTime:breach.t,signalTime:b.t,reason:'Waiting for next 1m candle to close beyond signal-candle high/low'};
-   // Stop goes past the wick that took yesterday's liquidity, including
-   // any deeper wick since it. Only closed 1m candles are used.
-   let start=eligible.findIndex(k=>k.t===breach.t);
-   // If the breach was earlier than the signal candle, preserve those wicks.
-   // Iterate back to the first breach within the last 60m, not just the last.
-   start=eligible.findIndex(k=>sg===1?k.l<day.low:k.h>day.high);
-   const sample=eligible.slice(Math.max(0,start));
-   const extreme=sg===1?Math.min(...sample.map(k=>k.l)):
-     Math.max(...sample.map(k=>k.h));
-   return {...state,ok:true,boundaryCrossed:true,signalCandle:true,
-     confirmation:true,breachTime:eligible[start].t,signalTime:b.t,
-     triggerTime:c.t,triggerPrice:c.c,extreme,
-     name:sg===1?'PDL sweep → bullish 1m reversal → high broken':
-       'PDH sweep → bearish 1m reversal → low broken',
-     reason:'Previous-day liquidity taken; fresh opposite candle and next-candle break confirmed'};
+   const n=bars1.length,currentDay=day.end+1;
+   // A 500-market scan needs several minutes. Inspect the last six completed
+   // 1m candles and use the newest 2-candle trigger; a separate age guard
+   // prevents opening late or chasing a completed move.
+   let latestCross=false,latestSignal=false;
+   for(let j=n-1;j>=Math.max(1,n-7);j--){
+     const b=bars1[j-1],c=bars1[j];
+     if(!b||!c||![b.o,b.h,b.l,b.c,c.o,c.h,c.l,c.c,b.t,c.t].every(ok)||
+        c.t-b.t!==60000||b.t<currentDay)continue;
+     const recent=bars1.slice(Math.max(0,j-61),j+1)
+       .filter(k=>k.t>=currentDay);
+     const crossed=recent.some(k=>sg===1?k.l<day.low:k.h>day.high);
+     if(!crossed)continue;
+     latestCross=true;
+     // The fresh direction-changing candle must be AT the crossed line;
+     // an unrelated reversal in yesterday's middle range does not count.
+     const candleNear=sg===1?b.l<day.low:b.h>day.high;
+     const direction=sg*(b.c-b.o)>0;
+     if(!candleNear||!direction)continue;
+     latestSignal=true;
+     const confirmed=sg===1?c.c>b.h:c.c<b.l;
+     if(!confirmed)continue;
+     const first=recent.findIndex(k=>sg===1?k.l<day.low:k.h>day.high);
+     const breached=recent.slice(Math.max(0,first));
+     const extreme=sg===1?Math.min(...breached.map(k=>k.l)):
+       Math.max(...breached.map(k=>k.h));
+     return {...state,ok:true,boundaryCrossed:true,signalCandle:true,
+       confirmation:true,breachTime:breached[0].t,signalTime:b.t,
+       triggerTime:c.t,triggerPrice:c.c,extreme,
+       name:sg===1?'PDL taken → bullish 1m candle → next high broken':
+         'PDH taken → bearish 1m candle → next low broken',
+       reason:'Previous-day liquidity breached, directional 1m reversal and next-candle close confirmed'};
+   }
+   return {...state,boundaryCrossed:latestCross,signalCandle:latestSignal,
+     reason:!latestCross?'Waiting for prior-day high/low liquidity breach':
+       latestSignal?'Fresh candle seen; waiting for the next 1m close to break its high/low':
+       'Prior-day line taken; waiting for fresh red/green 1m candle at line'};
  }
- function evaluate({bars15,bars1,mark,account=2000,risk=0.5}){
+ function evaluate({bars15,bars1,mark,account=2000,risk=0.5,now=Date.now()}){
    if(!Array.isArray(bars15)||!Array.isArray(bars1)||
       bars15.length<97||bars1.length<35||!ok(mark)||mark<=0)
      return {status:'none',side:null,dir:null,reason:'Waiting for previous UTC day and 1m closed candles',
@@ -98,7 +97,9 @@
      const maxChase=g.ok?Math.max(Math.abs(g.triggerPrice-g.extreme)*0.35,
        g.triggerPrice*0.002):0;
      const priceSafe=g.ok&&Math.abs(mark-g.triggerPrice)<=maxChase;
-     const qualified=!!(g.ok&&validStop&&priceSafe);
+     const age=g.ok?now-(g.triggerTime+60000):Infinity;
+     const freshTrigger=g.ok&&age>=-30000&&age<=4*60000;
+     const qualified=!!(g.ok&&validStop&&priceSafe&&freshTrigger);
      const cashRisk=Math.max(0,Number(account)*Number(risk)/100);
      const sp=validStop?100*riskDistance/mark:null;
      const notional=validStop&&sp>0?cashRisk/(sp/100):null;
@@ -117,7 +118,8 @@
        {ok:g.signalCandle,t:'Fresh directional 1m reversal candle at liquidity line'},
        {ok:g.confirmation,t:'Next closed 1m candle breaks signal-candle high/low'},
        {ok:!!validStop,t:'Stop beyond sweep wick is valid'},
-       {ok:!!priceSafe,t:'Current price has not moved too far from trigger'}
+       {ok:!!priceSafe,t:'Current price has not moved too far from trigger'},
+       {ok:!!freshTrigger,t:'1m trigger still fresh enough for execution'}
      ];
      const reason=qualified?g.reason:g.ok?
        '1m reversal occurred, but entry is now stale or structural stop invalid':
