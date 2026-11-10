@@ -1,6 +1,6 @@
 'use strict';
 /*
- GAUTAM-INSPIRED TWO-LINE CRYPTO FUTURES — DOUBLE LIQUIDITY CONFIRMATION
+ DUAL_LIQUIDITY_RECLAIM-INSPIRED TWO-LINE CRYPTO FUTURES — DOUBLE LIQUIDITY CONFIRMATION
 
  ONLY entry inputs: completed previous UTC day's HIGH/LOW and CLOSED 1m
  price candles. No RSI, EMA, funding, VWAP, volume, FVG, whale indicators.
@@ -36,14 +36,14 @@
    const n=nums.length;return n%2?nums[(n-1)/2]:
      (nums[n/2-1]+nums[n/2])/2;
  }
- function gautamDoubleSweep(bars15,bars1,dir){
+ function dualLiquidityReclaim(bars15,bars1,dir){
    const day=priorUTCDay(bars15);
    const sg=dir==='long'?1:dir==='short'?-1:0;
    const level=day?(sg===1?day.low:day.high):null;
    const base={ok:false,dir,day,level,stage:0,
      firstSweep:false,secondSweep:false,boundaryCrossed:false,
      levelReclaimed:false,structureBroken:false,strongPressure:false,
-     confirmation:false,kind:'Gautam double liquidity sweep · 1m crypto',
+     confirmation:false,kind:'Dual Liquidity Reclaim · 1m crypto',
      reason:day?'Waiting for the first previous-day liquidity grab':
        'Previous completed UTC day unavailable'};
    if(!sg||!day||!Array.isArray(bars1)||bars1.length<110)return base;
@@ -153,10 +153,10 @@
       bars15.length<97||bars1.length<110||!ok(mark)||mark<=0)
      return {status:'none',side:null,reason:'Waiting for previous UTC day / closed 1m candles',
        checks:[],G:[],score:0,executionReady:false,
-       confirmationMode:'Gautam double liquidity · 1m'};
+       confirmationMode:'Dual Liquidity Reclaim double liquidity · 1m'};
    const both=['long','short'].map(side=>{
      const sg=side==='long'?1:-1;
-     const g=gautamDoubleSweep(bars15,bars1,side);
+     const g=dualLiquidityReclaim(bars15,bars1,side);
      const stop=g.ok?g.extreme-sg*Math.max(mark*.0001,g.baseline*.22):null;
      const stopOK=g.ok&&ok(stop)&&sg*(mark-stop)>0;
      const distance=stopOK?Math.abs(mark-stop):0;
@@ -176,7 +176,7 @@
        lev:Number(account)>0&&notional!=null?notional/Number(account):null,
        ck:g.triggerTime,rr:3,tp1pct:sp*3,tp2pct:sp*3,
        timeframe:'1m',targetMode:'fixed3r',
-       setupType:'Gautam two-line + DOUBLE liquidity sweep',
+       setupType:'Dual Liquidity Reclaim + DOUBLE liquidity sweep',
        structureExtreme:g.extreme,
        firstSweepPrice:g.firstExtreme,secondSweepPrice:g.secondExtreme,
        breakLevel:g.structureBreakLevel,
@@ -200,7 +200,7 @@
        pattern:g.ok?{name:g.name,confirmTime:g.triggerTime,
          confirmClose:g.triggerPrice,patternTime:g.signalTime,
          extreme:g.extreme}:null,
-       gautam:g,confirmationMode:'Gautam double liquidity sweep · strong 1m confirmation',
+       liquidity:g,confirmationMode:'Dual Liquidity Reclaim · strong 1m confirmation',
        executionReady:false,checks,G:checks,plan,ok:confirmed,
        reason:confirmed?g.reason:g.ok?
          'Confirmed structure but price is late or stop invalid':g.reason};
@@ -212,7 +212,7 @@
    return both[0];
  }
  root.UnifiedStrategy=Object.freeze({
-   priorUTCDay,gautamDoubleSweep,evaluate,
-   activeStrategy:'GAUTAM_DOUBLE_SWEEP_1M_CRYPTO_V2'
+   priorUTCDay,dualLiquidityReclaim,evaluate,
+   activeStrategy:'DUAL_LIQUIDITY_RECLAIM_1M_CRYPTO_V2'
  });
 })(window);
