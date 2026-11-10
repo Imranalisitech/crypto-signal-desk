@@ -304,7 +304,8 @@ function compactResult(r){
   return {sym:r.sym,status:r.status,dir:r.dir,side:r.dir,
     price:r.price,analyzedAt:r.analyzedAt,
     score:r.score,chg:r.chg,vol:r.vol,G:r.G||r.checks||[],
-    rsi:r.rsi,pattern:r.pattern,reason:r.reason,fundingPct:r.fundingPct,
+    rsi:r.rsi,pattern:r.pattern,structure:r.structure,
+    reason:r.reason,fundingPct:r.fundingPct,
     plan:r.plan,ok:r.ok};
 }
 let scanning=false;
