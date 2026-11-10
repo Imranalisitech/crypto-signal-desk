@@ -19,7 +19,9 @@ function liveConfig(v={},base={}){
   // Broker/exchange safety and valid non-zero values cannot be disabled.
   const limits=[
     ['riskPerTradePct',.01,5],['maxNotionalUSDT',5,100000],
-    ['maxLeverage',1,20],['maxOrdersPerDay',1,200],
+    // User-configurable: no arbitrary low application preset.
+    // Binance symbol-specific maximum leverage and risk safeguards still apply.
+    ['maxLeverage',1,125],['maxOrdersPerDay',1,Number.MAX_SAFE_INTEGER],
     ['maxDailyLossPct',.1,20],['maxChasePct',.01,5],
     ['maxStopPct',.1,50],['minNotionalUSDT',1,1000]
   ];
@@ -31,8 +33,11 @@ function liveConfig(v={},base={}){
   }
   if(out.minNotionalUSDT>out.maxNotionalUSDT)
     throw Error('Minimum order notional cannot exceed maximum order notional');
-  out.maxLeverage=Math.floor(out.maxLeverage);
-  out.maxOrdersPerDay=Math.floor(out.maxOrdersPerDay);
+  // Leverage and entries must be exact whole numbers; never silently round
+  // a value the user explicitly chose or revert it to the default.
+  if(!Number.isSafeInteger(out.maxLeverage)||!Number.isSafeInteger(out.maxOrdersPerDay))
+    throw Error('Leverage and maximum daily entries must be positive whole numbers');
+
   return out;
 }
 function windowsDpapi(mode,payload){
