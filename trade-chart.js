@@ -75,32 +75,33 @@
     const completed=trade?.tradeKind==='history';
     const ended=completed?Math.min(Date.now(),Math.max(Number(trade.closedAt)||0,Number(trade.openedAt)||0)+3600000):null;
     const activeSource=source==='binance'?'binance':'bybit';
-    if(!ended&&activeSource===EX())return K(symbol,'5m',180);
+    const interval=trade?.plan?.timeframe==='1m'?'1m':'5m';
+    if(!ended&&activeSource===EX())return K(symbol,interval,180);
     if(activeSource==='bybit'){
       const query='https://api.bybit.com/v5/market/kline?category=linear&symbol='+encodeURIComponent(symbol)+
-        '&interval=5&limit=220'+(ended?'&end='+Math.floor(ended):'');
+        '&interval='+(interval==='1m'?'1':'5')+'&limit=220'+(ended?'&end='+Math.floor(ended):'');
       const response=await J(query);
-      if(!Array.isArray(response?.result?.list))throw new Error('Bybit 5-minute candles unavailable');
+      if(!Array.isArray(response?.result?.list))throw new Error('Bybit '+interval+' candles unavailable');
       return response.result.list.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]})).reverse();
     }
     const query='https://fapi.binance.com/fapi/v1/klines?symbol='+encodeURIComponent(symbol)+
-      '&interval=5m&limit=220'+(ended?'&endTime='+Math.floor(ended):'');
+      '&interval='+interval+'&limit=220'+(ended?'&endTime='+Math.floor(ended):'');
     const response=await J(query,2);
-    if(!Array.isArray(response))throw new Error('Binance 5-minute candles unavailable');
+    if(!Array.isArray(response))throw new Error('Binance '+interval+' candles unavailable');
     return response.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}));
   }
   async function update(symbol,session,source,result){
     const rows=await chartMarketBars(symbol,source,result);
     if(session!==activeSession||!candles)return;
     const bars=cleanBars(rows);
-    if(bars.length<20)throw new Error('Not enough 5-minute market candles');
+    if(bars.length<20)throw new Error('Not enough '+(result.plan?.timeframe||'5m')+' candles');
     data=bars;candles.setData(bars);
     const fixed=[plan.stop,plan.tp2];
     for(let i=0;i<anchorSeries.length;i++){
       const value=fixed[i];
       anchorSeries[i].setData([{time:bars[0].time,value},{time:bars[bars.length-1].time,value}]);
     }
-    byId('tradeChartStatus').textContent=source.toUpperCase()+' 5m market candles · '+(result.tradeKind==='history'?
+    byId('tradeChartStatus').textContent=source.toUpperCase()+' '+(result.plan?.timeframe||'5m')+' market candles · '+(result.tradeKind==='history'?
       'historical chart around saved trade':'updated '+new Date().toLocaleTimeString()+' · refreshes every 30 seconds');
     requestAnimationFrame(drawZones);
   }
@@ -123,6 +124,7 @@
       openedAt:trade.open,closedAt:trade.close,
       outcome:trade.why||null,exitPrice:Number(trade.ex),
       plan:{en,stop,tp2:tp,sp:risk/en*100,rr,structureExtreme:null,
+        timeframe:trade.timeframe||'5m',
         previousDayLevel:trade.previousDayLevel||null},
       confirmationMode:trade.confirmationMode||null,
       researchOnly:trade.researchOnly===true,
@@ -149,7 +151,7 @@
     document.body.style.overflow='hidden';
     const title=result.tradeKind==='history'?'Completed trade result':
        result.tradeKind==='open'?'Automatically tracked trade':'Confirmed trade';
-    byId('tradeChartTitle').textContent=symbol+' · '+result.dir.toUpperCase()+' · '+title+' · 5-minute chart';
+    byId('tradeChartTitle').textContent=symbol+' · '+result.dir.toUpperCase()+' · '+title+' · '+(setup.timeframe||'5m')+' chart';
     byId('tradeChartTV').href='https://www.tradingview.com/chart/?symbol='+encodeURIComponent((source==='bybit'?'BYBIT':'BINANCE')+':'+symbol+'.P');
     byId('tradeChartLevels').replaceChildren();
     const rr=setup.sp>0?Math.abs(setup.tp2-setup.en)/Math.abs(setup.en-setup.stop):0;
@@ -158,8 +160,6 @@
       ['Final TP (3R) ',setup.tp2,'good'],
       ['R:R 1 : ',rr,''],['Pattern ',pattern,'entry']
     ];
-    if(Number.isFinite(result.fundingPct))
-      levels.push(['Funding ',result.fundingPct.toFixed(4)+'%','']);
     if(result.tradeKind==='open')
       levels.push(['Status ','Automatically tracking','good']);
     if(result.tradeKind==='history'){
@@ -181,7 +181,7 @@
         (item[0]==='R:R 1 : '?item[1].toFixed(2):fmtPrice(item[1])):item[1]);
       byId('tradeChartLevels').appendChild(element);
     }
-    byId('tradeChartStatus').textContent='Loading '+source.toUpperCase()+' 5-minute market candles…';
+    byId('tradeChartStatus').textContent='Loading '+source.toUpperCase()+' '+(setup.timeframe||'5m')+' candles…';
     byId('tradeChartGain').style.display='none';byId('tradeChartLoss').style.display='none';
     byId('tradeChartCanvas').replaceChildren();
     byId('tradeChartDialog').focus();
