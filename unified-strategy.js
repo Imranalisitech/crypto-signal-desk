@@ -82,6 +82,118 @@
       r.r15>=23&&r.r15<=59&&r.d15>=.25&&r.r5>=30&&r.r5<=70&&r.d5>.4&&r.r1h<=67:
       r.r15>=41&&r.r15<=77&&r.d15<=-.25&&r.r5>=30&&r.r5<=70&&r.d5<-.4&&r.r1h>=33;
  }
+ // 15m EMA structure: trade with the established direction; a strong,
+ // confirmed liquidity reversal is required to trade against it.
+ function emaSeries(bars,n){
+   const result=Array(bars.length).fill(null);
+   if(bars.length<n)return result;
+   const mean=bars.slice(0,n).reduce((sum,b)=>sum+b.c,0)/n;
+   result[n-1]=mean;
+   const alpha=2/(n+1);
+   for(let i=n;i<bars.length;i++)result[i]=alpha*bars[i].c+(1-alpha)*result[i-1];
+   return result;
+ }
+ function marketTrend(bars15,dir){
+   const sg=dir==='long'?1:-1,fast=emaSeries(bars15,20),slow=emaSeries(bars15,50);
+   const a=fast.at(-1),b=slow.at(-1),previous=fast.at(-4);
+   const last=bars15.at(-1),prior=bars15.at(-2);
+   if(![a,b,previous].every(ok))return {aligned:false,direction:'unknown'};
+   const avgRange=bars15.slice(-20).reduce((sum,k)=>sum+(k.h-k.l),0)/20;
+   const band=Math.max(last.c*.0001,avgRange*.035);
+   const up=a>b+band&&a>=previous&&last.c>=a-avgRange*.2;
+   const down=a<b-band&&a<=previous&&last.c<=a+avgRange*.2;
+   return {aligned:sg===1?up:down,
+     direction:up?'long':down?'short':'neutral',
+     ema20:a,ema50:b,
+     recentSwing:dir==='long'?Math.max(...bars15.slice(-6,-1).map(k=>k.h)):
+       Math.min(...bars15.slice(-6,-1).map(k=>k.l))};
+ }
+ function liquiditySweep(bars,dir,atr){
+   const sg=dir==='long'?1:-1,n=bars.length,last=bars.at(-1);
+   // The swept high/low must predate the sweep candle. Look back roughly
+   // 90 minutes for a local liquidity pool and up to 60 minutes to reclaim.
+   const sweepBuffer=Math.max(last.c*.00008,atr*.035);
+   for(let i=n-2;i>=Math.max(22,n-13);i--){
+     const prior=bars.slice(i-20,i);
+     if(prior.length<14)continue;
+     const level=sg===1?Math.min(...prior.map(k=>k.l)):Math.max(...prior.map(k=>k.h));
+     const k=bars[i],extreme=sg===1?k.l:k.h;
+     const broken=sg*(level-extreme)>sweepBuffer;
+     if(!broken)continue;
+     const next=bars.slice(i+1);
+     const reclaim=next.findIndex(x=>sg*(x.c-level)>atr*.045);
+     if(reclaim<0||reclaim>5)continue;
+     // Do not buy/sell if the confirmation has failed back into the pool.
+     if(!(sg*(last.c-level)>atr*.07))continue;
+     const laterExtreme=sg===1?Math.min(...next.map(x=>x.l)):Math.max(...next.map(x=>x.h));
+     if(sg*(extreme-laterExtreme)<-atr*.13)continue;
+     const localShift=sg===1?Math.max(...bars.slice(Math.max(0,i-5),i).map(x=>x.h)):
+       Math.min(...bars.slice(Math.max(0,i-5),i).map(x=>x.l));
+     return {ok:true,level,extreme,time:k.t,confirmedAt:next[reclaim]?.t,
+       structureShift:sg*(last.c-localShift)>atr*.04,kind:'Sweep + reclaim'};
+   }
+   return {ok:false,kind:'No recent reclaimed liquidity sweep'};
+ }
+ function mitigatedImbalance(bars,dir,atr){
+   const sg=dir==='long'?1:-1,n=bars.length,last=bars.at(-1);
+   const minGap=Math.max(last.c*.00012,atr*.08);
+   // Fair-value imbalance: candle 1 / candle 3 non-overlap, formed before
+   // the mitigation candle. Only a CLOSED candle reclaim is a candidate.
+   for(let i=n-5;i>=Math.max(3,n-52);i--){
+     const first=bars[i-2],third=bars[i];
+     const low=sg===1?first.h:third.h,high=sg===1?third.l:first.l;
+     if(!(high-low>minGap))continue;
+     const mid=(high+low)/2;
+     const after=bars.slice(i+1,n-1);
+     const touched=after.findIndex(k=>(sg===1?k.l<=mid:k.h>=mid));
+     if(touched<0)continue;
+     const touch=after[touched];
+     const minClose=sg===1?
+       Math.min(...bars.slice(i+1).map(k=>k.c)):
+       Math.max(...bars.slice(i+1).map(k=>k.c));
+     // Ignore an imbalance that decisively failed instead of reacting.
+     if(sg*(minClose-low)<-atr*.28&&sg===1)continue;
+     if(sg===-1&&minClose>high+atr*.28)continue;
+     if(!(sg*(last.c-mid)>atr*.05))continue;
+     const recent=bars.slice(Math.max(i+1,n-8),n-1);
+     if(!recent.some(k=>(sg===1?k.l<=high:k.h>=low)))continue;
+     // Require price to reject the imbalance from its direction of travel;
+     // also require a local liquidity probe around that mitigation.
+     const tidx=i+1+touched;
+     const old=bars.slice(Math.max(i+1,tidx-5),tidx);
+     const local=old.length>=2?
+       (sg===1?Math.min(...old.map(k=>k.l)):Math.max(...old.map(k=>k.h))):null;
+     const probe=local!==null&&sg*(local-(sg===1?touch.l:touch.h))>atr*.035;
+     return {ok:true,kind:'Imbalance mitigated + reclaimed',low,high,mid,
+       touchedAt:touch.t,extreme:sg===1?
+         Math.min(...recent.map(k=>k.l)):Math.max(...recent.map(k=>k.h)),
+       liquidityProbe:probe};
+   }
+   return {ok:false,kind:'No recent reclaimed 5m imbalance'};
+ }
+ function structureContext(bars15,bars5,dir,pattern){
+   const trend=marketTrend(bars15,dir);
+   if(!pattern)return {ok:false,trend,sweep:{ok:false},imbalance:{ok:false},kind:'Waiting for candle confirmation'};
+   const sweep=liquiditySweep(bars5,dir,pattern.atr);
+   const imbalance=mitigatedImbalance(bars5,dir,pattern.atr);
+   // A wick that grabs liquidity at the imbalance can itself form the
+   // local sweep; otherwise the standalone sweep/reclaim must exist.
+   const liquidityOK=sweep.ok||(imbalance.ok&&imbalance.liquidityProbe);
+   const gapOrSweep=sweep.ok||imbalance.ok;
+   // Counter-trend trades need a stronger change of structure, not simply
+   // RSI turning briefly against a larger move.
+   const sg=dir==='long'?1:-1;
+   const reversal=sweep.ok&&sweep.structureShift&&
+     sg*(bars5.at(-1).c-trend.recentSwing)>pattern.atr*.06;
+   const aligned=trend.aligned;
+   const okContext=!!(liquidityOK&&gapOrSweep&&(aligned||reversal));
+   return {ok:okContext,trend,sweep,imbalance,kind:
+     okContext?(reversal&&!aligned?'Confirmed liquidity reversal':
+       sweep.ok?'Sweep + reclaim with trend':'Imbalance fill + liquidity rejection'):
+     !liquidityOK?'Waiting for liquidity grab/rejection':
+     !gapOrSweep?'Waiting for imbalance mitigation or sweep':
+     'Waiting for 15m trend alignment or structural reversal'};
+ }
  function evaluate({bars15,bars5,mark,fundingPct,maxFunding=0.05,
                     account=2000,risk=0.5}){
    const insufficient=!(bars15?.length>=64&&bars5?.length>=40&&ok(mark)&&mark>0);
@@ -95,10 +207,17 @@
      const fundingOK=ok(fundingPct)&&Math.abs(fundingPct)<=Math.max(0,maxFunding)&&
        (side==='long'?fundingPct<=maxFunding:fundingPct>=-maxFunding);
      const candleOK=!!pattern;
+     const structure=structureContext(bars15,bars5,side,pattern);
+     const structureOK=structure.ok;
      // Structure defines SL; risk/reward is always 1:3, not a fixed percent.
      // Neither stop distance nor projected leverage may reject an otherwise
      // qualified confluence signal. Estimated exposure is INFORMATIONAL only.
-     const stop=pattern?pattern.extreme-sg*Math.max(mark*.00035,pattern.atr*.12):null;
+     const extreme=pattern?
+       (structure.sweep?.ok?
+         (sg===1?Math.min(pattern.extreme,structure.sweep.extreme):
+           Math.max(pattern.extreme,structure.sweep.extreme)):
+         pattern.extreme):null;
+     const stop=pattern?extreme-sg*Math.max(mark*.00035,pattern.atr*.12):null;
      const structureCorrect=pattern&&Number.isFinite(stop)&&sg*(mark-stop)>0;
      const riskDistance=structureCorrect?Math.abs(mark-stop):null;
      const stopPct=structureCorrect?riskDistance/mark*100:null;
@@ -120,18 +239,19 @@
        {ok:candleOK,t:'Closed candlestick pattern + confirmation'},
        {ok:volOK,t:'Volume at least 1.30x recent baseline'},
        {ok:fundingOK,t:'Funding rate within risk limits'},
+       {ok:structureOK,t:'Liquidity sweep or mitigated imbalance + 15m structure confirmation'},
        {ok:priceOK,t:'Price close enough to confirmed candle and stop on correct side'}
      ];
      const qualified=checkItems.every(x=>x.ok);
-     const score=Math.min(100,Math.round(25*Number(rsiOK)+25*Number(candleOK)+
-       25*Number(volOK)+15*Number(fundingOK)+10*Number(priceOK)));
+     const score=Math.min(100,Math.round(20*Number(rsiOK)+20*Number(candleOK)+
+       20*Number(volOK)+10*Number(fundingOK)+20*Number(structureOK)+10*Number(priceOK)));
      const plan=pattern&&structureCorrect?{en:entry,stop,tp1,tp2,sp:stopPct,r$:cashRisk,nt,
        lev:leverage,ck:pattern.confirmTime,rr,tp1pct:targetPct,tp2pct:targetPct,
-       targetMode:'fixed3r',setupType:'RSI + Candle + Volume + Funding',
-       structureExtreme:pattern.extreme}:null;
+       targetMode:'fixed3r',setupType:'RSI + Candle + Volume + Funding + Liquidity / FVG',
+       structureExtreme:extreme,structureContext:structure.kind}:null;
      return {side,status:qualified?'confirm':rsiOK?'watch':'none',
-       score,rsi,pattern,fundingPct,volumeRatio:pattern?.volumeRatio??null,
-       checks:checkItems,G:checkItems,plan,setupType:'Unified confluence',ok:qualified,
+       score,rsi,pattern,structure,fundingPct,volumeRatio:pattern?.volumeRatio??null,
+       checks:checkItems,G:checkItems,plan,setupType:'Liquidity-confirmed confluence',ok:qualified,
        reason:qualified?'Confluence confirmed':checkItems.filter(x=>!x.ok).map(x=>x.t).join('; ')};
    });
    evaluated.sort((a,b)=>
@@ -141,5 +261,8 @@
      return {...top,status:'watch',ok:false,reason:'Conflicting LONG/SHORT confirmation'};
    return top;
  }
- root.UnifiedStrategy=Object.freeze({rsiSeries,mapRSI,candlestick,rsiAligned,evaluate});
+ root.UnifiedStrategy=Object.freeze({
+   rsiSeries,mapRSI,candlestick,rsiAligned,emaSeries,marketTrend,
+   liquiditySweep,mitigatedImbalance,structureContext,evaluate
+ });
 })(window);
