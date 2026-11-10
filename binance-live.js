@@ -15,15 +15,22 @@ const DEFAULT_LIVE_CONFIG=Object.freeze({
 function liveConfig(v={},base={}){
   const source={...DEFAULT_LIVE_CONFIG,...base,...v};
   const out={};
-  for(const [key,min,max] of [
-    ['riskPerTradePct',.01,1],['maxNotionalUSDT',10,1000],
-    ['maxLeverage',1,5],['maxOrdersPerDay',1,5],
-    ['maxDailyLossPct',.1,3],['maxChasePct',.01,1],
-    ['maxStopPct',.1,15],['minNotionalUSDT',1,100]
-  ]){
+  // Broad, individually editable limits for real-money risk management.
+  // Broker/exchange safety and valid non-zero values cannot be disabled.
+  const limits=[
+    ['riskPerTradePct',.01,5],['maxNotionalUSDT',5,100000],
+    ['maxLeverage',1,20],['maxOrdersPerDay',1,200],
+    ['maxDailyLossPct',.1,20],['maxChasePct',.01,5],
+    ['maxStopPct',.1,50],['minNotionalUSDT',1,1000]
+  ];
+  for(const [key,min,max] of limits){
     const n=Number(source[key]);
-    out[key]=Number.isFinite(n)&&n>=min&&n<=max?n:DEFAULT_LIVE_CONFIG[key];
+    if(!Number.isFinite(n)||n<min||n>max)
+      throw Error(key+' must be between '+min+' and '+max+'; not saved');
+    out[key]=n;
   }
+  if(out.minNotionalUSDT>out.maxNotionalUSDT)
+    throw Error('Minimum order notional cannot exceed maximum order notional');
   out.maxLeverage=Math.floor(out.maxLeverage);
   out.maxOrdersPerDay=Math.floor(out.maxOrdersPerDay);
   return out;
@@ -254,6 +261,8 @@ class BinanceLiveBroker{
   if(!this.state.armed||!this.vault.exists())return {accepted:false,reason:'Live execution disabled'};
   if(source!=='binance')return {accepted:false,reason:'Live execution requires Binance-based signal data'};
   if(!signal||signal.status!=='confirm'||!signal.plan)return {accepted:false,reason:'Not a confirmed strategy signal'};
+  if(signal.executionReady!==true||signal.plan.researchOnly===true)
+    return {accepted:false,reason:'Unvalidated signal cannot place real Binance orders'};
   const sym=signal.sym,dir=signal.dir,sg=dir==='long'?1:dir==='short'?-1:0;
   const ck=Number(signal.plan.ck),key=[source,sym,dir,ck].join(':');
   const now=Date.now();
