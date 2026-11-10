@@ -37,7 +37,7 @@ const strategy=ctx.window.UnifiedStrategy;
 if(!strategy||typeof strategy.evaluate!=='function')throw Error('Missing unified-strategy.js');
 
 const loaded=readFile(STATE_FILE,{});
-const ACTIVE_STRATEGY='GAUTAM_DOUBLE_SWEEP_1M_CRYPTO_V2';
+const ACTIVE_STRATEGY='DUAL_LIQUIDITY_RECLAIM_1M_CRYPTO_V2';
 // Keep old demo results in a local archive; no more paper orders run.
 if(loaded.paper&&typeof loaded.paper==='object'){
   const archive=path.join(BASE,'binance-paper-archive.json');
@@ -71,6 +71,12 @@ const state={
 // Backfill keys from previous tracked trades so historical signals remain deduplicated.
 for(const trade of [...state.open,...state.history]){
   if(trade.signalKey)state.trackedKeys[trade.signalKey]=state.trackedKeys[trade.signalKey]||trade.open||Date.now();
+}
+// Cosmetic name migration only: preserve all historical prices, SL, TP and outcomes.
+for(const oldTrade of [...state.open,...state.history]){
+  if(typeof oldTrade.confirmationMode==='string')
+    oldTrade.confirmationMode=oldTrade.confirmationMode
+      .replace(/Gautam(?: Jha)?/gi,'Dual Liquidity Reclaim');
 }
 let persistTimer=null;
 function persist(){
@@ -260,7 +266,7 @@ function register(r){
     sym:r.sym,dir:r.dir,en:p.en,stop:p.stop,stop0:p.stop,
     tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,source:config.exchange,
     signalCandle:p.ck,open:now,realizedR:null,targetMode:'fixed3r',
-    confirmationMode:r.confirmationMode||'Gautam double sweep · strong 1m crypto futures',
+    confirmationMode:r.confirmationMode||'Dual Liquidity Reclaim · strong 1m crypto futures',
     firstSweepPrice:p.firstSweepPrice??null,
     secondSweepPrice:p.secondSweepPrice??null,
     breakLevel:p.breakLevel??null,
@@ -322,7 +328,7 @@ function compactResult(r){
   return {sym:r.sym,status:r.status,dir:r.dir,side:r.dir,
     price:r.price,analyzedAt:r.analyzedAt,
     score:r.score,chg:r.chg,G:r.G||r.checks||[],
-    pattern:r.pattern,gautam:r.gautam,
+    pattern:r.pattern,liquidity:r.liquidity,
     confirmationMode:r.confirmationMode,executionReady:r.executionReady,
     reason:r.reason,
     plan:r.plan,ok:r.ok};
@@ -369,7 +375,7 @@ async function scan(){
           analyzedAt:Date.now()};
         try{
           const [raw15,raw1]=await Promise.all([
-            // Previous UTC day from 15m bars; Gautam two-line trigger on 1m.
+            // Previous UTC day from 15m bars; Dual Liquidity Reclaim trigger on 1m.
             candles(sym,'15m',210),candles(sym,'1m',240)]);
           const bars15=closed(raw15,15),bars1=closed(raw1,1);
           if(bars15.length<97||bars1.length<35){
