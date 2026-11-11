@@ -266,7 +266,11 @@
      const priceOK=fvg.ok&&drift<=maxDrift;
      const age=fvg.ok?now-(fvg.triggerTime+60000):Infinity;
      const fresh=fvg.ok&&age>=-30000&&age<=4*60000;
-     const confirmed=!!(g.ok&&fvg.ok&&stopOK&&priceOK&&fresh);
+     // Never issue a late signal if the protected stop wick was already
+     // breached between the final closed candle and scan evaluation.
+     const invalidated=fvg.ok&&stopOK&&bars1.some(k=>k.t>fvg.triggerTime&&
+       (sg===1?k.l<=stop:k.h>=stop));
+     const confirmed=!!(g.ok&&fvg.ok&&stopOK&&priceOK&&fresh&&!invalidated);
      const cashRisk=Math.max(0,Number(account)*Number(risk)/100);
      const notional=stopOK&&sp>0?cashRisk/(sp/100):null;
      const plan=confirmed?{
@@ -301,7 +305,8 @@
          'New bearish candle with decreasing volume'},
        {ok:!!stopOK,t:'Stop outside second sweep wick'},
        {ok:!!priceOK,t:'Entry near confirmed trigger'},
-       {ok:!!fresh,t:'Confirmation still recent'}
+       {ok:!!fresh,t:'Confirmation still recent'},
+       {ok:!invalidated,t:'Original structural stop not already breached'}
      ];
      const pendingScore=Math.min(99,Math.max(0,g.stage*11+
        (fvg.formed?9:0)+(fvg.filled?12:0)));
@@ -315,8 +320,9 @@
        liquidity:g,fvg,volumeRatio:fvg.volumeRatio??null,
        confirmationMode:'Dual Liquidity Reclaim · FVG fill + directional 1m volume',
        executionReady:false,checks,G:checks,plan,ok:confirmed,
-       reason:confirmed?fvg.reason:fvg.ok?
-         'FVG volume confirmed, but entry is stale or structural stop invalid':
+       reason:confirmed?fvg.reason:invalidated?
+         'FVG confirmed, but the structural stop was already breached after the signal':
+         fvg.ok?'FVG volume confirmed, but entry is stale, too far or stop invalid':
          g.ok?fvg.reason:g.reason};
    });
    both.sort((a,b)=>Number(b.ok)-Number(a.ok)||b.score-a.score);
