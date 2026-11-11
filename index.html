@@ -261,12 +261,12 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
  <p class="paper-note"><b>Important:</b> Emergency Pause blocks future entries; it does not close already-open Binance positions. Existing Binance-side protective orders stay on the exchange. Realized P&L must be verified from Binance account history. This desktop software is not a replacement for monitoring your exchange account.</p>
 </section>
 
-<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins are awaiting the second liquidity grab, previous-day level reclaim, swing break or strong 1m confirmation. Final TP is 3R; targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
+<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins may await double liquidity, a newly formed FVG, its full fill, or the final direction-and-volume candle. Final TP stays 3R; targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 <section id="tradeResultsPanel"><h2>Automatic trades & results <span><button id="allResults" type="button" hidden>Show all results</button> <button id="clearHistory" type="button">Clear closed history</button> <button id="csv" type="button">Export all CSV</button></span></h2>
   <p class="mut" style="font-size:12px">Open simulated trades and closed simulated results appear together below. Use Close manually to close a tracked simulation; this does not close an actual Binance Futures position.</p>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
 
-<p class="mut" style="font-size:12px">The laptop server tracks confirmed signals while running. Previous trade history remains saved. New signals require TWO liquidity grabs, previous-day reclaim, a 1m swing break and strong directional candles; RSI, volume, funding, EMA and FVG are not used. TP remains 3R. New double-sweep signals are SIMULATED ONLY pending testing, even if the Binance connector is enabled.</p>
+<p class="mut" style="font-size:12px">The laptop server tracks confirmed signals while running. Previous trade history remains saved. New signals require double liquidity, a reclaimed previous-day line, swing break, a fully filled newly formed FVG, then a fresh 1m direction-and-volume candle. LONG volume rises and SHORT volume decreases. RSI, funding and EMA remain inactive. Existing SL/TP and profit-lock continue; these new signals remain SIMULATED ONLY.</p>
 </main>
 <div id="tradeChartModal" class="trade-chart-modal" hidden>
   <div id="tradeChartDialog" class="trade-chart-dialog" role="dialog" aria-modal="true" aria-labelledby="tradeChartTitle" tabindex="-1">
@@ -431,7 +431,10 @@ function registerConfirmedTrade(r){
     open:now,signalCandle:p.ck,source:EX(),
     tp1h:false,targetMode:'fixed3r',profitLockStage:0,
     timeframe:p.timeframe||'1m',
-    confirmationMode:r.confirmationMode||'Dual Liquidity Reclaim · 1m',
+    confirmationMode:r.confirmationMode||'Dual Liquidity Reclaim · FVG + volume',
+    fvgZone:p.fvgZone||null,fvgFormedAt:p.fvgFormedAt||null,
+    fvgFilledAt:p.fvgFilledAt||null,fvgVolumeRatio:p.fvgVolumeRatio??null,
+    volumeDirection:p.volumeDirection||null,
     firstSweepPrice:p.firstSweepPrice??null,secondSweepPrice:p.secondSweepPrice??null,
     breakLevel:p.breakLevel??null,strength:p.bodyMultiple??null,
     researchOnly:p.researchOnly===true,
@@ -450,6 +453,9 @@ function closeT(t,why,px,gross){
     confirmationMode:t.confirmationMode||null,
     firstSweepPrice:t.firstSweepPrice??null,secondSweepPrice:t.secondSweepPrice??null,
     breakLevel:t.breakLevel??null,strength:t.strength??null,
+    fvgZone:t.fvgZone||null,fvgFormedAt:t.fvgFormedAt||null,
+    fvgFilledAt:t.fvgFilledAt||null,fvgVolumeRatio:t.fvgVolumeRatio??null,
+    volumeDirection:t.volumeDirection||null,
     timeframe:t.timeframe||'5m',researchOnly:!!t.researchOnly,
     finalManagedStop:t.stop,profitLockStage:t.profitLockStage||0,
     previousDayLevel:t.previousDayLevel||null});
@@ -500,17 +506,23 @@ function card(r){
  const p=r.plan,key=signalKey(r);
  const tracking=st.open.some(x=>x.signalKey===key);
  const recorded=st.hist.some(x=>x.signalKey===key);
- const g=r.liquidity||{},day=g.day||p.previousDayLevel||{};
+ const g=r.liquidity||{},fv=r.fvg||{},day=g.day||p.previousDayLevel||{};
  const checks=[
   ['Entry',fp(p.en)],['SL ('+f(p.sp,2)+'%)',fp(p.stop)],
   ['Final TP (3R / '+f(p.tp2pct,2)+'%)',fp(p.tp2)],['Target R:R','1 : '+f(p.rr,1)],
-  ['Strategy','Dual Liquidity Reclaim double liquidity grab (1m)'],
+  ['Strategy','Dual Liquidity Reclaim + FVG fill + volume (1m)'],
   ['Previous day high',fp(day.high)],['Previous day low',fp(day.low)],
   ['First stop run',fp(g.firstExtreme)],['Second deeper stop run',fp(g.secondExtreme)],
   ['Previous-day level reclaimed',g.levelReclaimed?'Yes':'No'],
   ['Intervening swing broken',fp(g.structureBreakLevel)],
-  ['Strong '+(r.dir==='long'?'buying':'selling')+' candles',
-    g.strongPressure?'2 consecutive closed 1m · '+f(g.bodyMultiple,2)+'× typical body':'Waiting'],
+  ['Initial structure',g.strongPressure?'Double sweep + 2 strong closed 1m candles':'Waiting'],
+  ['FVG zone',fv.formed?fp(fv.low)+' – '+fp(fv.high):'Not formed'],
+  ['Full FVG fill',fv.filled?'Completed after structure confirmation':'Waiting'],
+  ['Final '+(r.dir==='long'?'bullish':'bearish')+' candle',fv.volumeConfirmed?'Closed after full gap fill':'Waiting'],
+  ['Volume requirement',r.dir==='long'?'Increasing (≥1.25× 20-candle average)':
+    'Decreasing (≤0.80× 20-candle average)'],
+  ['Final candle volume',Number.isFinite(fv.volumeRatio)?
+    f(fv.volumeRatio,2)+'× 20-candle average':'—'],
   ['Stop placement','Beyond SECOND swept wick'],
   ['Execution','SIMULATED ONLY · New method not live-enabled']
  ];
@@ -621,9 +633,12 @@ function renderScanInspector(){
     const priceCell=Number.isFinite(livePrice)&&livePrice>0?fp(livePrice):
       Number.isFinite(storedPrice)&&storedPrice>0?
         '<span title="Last analyzed price — NOT live">'+fp(storedPrice)+' (saved)</span>':'—';
-    const jha=r.liquidity?.ok?
-      '2 grabs + reclaim + swing break + strong '+(r.dir==='long'?'BUY':'SELL'):
-      r.liquidity?.secondSweep?'Second grab · awaiting reclaim/structure/strong 1m closes':
+    const jha=r.fvg?.ok?
+      'Full FVG fill + '+(r.dir==='long'?'rising-volume BUY':'falling-volume SELL')+' candle':
+      r.fvg?.filled?'FVG filled — volume-confirmed candle pending':
+      r.fvg?.formed?'New FVG formed — waiting for FULL gap fill':
+      r.liquidity?.ok?'Double liquidity confirmed — awaiting new FVG':
+      r.liquidity?.secondSweep?'Second grab — awaiting structure confirmation':
       r.liquidity?.firstSweep?'First grab only — second grab required':
       r.liquidity?.day?'No liquidity event':'Previous UTC day unavailable';
     return '<tr><td>'+link+'</td><td>'+safe(r.dir||'—')+'</td><td>'+
@@ -636,14 +651,15 @@ function renderScanInspector(){
   });
   const scroll=$('scanCoinTable').scrollTop;
   $('scanCoinTable').innerHTML=tbl(
-    ['Coin','Side','Price','1m candles','Prev day high','Prev day low','Double sweep confirmation','Score','Result','Analysis / reason'],rows,
+    ['Coin','Side','Price','Final candle','Prev day high','Prev day low','FVG + volume stage','Score','Result','Analysis / reason'],rows,
     running?'Scan in progress; previous results remain visible until analysis completes.':
     'No stored coin results yet. Check the scanner diagnostics above.');
   $('scanCoinTable').scrollTop=scroll;
   const recent=Array.isArray(meta.scanRecent)?meta.scanRecent.slice(0,4):[];
   $('scanHelp').textContent=(running?'Current scan is processing markets. ':'')+
-    'New confirmation requires a second deeper stop run, reclaim of yesterday high/low, a break of the intervening swing and two strong closed 1m candles. '+
-    'New strategy signals are SIMULATED ONLY pending validation; no automatic real Binance orders. TP stays 3R.'+
+    'After double-liquidity confirmation, wait for a new 1m FVG, FULL gap fill and a subsequent directional closed candle. '+
+    'LONG volume increases; SHORT volume decreases as requested. This does not prove institutional buying or selling. '+
+    'Signals remain SIMULATED ONLY; SL stays beyond second sweep and final TP stays 3R.'+
     (recent.length?' · Recently scanned: '+recent.map(x=>x.sym).join(', '):'');
 }
 function render(){
@@ -688,7 +704,7 @@ function render(){
 const wl=wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).slice(0,watchLimit);
 $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).length+' coins · scroll for more';
   $('wl').innerHTML=tbl(
- ['','Coin','Side','Price','Previous day level','Double grab status','Score','Waiting for'],
+ ['','Coin','Side','Price','Previous day level','FVG / volume stage','Score','Waiting for'],
  wl.map(r=>{
   const missing=r.G?r.G.filter(x=>!x.ok).map(x=>x.t):[];
   const g=r.liquidity||{};
@@ -697,7 +713,9 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
    (r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'—')+
    '</td><td>'+fp(M[r.sym]?.p||r.price)+
    '</td><td>'+boundary+'</td><td>'+
-   (g.secondSweep?'Second sweep seen':g.firstSweep?'First sweep only':'Awaiting first grab')+'</td><td>'+
+   (r.fvg?.filled?'Gap filled · volume pending':r.fvg?.formed?'FVG not fully filled':
+    g.strongPressure?'Double sweep confirmed · FVG pending':
+    g.secondSweep?'Second sweep seen':g.firstSweep?'First sweep only':'Awaiting first grab')+'</td><td>'+
    f(r.score,0)+'</td><td class="mut">'+(missing.join('; ')||r.reason||'—')+'</td></tr>';
  }), 'No candidates near yesterday high/low.');
  $('wl').scrollTop=watchScroll;
@@ -888,12 +906,12 @@ function adoptLaptop(snapshot,source,online,lastSeen){
  remoteHistoryTruncated=!!snapshot.historyTruncated;
  scanMeta=snapshot;
  if(['bybit','binance'].includes(snapshot.exchange))$('ex').value=snapshot.exchange;
- const strategyMatches=snapshot.strategyVersion==='DUAL_LIQUIDITY_RECLAIM_1M_CRYPTO_V2';
+ const strategyMatches=snapshot.strategyVersion==='DUAL_LIQUIDITY_FVG_VOLUME_1M_CRYPTO_V3';
  R=strategyMatches?
     Object.fromEntries(snapshot.results.filter(x=>x&&x.sym).map(x=>[x.sym,x])):{};
  if(!strategyMatches){
    scanMeta={...snapshot,scanPhase:'UPDATE_REQUIRED',
-     scanMessage:'Desktop scanner update required: install the Double Liquidity confirmation update. Existing trade history is preserved; older signals are hidden.'};
+     scanMessage:'Desktop scanner update required: install the FVG + volume update. Existing trades are preserved; old signals are hidden.'};
  }
  M=snapshot.markets||{};
  const serverClearEpoch=Number(snapshot.historyClearEpoch)||0;
