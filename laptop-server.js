@@ -38,7 +38,7 @@ const strategy=ctx.window.UnifiedStrategy;
 if(!strategy||typeof strategy.evaluate!=='function')throw Error('Missing unified-strategy.js');
 
 const loaded=readFile(STATE_FILE,{});
-const ACTIVE_STRATEGY='DUAL_LIQUIDITY_RECLAIM_1M_CRYPTO_V2';
+const ACTIVE_STRATEGY='DUAL_LIQUIDITY_FVG_VOLUME_1M_CRYPTO_V3';
 // Keep old demo results in a local archive; no more paper orders run.
 if(loaded.paper&&typeof loaded.paper==='object'){
   const archive=path.join(BASE,'binance-paper-archive.json');
@@ -271,11 +271,15 @@ function register(r){
     profitLockStage:0,
     tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,source:config.exchange,
     signalCandle:p.ck,open:now,realizedR:null,targetMode:'fixed3r',
-    confirmationMode:r.confirmationMode||'Dual Liquidity Reclaim · strong 1m crypto futures',
+    confirmationMode:r.confirmationMode||'Dual Liquidity Reclaim · FVG fill + directional 1m volume',
     firstSweepPrice:p.firstSweepPrice??null,
     secondSweepPrice:p.secondSweepPrice??null,
     breakLevel:p.breakLevel??null,
     strength:p.bodyMultiple??null,
+    fvgZone:p.fvgZone||null,fvgFormedAt:p.fvgFormedAt||null,
+    fvgFilledAt:p.fvgFilledAt||null,
+    fvgVolumeRatio:p.fvgVolumeRatio??null,
+    volumeDirection:p.volumeDirection||null,
     timeframe:p.timeframe||'1m',
     researchOnly:p.researchOnly===true,
     previousDayLevel:p.previousDayLevel||null};
@@ -294,6 +298,10 @@ function settle(t,reason,price,grossR){
     secondSweepPrice:t.secondSweepPrice??null,
     breakLevel:t.breakLevel??null,
     strength:t.strength??null,
+    fvgZone:t.fvgZone||null,fvgFormedAt:t.fvgFormedAt||null,
+    fvgFilledAt:t.fvgFilledAt||null,
+    fvgVolumeRatio:t.fvgVolumeRatio??null,
+    volumeDirection:t.volumeDirection||null,
     timeframe:t.timeframe||'5m',researchOnly:!!t.researchOnly,
     finalManagedStop:t.stop,profitLockStage:t.profitLockStage||0,
     previousDayLevel:t.previousDayLevel||null,
@@ -351,6 +359,7 @@ function compactResult(r){
     price:r.price,analyzedAt:r.analyzedAt,
     score:r.score,chg:r.chg,G:r.G||r.checks||[],
     pattern:r.pattern,liquidity:r.liquidity,
+    fvg:r.fvg,volumeRatio:r.volumeRatio??null,
     confirmationMode:r.confirmationMode,executionReady:r.executionReady,
     reason:r.reason,
     plan:r.plan,ok:r.ok};
