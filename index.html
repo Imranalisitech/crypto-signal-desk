@@ -262,8 +262,8 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 </section>
 
 <section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins may await double liquidity, a newly formed FVG, its full fill, or the final direction-and-volume candle. Final TP stays 3R; targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
-<section id="tradeResultsPanel"><h2>Automatic trades & results <span><button id="allResults" type="button" hidden>Show all results</button> <button id="clearHistory" type="button">Clear closed history</button> <button id="csv" type="button">Export all CSV</button></span></h2>
-  <p class="mut" style="font-size:12px">Open simulated trades and closed simulated results appear together below. Use Close manually to close a tracked simulation; this does not close an actual Binance Futures position.</p>
+<section id="tradeResultsPanel"><h2>Automatic trades & results <span><button id="allResults" type="button" hidden>Show all results</button> <button id="clearHistory" type="button">Clear closed history</button> <button id="clearAllTrades" type="button" title="Clear open AND closed simulated trades and current coin analysis; never touches real Binance positions">Clear all simulated trades</button> <button id="csv" type="button">Export all CSV</button></span></h2>
+  <p class="mut" style="font-size:12px">Open and closed simulated trades are shown together. "Clear closed history" keeps open trades; "Clear all simulated trades" also resets open simulations and current scanner coin rows (fresh scan results can appear again). Neither closes real Binance positions.</p>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
 
 <p class="mut" style="font-size:12px">The laptop server tracks confirmed signals while running. Previous trade history remains saved. New signals require double liquidity, a reclaimed previous-day line, swing break, a fully filled newly formed FVG, then a fresh 1m direction-and-volume candle. LONG volume rises and SHORT volume decreases. RSI, funding and EMA remain inactive. Existing SL/TP and profit-lock continue; these new signals remain SIMULATED ONLY.</p>
@@ -332,8 +332,17 @@ IDS.forEach(i=>{if(st.set[i]!=null)$(i).value=st.set[i]});
 try{banUntil=+localStorage.getItem('ban_'+EX())||0}catch(e){}
 let R={},M={},audio=null,notif=false,busy=false,lastScan=null,err='',prog='';
 let watchLimit=50,watchQuery='',showAllHistory=false,scanMeta=null,scanQuery='',scanFilter='all',scanLimit=80;
-let historyClearEpoch=0;
-try{historyClearEpoch=Math.max(0,Number(localStorage.getItem('cryptoClosedHistoryClearEpoch'))||0)}catch(_){}
+let historyClearEpoch=0,simTradesClearEpoch=0;
+try{
+  historyClearEpoch=Math.max(0,Number(localStorage.getItem('cryptoClosedHistoryClearEpoch'))||0);
+  simTradesClearEpoch=Math.max(0,Number(localStorage.getItem('cryptoAllTradesClearEpoch'))||0);
+}catch(_){}
+function storeTradeClearEpoch(){
+  try{
+    localStorage.setItem('cryptoClosedHistoryClearEpoch',String(historyClearEpoch));
+    localStorage.setItem('cryptoAllTradesClearEpoch',String(simTradesClearEpoch));
+  }catch(_){}
+}
 let lim=false,dur=0,scanFailures=0,liveRenderTimer=null;
 function queueLiveRender(){
   if(liveRenderTimer!==null)return;
@@ -412,7 +421,8 @@ function signalKey(r){
 function registerConfirmedTrade(r){
   if(r.status!=='confirm'||!r.plan)return false;
   const key=signalKey(r),p=r.plan;
-  if(!key||st.trackedKeys[key])return false;
+  if(!key||st.trackedKeys[key]||
+     Number(p.ck)<=simTradesClearEpoch)return false;
   if(![p.en,p.stop,p.tp2,p.sp].every(v=>Number.isFinite(v)&&v>0))return false;
   const direction=r.dir==='long'?1:-1;
   if(direction*(p.en-p.stop)<=0||direction*(p.tp2-p.en)<=0)return false;
@@ -552,7 +562,8 @@ function renderScanInspector(){
     COMPLETE_WITH_ERRORS:'COMPLETED WITH ERRORS',RATE_LIMITED:'RATE LIMITED',
     PARTIAL:'PARTIAL SCAN',NO_DATA:'NO MARKET DATA',ERROR:'SCAN ERROR',
     UNKNOWN:'STATUS NOT YET AVAILABLE',IDLE:'NOT STARTED',
-    UPDATE_REQUIRED:'DESKTOP UPDATE REQUIRED'};
+    UPDATE_REQUIRED:'DESKTOP UPDATE REQUIRED',
+    CLEARED:'SIMULATED DATA CLEARED'};
   const scanBadge=remoteMode&&!remoteOnline?'SERVER DISCONNECTED':
     remoteMode&&!remoteMarketFresh&&phase==='RUNNING'?'WAITING FOR EXCHANGE PRICES':
     labels[phase]||phase;
@@ -683,13 +694,22 @@ function render(){
       (remoteLastSeen?' · last report '+new Date(remoteLastSeen).toLocaleString():'')+
       (remoteHistoryTruncated?' · online view shows recent history; full record stays on laptop':'');
     $('settingsPanel').hidden=remoteSource==='cloud';
-    $('clearHistory').disabled=remoteSource!=='local'||!remoteOnline;
-    $('clearHistory').title=remoteSource==='local'?
-      'Back up and clear closed simulated results; open trades remain active':
-      'Clear history from the Windows desktop app, not the remote website';
+    const onLaptop=remoteSource==='local';
+    $('clearHistory').disabled=onLaptop&&!remoteOnline;
+    $('clearAllTrades').disabled=onLaptop&&!remoteOnline;
+    $('clearHistory').textContent=onLaptop?'Clear closed history':'Hide closed results here';
+    $('clearAllTrades').textContent=onLaptop?'Clear all simulated trades':'Hide all simulated data here';
+    $('clearHistory').title=onLaptop?
+      'Back up and permanently clear closed simulated results on this laptop':
+      'Hide closed results only in this browser; source laptop records remain unchanged';
+    $('clearAllTrades').title=onLaptop?
+      'Back up and permanently clear open/closed SIMULATED trades and current scanned coin rows; real Binance orders untouched':
+      'Hide simulated trades and coin rows only in this browser. To clear source data on all devices use Windows desktop app.';
   }else{
     $('serverMode').hidden=true;$('settingsPanel').hidden=false;
-    $('clearHistory').disabled=false;
+    $('clearHistory').disabled=false;$('clearAllTrades').disabled=false;
+    $('clearHistory').textContent='Clear closed history';
+    $('clearAllTrades').textContent='Clear all simulated trades';
     if(!busy)$('stat').textContent=lastScan?XN()+' futures · last scan '+lastScan.toLocaleTimeString()+' · '+L.length+' coins · took '+dur+'s'+(scanFailures?' · '+scanFailures+' data errors':''):'Starting…';
   }
   $('ban').innerHTML=err?`<div class="ban err">${err}</div>`:'';
@@ -827,46 +847,82 @@ $('refreshScan').addEventListener('click',async()=>{
 
 $('wl').addEventListener('scroll',()=>{const el=$('wl');if(el.scrollTop+el.clientHeight>=el.scrollHeight-90){const all=Object.values(R).filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).filter(r=>r.sym.toLowerCase().includes(watchQuery));if(watchLimit<all.length){const pos=el.scrollTop;watchLimit+=50;render();el.scrollTop=pos}}});
 $('allResults').addEventListener('click',()=>{showAllHistory=!showAllHistory;render()});
-$('clearHistory').addEventListener('click',async()=>{
-  if(remoteMode&&remoteSource!=='local'){
-    window.alert('Clear history from the local Windows desktop app. The website only displays a copy.');
-    return;
+async function clearSimulatedData(mode){
+  const all=mode==='all';
+  const button=all?$('clearAllTrades'):$('clearHistory');
+  const phrase=all?'CLEAR ALL SIMULATED TRADES':'CLEAR CLOSED HISTORY';
+  const local=remoteMode&&remoteSource==='local';
+  const cloud=remoteMode&&remoteSource==='cloud';
+  if(local&&!remoteOnline){
+    window.alert('The Windows laptop scanner is disconnected. Reconnect the local server before clearing stored data.');return;
   }
-  if(remoteMode&&!remoteOnline){window.alert('Connect the local laptop scanner before clearing history.');return;}
-  const nClosed=st.hist.length;
-  if(!nClosed){window.alert('There are no closed simulated trades to clear. Open tracked trades are unchanged.');return;}
-  const phrase=window.prompt('Clear ALL '+nClosed+' CLOSED SIMULATED trade results?\n\nOpen trades and REAL Binance order records will be kept.\nA local archive is made before clearing on Windows.\n\nType CLEAR CLOSED HISTORY to confirm:');
-  if(phrase!=='CLEAR CLOSED HISTORY')return;
-  const button=$('clearHistory');button.disabled=true;
+  const closedCount=st.hist.length,openCount=st.open.length,coinsCount=Object.keys(R).length;
+  if(!all&&!closedCount){
+    window.alert('No closed simulated results are visible. Open trades were not changed.');return;
+  }
+  if(all&&!closedCount&&!openCount&&!coinsCount){
+    window.alert('No simulated trades or scanned coin data are visible.');return;
+  }
+  const scope=cloud?'ONLY this browser display (NOT the laptop source)':local?
+    'the Windows laptop stored simulated records':'this browser saved simulated data';
+  const description=all?
+    'CLEAR '+openCount+' OPEN simulated trades, '+closedCount+
+      ' CLOSED simulated results and '+coinsCount+' scanned coin rows from '+scope+'.':
+    'CLEAR '+closedCount+' CLOSED simulated trade results from '+scope+'.';
+  const answer=window.prompt(description+
+    '\n\n'+(cloud?
+      'Cloud viewing does not have permission to erase records on your laptop. The old data will be hidden on this browser only.\n':
+      'An archive is created first. Open trades will be kept unless you choose Clear all.\n')+
+    'Real Binance positions and exchange-side SL/TP orders are NEVER closed or cancelled.\n\nType '+phrase+' to confirm:');
+  if(answer!==phrase)return;
+  button.disabled=true;
   try{
-    if(remoteMode){
-      const response=await fetch('/api/trades/clear-history',{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({phrase})
-      });
-      const out=await response.json();
-      if(!response.ok)throw Error(out.error||'Unable to clear history');
-      historyClearEpoch=Math.max(historyClearEpoch,Number(out.historyClearEpoch)||Date.now());
-      try{localStorage.setItem('cryptoClosedHistoryClearEpoch',String(historyClearEpoch))}catch(_){}
-      st.hist=[];
-      render();
+    if(local){
+      const endpoint=all?'/api/trades/clear-all':'/api/trades/clear-history';
+      const response=await fetch(endpoint,{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({phrase}),
+        cache:'no-store'});
+      const data=await response.json();
+      if(!response.ok||!data.ok)throw Error(data.error||'Local server rejected the clear request');
+      historyClearEpoch=Math.max(historyClearEpoch,Number(data.historyClearEpoch)||0);
+      simTradesClearEpoch=Math.max(simTradesClearEpoch,Number(data.simTradesClearEpoch)||0);
+      storeTradeClearEpoch();
+      if(all){st.open=[];R={};st.trackedKeys={};}
+      st.hist=[];showAllHistory=false;render();
       await remotePoll();
-      window.alert(out.cleared+' closed simulated records cleared. Local backup saved. Open trades remain.');
+      window.alert((all?
+        data.clearedOpen+' open, '+data.clearedClosed+' closed simulations and '+
+          data.clearedCoins+' coin rows cleared.':
+        data.clearedClosed+' closed simulated results cleared.')+
+        '\nLocal backup saved. Real Binance orders untouched.');
     }else{
-      // Browser-only fallback: archive history into a local JSON download.
-      const archive=new Blob([JSON.stringify({archivedAt:new Date().toISOString(),
-        type:'simulated-closed-trade-history',history:st.hist},null,2)],{type:'application/json'});
-      const url=URL.createObjectURL(archive),link=document.createElement('a');
-      link.href=url;link.download='simulated-trade-history-backup-'+Date.now()+'.json';link.click();
-      setTimeout(()=>URL.revokeObjectURL(url),10000);
-      historyClearEpoch=Math.max(historyClearEpoch,Date.now());
-      try{localStorage.setItem('cryptoClosedHistoryClearEpoch',String(historyClearEpoch))}catch(_){}
-      st.hist=[];save();render();
-      window.alert('Browser-only closed history cleared. Keep the downloaded backup.');
+      // Browser-only or cloud viewer. Never pretend a read-only cloud
+      // dashboard can erase authoritative Windows laptop records.
+      const archive=new Blob([JSON.stringify({
+        backedUpAt:new Date().toISOString(),
+        mode:all?'all simulated':'closed simulated',
+        open:all?st.open:[],history:st.hist,
+        scannedCoins:all?R:{}
+      },null,2)],{type:'application/json'});
+      const url=URL.createObjectURL(archive),a=document.createElement('a');
+      a.href=url;a.download='simulated-data-backup-'+Date.now()+'.json';a.click();
+      setTimeout(()=>URL.revokeObjectURL(url),15000);
+      const moment=Date.now();
+      historyClearEpoch=Math.max(historyClearEpoch,moment);
+      if(all)simTradesClearEpoch=Math.max(simTradesClearEpoch,moment);
+      storeTradeClearEpoch();
+      st.hist=[];
+      if(all){st.open=[];st.trackedKeys={};R={};}
+      showAllHistory=false;save();render();
+      if(cloud)window.alert('Data hidden in THIS browser only. For permanent deletion from your laptop and all connected displays, use these buttons inside the Windows desktop app.');
+      else window.alert('Browser saved simulated data cleared. Backup download initiated. Real Binance orders unaffected.');
     }
-  }catch(e){window.alert('Clear history failed: '+String(e.message||e))}
-  finally{button.disabled=false;}
-});
+  }catch(e){
+    window.alert('Clear failed; original data kept: '+String(e?.message||e));
+  }finally{button.disabled=false;}
+}
+$('clearHistory').addEventListener('click',()=>clearSimulatedData('closed'));
+$('clearAllTrades').addEventListener('click',()=>clearSimulatedData('all'));
 let sendConfigTimeout=null;
 document.addEventListener('input',()=>{
  IDS.forEach(i=>st.set[i]=$(i).value);
@@ -906,24 +962,32 @@ function adoptLaptop(snapshot,source,online,lastSeen){
  remoteHistoryTruncated=!!snapshot.historyTruncated;
  scanMeta=snapshot;
  if(['bybit','binance'].includes(snapshot.exchange))$('ex').value=snapshot.exchange;
+ const serverAllEpoch=Number(snapshot.simTradesClearEpoch)||0;
+ const serverClosedEpoch=Number(snapshot.historyClearEpoch)||0;
+ if(serverAllEpoch>simTradesClearEpoch||serverClosedEpoch>historyClearEpoch){
+   simTradesClearEpoch=Math.max(simTradesClearEpoch,serverAllEpoch);
+   historyClearEpoch=Math.max(historyClearEpoch,serverClosedEpoch,simTradesClearEpoch);
+   storeTradeClearEpoch();
+ }
+ const allCutoff=simTradesClearEpoch;
  const strategyMatches=snapshot.strategyVersion==='DUAL_LIQUIDITY_FVG_VOLUME_1M_CRYPTO_V3';
  R=strategyMatches?
-    Object.fromEntries(snapshot.results.filter(x=>x&&x.sym).map(x=>[x.sym,x])):{};
+    Object.fromEntries(snapshot.results.filter(x=>x&&x.sym&&
+      (!allCutoff||Number(x.analyzedAt)>allCutoff)).map(x=>[x.sym,x])):{};
  if(!strategyMatches){
    scanMeta={...snapshot,scanPhase:'UPDATE_REQUIRED',
      scanMessage:'Desktop scanner update required: install the FVG + volume update. Existing trades are preserved; old signals are hidden.'};
  }
  M=snapshot.markets||{};
- const serverClearEpoch=Number(snapshot.historyClearEpoch)||0;
- if(serverClearEpoch>historyClearEpoch){
-   historyClearEpoch=serverClearEpoch;
-   try{localStorage.setItem('cryptoClosedHistoryClearEpoch',String(historyClearEpoch))}catch(_){}
- }
- st.open=snapshot.open;
- // Ignore old cached/remote snapshots after the user has cleared history.
- // Newly closed trades still appear because their close time is later.
- st.hist=snapshot.history.filter(item=>Number(item.close)>historyClearEpoch);
+ st.open=snapshot.open.filter(item=>
+   !allCutoff||Number(item.open)>allCutoff);
+ st.hist=snapshot.history.filter(item=>
+   Number(item.close)>Math.max(historyClearEpoch,simTradesClearEpoch));
  st.trackedKeys=snapshot.trackedKeys||{};
+ if(allCutoff&&Number(snapshot.lastScanAt||0)<=allCutoff){
+   scanMeta={...snapshot,scanning:false,scanned:0,scanTotal:0,
+     scanPhase:'CLEARED',scanMessage:'Simulated coins and trades cleared. New market scans may produce new coin results.'};
+ }
  scanFailures=snapshot.scanFailures||0;
  lastScan=snapshot.lastScanAt?new Date(snapshot.lastScanAt):null;
  busy=!!snapshot.scanning;
