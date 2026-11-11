@@ -550,9 +550,10 @@ function snapshot(fullHistory=false){
   out.historyTruncated=history.length<totalHistory;
   return out;
 }
-let syncing=false;
-async function syncRemote(){
-  if(syncing||!config.syncToken||!config.remoteSyncUrl)return;
+let syncing=false,syncAfterCurrent=false;
+async function syncRemote(force=false){
+  if(!config.syncToken||!config.remoteSyncUrl)return;
+  if(syncing){if(force)syncAfterCurrent=true;return;}
   syncing=true;
   try{
     const r=await fetch(config.remoteSyncUrl,{method:'POST',headers:{
@@ -561,7 +562,13 @@ async function syncRemote(){
     if(!r.ok)throw Error('Render sync HTTP '+r.status);
     state.lastSyncAt=Date.now();
   }catch(e){if(Date.now()-(state.lastSyncAt||0)>120_000)fault('Render sync: '+e.message)}
-  finally{syncing=false}
+  finally{
+    syncing=false;
+    if(syncAfterCurrent){
+      syncAfterCurrent=false;
+      setImmediate(()=>syncRemote().catch(e=>log('Queued mirror update: '+e.message)));
+    }
+  }
 }
 function respond(res,code,data){
   res.writeHead(code,{'Content-Type':'application/json; charset=utf-8',
@@ -660,7 +667,7 @@ const server=http.createServer((req,res)=>{
         log((all?'ALL SIMULATED DATA':'CLOSED SIMULATED HISTORY')+
           ' cleared: '+openCount+' open; '+closedCount+' closed; '+resultsCount+
           ' scanned rows. Source backup '+path.basename(backup));
-        syncRemote().catch(e=>log('Trade clear sync: '+e.message));
+        syncRemote(true).catch(e=>log('Trade clear sync: '+e.message));
         return respond(res,200,{ok:true,mode:all?'all':'closed',
           clearedOpen:all?openCount:0,clearedClosed:closedCount,
           clearedCoins:all?resultsCount:0,
