@@ -133,6 +133,11 @@
         secondSweepPrice:trade.secondSweepPrice??null,
         breakLevel:trade.breakLevel??null,
         bodyMultiple:trade.strength??null,
+        fvgZone:trade.fvgZone||null,
+        fvgFormedAt:trade.fvgFormedAt||null,
+        fvgFilledAt:trade.fvgFilledAt||null,
+        fvgVolumeRatio:trade.fvgVolumeRatio??null,
+        volumeDirection:trade.volumeDirection||null,
         previousDayLevel:trade.previousDayLevel||null},
       confirmationMode:trade.confirmationMode||null,
       researchOnly:trade.researchOnly===true,
@@ -153,6 +158,9 @@
     const isDoubleSweep=Number.isFinite(firstSweep)&&firstSweep>0&&
       Number.isFinite(secondSweep)&&secondSweep>0&&
       Number.isFinite(breakPrice)&&breakPrice>0;
+    const fvg=setup.fvgZone;
+    const hasFvg=fvg&&Number.isFinite(fvg.low)&&Number.isFinite(fvg.high)&&
+      fvg.low>0&&fvg.high>fvg.low;
     const previousDay=setup.previousDayLevel;
     const hasPreviousDay=previousDay&&
       Number.isFinite(previousDay.high)&&previousDay.high>0&&
@@ -196,6 +204,15 @@
       if(Number.isFinite(strength)&&strength>0)
         levels.push([result.dir==='long'?'BUY candle strength ':'SELL candle strength ',
           strength.toFixed(2)+'× typical 1m body','good']);
+    }
+    if(hasFvg){
+      levels.push(['Filled FVG lower edge ',fvg.low,'']);
+      levels.push(['Filled FVG upper edge ',fvg.high,'']);
+      const ratio=Number(setup.fvgVolumeRatio);
+      if(Number.isFinite(ratio))
+        levels.push(['Final volume vs 20 candles ',ratio.toFixed(2)+'×','entry']);
+      if(setup.volumeDirection)
+        levels.push(['Volume condition ',setup.volumeDirection,'entry']);
     }
     if(hasPreviousDay){
       levels.push(['Previous day high ',previousDay.high,'']);
@@ -246,6 +263,10 @@
         lines.push({price:firstSweep,color:'#edc17c',width:1,title:'FIRST STOP RUN'});
         lines.push({price:secondSweep,color:'#e78062',width:1,title:'SECOND STOP RUN'});
         lines.push({price:breakPrice,color:'#84d2ed',width:1,title:'SWING BREAK'});
+      }
+      if(hasFvg){
+        lines.push({price:fvg.low,color:'#d8a749',width:1,title:'FVG FILLED LOW'});
+        lines.push({price:fvg.high,color:'#cba768',width:1,title:'FVG FILLED HIGH'});
       }
       if(hasPreviousDay){
         lines.push({price:previousDay.high,color:'#ba91ed',width:1,title:'PREV DAY HIGH'});
