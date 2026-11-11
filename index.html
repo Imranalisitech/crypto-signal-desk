@@ -697,8 +697,8 @@ function render(){
     const onLaptop=remoteSource==='local';
     $('clearHistory').disabled=onLaptop&&!remoteOnline;
     $('clearAllTrades').disabled=onLaptop&&!remoteOnline;
-    $('clearHistory').textContent=onLaptop?'Clear closed history':'Hide closed results here';
-    $('clearAllTrades').textContent=onLaptop?'Clear all simulated trades':'Hide all simulated data here';
+    $('clearHistory').textContent=onLaptop?'Clear closed history':'Hide closed history (this browser)';
+    $('clearAllTrades').textContent=onLaptop?'Clear all simulated trades':'Hide all simulated data (this browser)';
     $('clearHistory').title=onLaptop?
       'Back up and permanently clear closed simulated results on this laptop':
       'Hide closed results only in this browser; source laptop records remain unchanged';
@@ -869,12 +869,16 @@ async function clearSimulatedData(mode){
     'CLEAR '+openCount+' OPEN simulated trades, '+closedCount+
       ' CLOSED simulated results and '+coinsCount+' scanned coin rows from '+scope+'.':
     'CLEAR '+closedCount+' CLOSED simulated trade results from '+scope+'.';
-  const answer=window.prompt(description+
-    '\n\n'+(cloud?
-      'Cloud viewing does not have permission to erase records on your laptop. The old data will be hidden on this browser only.\n':
-      'An archive is created first. Open trades will be kept unless you choose Clear all.\n')+
-    'Real Binance positions and exchange-side SL/TP orders are NEVER closed or cancelled.\n\nType '+phrase+' to confirm:');
-  if(answer!==phrase)return;
+  // Public cloud viewing is read-only: make the browser-only action easy to
+  // confirm, while retaining the exact-phrase safeguard for permanent laptop deletion.
+  const confirmed=local?
+    window.prompt(description+
+      '\n\nA local backup is created first. Real Binance positions and exchange-side SL/TP orders are NEVER closed or cancelled.\n\nType '+phrase+' to confirm:')===phrase:
+    window.confirm(description+
+      '\n\nA JSON backup will be downloaded before hiding the records.'+
+      (cloud?' This affects ONLY this browser, not saved laptop records or other devices.':'')+
+      '\n\nReal Binance positions and exchange-side SL/TP orders are NEVER closed or cancelled.\n\nContinue?');
+  if(!confirmed)return;
   button.disabled=true;
   try{
     if(local){
