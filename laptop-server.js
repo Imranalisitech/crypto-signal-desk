@@ -52,14 +52,20 @@ const state={
   createdAt:loaded.createdAt||Date.now(),
   strategyVersion:ACTIVE_STRATEGY,
   results:loaded.strategyVersion===ACTIVE_STRATEGY&&loaded.results&&
-    typeof loaded.results==='object'?loaded.results:{},
+    typeof loaded.results==='object'?
+    Object.fromEntries(Object.entries(loaded.results).filter(([,r])=>
+      Number(r?.analyzedAt)>Number(loaded.simTradesClearEpoch||0))):{},
   live:loaded.live&&typeof loaded.live==='object'?loaded.live:null,
-  markets:{},open:Array.isArray(loaded.open)?loaded.open:[],
+  markets:{},open:Array.isArray(loaded.open)?
+    loaded.open.filter(x=>Number(x.open)>Number(loaded.simTradesClearEpoch||0)):[],
+  simTradesClearEpoch:Number(loaded.simTradesClearEpoch)||0,
   historyClearEpoch:Number.isFinite(Number(loaded.historyClearEpoch))?
     Number(loaded.historyClearEpoch):0,
   history:Array.isArray(loaded.history)?
-    loaded.history.filter(x=>!(Number(x.close)>0&&Number(x.close)<=Number(loaded.historyClearEpoch||0))):[],
-  trackedKeys:loaded.trackedKeys&&typeof loaded.trackedKeys==='object'?loaded.trackedKeys:{},
+    loaded.history.filter(x=>Number(x.close)>Math.max(
+      Number(loaded.historyClearEpoch)||0,Number(loaded.simTradesClearEpoch)||0)):[],
+  trackedKeys:loaded.simTradesClearEpoch?{}:
+    loaded.trackedKeys&&typeof loaded.trackedKeys==='object'?loaded.trackedKeys:{},
   lastScanAt:loaded.lastScanAt||null,lastPriceAt:null,
   lastScanDurationSec:loaded.lastScanDurationSec||null,
   scanning:false,scanned:0,scanTotal:0,scanFailures:0,
@@ -256,7 +262,8 @@ function signalKey(r){
 function register(r){
   if(r.status!=='confirm'||!r.plan)return false;
   const p=r.plan,key=signalKey(r);
-  if(!key||state.trackedKeys[key])return false;
+  if(!key||state.trackedKeys[key]||
+     Number(r.plan?.ck)<=Number(state.simTradesClearEpoch||0))return false;
   const timestamp=Number(p.ck),now=Date.now();
   // Never open a simulated position on stale confirmation candles after
   // an offline period or several minutes of scanning backlog.
@@ -380,7 +387,7 @@ async function scan(){
   state.scanTotal=0;
   state.scanRateLimitedUntil=null;
   state.nextScanAt=Date.now()+300_000;
-  const started=Date.now();
+  const started=Date.now(),clearGeneration=state.simTradesClearEpoch;
   // Keep the last completed scan visible. In-progress results are published
   // separately through progress and recently scanned coin diagnostics.
   // Never erase a working scanner result set just because the next scan starts.
@@ -399,7 +406,8 @@ async function scan(){
     let index=0;
     async function worker(){
       while(index<scanUniverse.length){
-        if(Date.now()<cooldownUntil)break;
+        if(state.simTradesClearEpoch!==clearGeneration||
+           Date.now()<cooldownUntil)break;
         const item=scanUniverse[index++],sym=item.symbol;
         let record={sym,price:item.price,chg:item.change,dir:null,status:'none',
           score:0,reason:'Waiting for previous-day liquidity',
@@ -424,7 +432,8 @@ async function scan(){
             record=compactResult(result);
             record.analyzedAt=Date.now();
             state.scanAnalyzed++;
-            if(result.status==='confirm'){
+            if(state.simTradesClearEpoch===clearGeneration&&
+               result.status==='confirm'){
               register(result); // Existing simulated results are unchanged.
               // Real trading remains off until the user explicitly arms it.
               if(liveBroker.state.armed&&config.exchange==='binance'&&
@@ -445,15 +454,18 @@ async function scan(){
             if(state.scanFailures<=4)fault(sym+': '+record.reason);
           }
         }finally{
-          nextResults[sym]=record;
-          state.scanned++;
-          state.scanRecent.unshift({sym,status:record.status,
-            dir:record.dir||null,reason:record.reason||null,at:Date.now()});
-          if(state.scanRecent.length>40)state.scanRecent.length=40;
+          if(state.simTradesClearEpoch===clearGeneration){
+            nextResults[sym]=record;
+            state.scanned++;
+            state.scanRecent.unshift({sym,status:record.status,
+              dir:record.dir||null,reason:record.reason||null,at:Date.now()});
+            if(state.scanRecent.length>40)state.scanRecent.length=40;
+          }
         }
       }
     }
     await Promise.all(Array.from({length:Math.min(8,scanUniverse.length)},()=>worker()));
+    if(state.simTradesClearEpoch!==clearGeneration)return;
     const interrupted=state.scanned<state.scanTotal;
     const completedRows=Object.values(nextResults);
     // Publish only complete successful scan results, or a useful partial
@@ -529,6 +541,7 @@ function snapshot(fullHistory=false){
     markets,results:Object.values(state.results),strategyVersion:ACTIVE_STRATEGY,
     open:state.open,history,historyTotal:totalHistory,
     historyClearEpoch:state.historyClearEpoch,
+    simTradesClearEpoch:state.simTradesClearEpoch,
     trackedKeys:state.trackedKeys};
   while(!fullHistory&&Buffer.byteLength(JSON.stringify(out))>1_900_000&&history.length>100){
     history=history.slice(Math.ceil(history.length/4));
@@ -588,51 +601,74 @@ const server=http.createServer((req,res)=>{
     return respond(res,202,{ok:true,scanning:true,
       message:'New scan requested. Existing coin results are retained until it completes.'});
   }
-  if(url.pathname==='/api/trades/clear-history'){
-    const remote=(req.socket.remoteAddress||'').replace(/^::ffff:/,'');
-    const host=req.headers.host,origin=req.headers.origin;
-    const localHosts=['127.0.0.1:'+config.port,'localhost:'+config.port];
+  if(url.pathname==='/api/trades/clear-history'||
+     url.pathname==='/api/trades/clear-all'){
+    const all=url.pathname==='/api/trades/clear-all';
+    const remote=String(req.socket.remoteAddress||'').replace(/^::ffff:/,'');
+    const host=String(req.headers.host||'').toLowerCase();
+    const origin=req.headers.origin;
+    const localHosts=['127.0.0.1:'+config.port,'localhost:'+config.port,
+      '[::1]:'+config.port];
     if(req.method!=='POST')return respond(res,405,{error:'POST only'});
     if(!['127.0.0.1','::1'].includes(remote)||!localHosts.includes(host)||
        (origin&&!localHosts.some(x=>origin==='http://'+x)))
-      return respond(res,403,{error:'Clear history requires local desktop access'});
+      return respond(res,403,{error:'Clearing stored trades requires the local Windows desktop'});
     if(!String(req.headers['content-type']||'').startsWith('application/json'))
       return respond(res,415,{error:'JSON required'});
-    let raw='',size=0;
-    req.on('data',part=>{size+=part.length;
-      if(size<1000)raw+=part;else req.destroy()});
+    let raw='',size=0,exceeded=false;
+    req.on('data',part=>{
+      size+=part.length;if(size<2000)raw+=part;else exceeded=true;
+    });
     req.on('end',()=>{
       try{
+        if(exceeded)throw Error('Confirmation request too large');
         const request=JSON.parse(raw||'{}');
-        if(request.phrase!=='CLEAR CLOSED HISTORY')
-          throw Error('Exact confirmation phrase CLEAR CLOSED HISTORY required');
-        const count=state.history.length;
-        // An immutable on-disk archive is written before history is cleared.
-        // It does not contain Binance API credentials or the real order ledger.
-        if(count>0){
-          const archive=path.join(BASE,
-            'closed-trade-history-backup-'+new Date().toISOString().replace(/[:.]/g,'-')+'.json');
-          fs.writeFileSync(archive,JSON.stringify({
-            backupAt:new Date().toISOString(),type:'simulated-closed-trade-history',
-            count,history:state.history
-          },null,2),{encoding:'utf8',flag:'wx'});
-          state.history=[];
-        }
-        // Persistent tombstone: subsequent stale snapshots/cached histories
-        // must not repopulate earlier CLOSED simulations.
-        state.historyClearEpoch=Math.max(state.historyClearEpoch||0,Date.now());
+        const phrase=all?'CLEAR ALL SIMULATED TRADES':'CLEAR CLOSED HISTORY';
+        if(request.phrase!==phrase)throw Error('Type exact phrase: '+phrase);
+        const openCount=state.open.length,closedCount=state.history.length;
+        const resultsCount=Object.keys(state.results).length;
+        const now=Date.now();
+        // Archive BEFORE changing anything. Never put API credentials or
+        // live Binance position/order records into this backup.
+        const backup=path.join(BASE,
+          (all?'all-simulated-trades-backup-':'closed-trades-backup-')+
+          new Date(now).toISOString().replace(/[:.]/g,'-')+'.json');
+        fs.writeFileSync(backup,JSON.stringify({
+          backedUpAt:new Date(now).toISOString(),
+          kind:all?'all-simulated-trades':'closed-simulated-results',
+          previousStrategy:state.strategyVersion,
+          open:all?state.open:[],closed:state.history,
+          scannedCoins:all?state.results:{},
+          trackedKeys:all?state.trackedKeys:{}
+        },null,2),{encoding:'utf8',flag:'wx'});
+        if(all){
+          state.open=[];state.history=[];state.results={};
+          state.trackedKeys={};state.scanRecent=[];
+          state.scanned=0;state.scanTotal=0;state.scanAnalyzed=0;
+          state.scanFailures=0;state.scanInsufficient=0;
+          state.lastScanCount=0;state.lastScanAnalyzed=0;
+          state.lastScanAt=null;
+          state.simTradesClearEpoch=now;
+          state.scanPhase='CLEARED';
+          state.scanMessage='All simulated trades, results and scanned coin rows cleared. A future scan will generate new results.';
+          state.nextScanAt=Math.max(Date.now()+60000,state.nextScanAt||0);
+        }else state.history=[];
+        state.historyClearEpoch=Math.max(state.historyClearEpoch||0,now);
+        // Save synchronously and publish a new mirror snapshot. Cancelling
+        // an existing scan's output is handled by its clearGeneration guard.
         persistImmediate();
-        if(count>0){
-          log('CLOSED SIMULATED HISTORY CLEARED '+count+
-              ' entries; archived locally; open trades and real orders retained');
-        }
-        // Propagate cleared state to the online read-only mirror immediately
-        // where a relay has been configured. Failure must not undo local clear.
-        syncRemote().catch(e=>log('Clear-history mirror sync: '+e.message));
-        respond(res,200,{ok:true,cleared:count,
+        log((all?'ALL SIMULATED DATA':'CLOSED SIMULATED HISTORY')+
+          ' cleared: '+openCount+' open; '+closedCount+' closed; '+resultsCount+
+          ' scanned rows. Source backup '+path.basename(backup));
+        syncRemote().catch(e=>log('Trade clear sync: '+e.message));
+        return respond(res,200,{ok:true,mode:all?'all':'closed',
+          clearedOpen:all?openCount:0,clearedClosed:closedCount,
+          clearedCoins:all?resultsCount:0,
           historyClearEpoch:state.historyClearEpoch,
-          message:'Closed simulated history cleared and backed up on this laptop. Open positions preserved.'});
-      }catch(e){respond(res,400,{error:String(e.message).slice(0,200)})}
+          simTradesClearEpoch:state.simTradesClearEpoch,
+          message:all?'All SIMULATED trades and scanned coin results cleared and backed up. Real Binance orders untouched.':
+            'Closed SIMULATED results cleared and backed up. Open simulations untouched.'});
+      }catch(e){return respond(res,400,{error:String(e.message).slice(0,250)})}
     });
     return;
   }
