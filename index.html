@@ -324,6 +324,7 @@ let st={hist:[],open:[],pins:[],trackedKeys:{},set:{}};
 try{st=Object.assign(st,JSON.parse(localStorage.getItem('scan1')||'{}'))}catch(e){}
 if(!Array.isArray(st.open))st.open=[];
 if(!Array.isArray(st.hist))st.hist=[];
+if(!st.pending||typeof st.pending!=='object'||Array.isArray(st.pending))st.pending={};
 if(!st.trackedKeys||typeof st.trackedKeys!=='object'||Array.isArray(st.trackedKeys))st.trackedKeys={};
 const save=()=>{if(remoteMode)return;try{localStorage.setItem('scan1',JSON.stringify(st))}catch(e){}};
 const IDS=['ex','acct','risk','fee','minvol','topn'];
@@ -393,10 +394,9 @@ async function scan(){
       const r=res[x.symbol];
       if(failure){r.status='error';scanFailures++}
       R[x.symbol]={...r};
-      if(!failure&&r.status==='confirm'&&r.plan){
-        const fresh=registerConfirmedTrade(r);
-        if(fresh)fire(r);
-      }
+      const pending=Object.values(st.pending).find(p=>p.sym===x.symbol);
+      if(pending)R[x.symbol]={...pending.result,status:'watch',price:M[x.symbol]?.p||r.price};
+      if(!failure&&r.status==='confirm'&&r.plan)queueBrowserPriceConfirmation(r);
     });
     if(remoteMode)return;
     if(Date.now()<banUntil){lim=false;wait=(banUntil-Date.now())/1000+5;err=banMsg()}
@@ -417,6 +417,44 @@ function signalKey(r){
   const ck=Number(r.plan?.ck);
   if(!r.sym||!['long','short'].includes(r.dir)||!(ck>0))return null;
   return [EX(),r.sym,r.dir,ck].join(':');
+}
+function queueBrowserPriceConfirmation(r){
+  const key=signalKey(r),p=r.plan,dir=r.dir==='long'?1:-1;
+  if(!key||st.trackedKeys[key]||st.pending[key]||!p)return;
+  if(!(dir*(p.tp2-p.en)>0&&dir*(p.en-p.stop)>0))return;
+  st.pending[key]={sym:r.sym,dir:r.dir,originalEntry:p.en,originalTarget:p.tp2,
+    threshold:p.en+.25*(p.tp2-p.en),result:{...r,status:'watch',ok:false,
+      reason:'Waiting for 25% favorable TP movement'}};save();
+}
+function monitorBrowserPending(){
+  for(const [key,pending] of Object.entries(st.pending)){
+    const p=pending.result.plan,px=M[pending.sym]?.p,dir=pending.dir==='long'?1:-1;
+    if(!(px>0)||!p)continue;
+    const progress=dir*(px-pending.originalEntry)/Math.abs(pending.originalTarget-pending.originalEntry);
+    if(dir*(px-p.stop)<=0){
+      delete st.pending[key];st.trackedKeys[key]=Date.now();
+      if(R[pending.sym])R[pending.sym]={...pending.result,plan:null,status:'watch',
+        reason:'Original stop breached before 25% confirmation'};
+      save();continue;
+    }
+    if(progress>=.25){
+      const risk=dir*(px-p.stop),now=Date.now();
+      if(!(risk>0)){delete st.pending[key];save();continue;}
+      const promoted={...pending.result,status:'confirm',ok:true,price:px,
+        analyzedAt:now,reason:'25% favorable progress confirmed; entry at observed price',
+        plan:{...p,en:px,sp:risk/px*100,tp1:px+dir*3*risk,tp2:px+dir*3*risk,
+          tp1pct:risk/px*300,tp2pct:risk/px*300,ck:now-60000,
+          originalSignalCandle:p.ck,referenceEntry:pending.originalEntry,
+          referenceTarget:pending.originalTarget,confirmationThreshold:pending.threshold}};
+      if(registerConfirmedTrade(promoted)){R[pending.sym]=promoted;fire(promoted);}
+      st.trackedKeys[key]=now;delete st.pending[key];save();
+    }else{
+      R[pending.sym]={...pending.result,status:'watch',price:px,
+        confirmationProgress:Math.max(0,progress),confirmationThreshold:pending.threshold,
+        reason:'Waiting for 25% favorable TP distance ('+
+          (Math.max(0,progress)*100).toFixed(1)+'% reached)'};
+    }
+  }
 }
 function registerConfirmedTrade(r){
   if(r.status!=='confirm'||!r.plan)return false;
@@ -472,6 +510,7 @@ function closeT(t,why,px,gross){
   st.open=st.open.filter(x=>x.id!==t.id);save();
 }
 function monitor(){
+  monitorBrowserPending();
   for(const t of [...st.open]){
     const px=M[t.sym]&&M[t.sym].p;
     if(!(px>0))continue;
@@ -668,7 +707,7 @@ function renderScanInspector(){
   $('scanCoinTable').scrollTop=scroll;
   const recent=Array.isArray(meta.scanRecent)?meta.scanRecent.slice(0,4):[];
   $('scanHelp').textContent=(running?'Current scan is processing markets. ':'')+
-    'After double-liquidity confirmation, wait for a new 1m FVG, FULL gap fill and a subsequent directional closed candle. '+
+    'After double liquidity, FVG and volume, wait for 25% favorable progress from original entry toward TP before confirming LONG or SHORT. '+
     'LONG volume increases; SHORT volume decreases as requested. This does not prove institutional buying or selling. '+
     'Signals remain SIMULATED ONLY; SL stays beyond second sweep and final TP stays 3R.'+
     (recent.length?' · Recently scanned: '+recent.map(x=>x.sym).join(', '):'');
