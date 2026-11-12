@@ -355,7 +355,7 @@ function updatePriceConfirmations(){
         confirmationThreshold:c.threshold,executionReady:false,
         reason:'25% favorable progress reached; simulated entry at observed market price'};
       if(register(confirmed))state.results[c.sym]=compactResult(confirmed);
-      else state.trackedKeys[key]=now;
+      state.trackedKeys[key]=now;
       delete state.pending[key];persist();
     }else{
       state.results[c.sym]={...compactResult(r),status:'watch',ok:false,
