@@ -396,7 +396,11 @@ async function scan(){
       R[x.symbol]={...r};
       const pending=Object.values(st.pending).find(p=>p.sym===x.symbol);
       if(pending)R[x.symbol]={...pending.result,status:'watch',price:M[x.symbol]?.p||r.price};
-      if(!failure&&r.status==='confirm'&&r.plan)queueBrowserPriceConfirmation(r);
+      if(!failure&&r.status==='confirm'&&r.plan){
+        queueBrowserPriceConfirmation(r);
+        const pending=Object.values(st.pending).find(p=>p.sym===r.sym);
+        if(pending)R[r.sym]={...pending.result,status:'watch',price:M[r.sym]?.p||r.price};
+      }
     });
     if(remoteMode)return;
     if(Date.now()<banUntil){lim=false;wait=(banUntil-Date.now())/1000+5;err=banMsg()}
