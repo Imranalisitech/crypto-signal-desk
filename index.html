@@ -930,7 +930,7 @@ async function clearSimulatedData(mode){
       historyClearEpoch=Math.max(historyClearEpoch,Number(data.historyClearEpoch)||0);
       simTradesClearEpoch=Math.max(simTradesClearEpoch,Number(data.simTradesClearEpoch)||0);
       storeTradeClearEpoch();
-      if(all){st.open=[];R={};st.trackedKeys={};}
+      if(all){st.open=[];R={};st.trackedKeys={};st.pending={};}
       st.hist=[];showAllHistory=false;render();
       await remotePoll();
       window.alert((all?
@@ -955,7 +955,7 @@ async function clearSimulatedData(mode){
       if(all)simTradesClearEpoch=Math.max(simTradesClearEpoch,moment);
       storeTradeClearEpoch();
       st.hist=[];
-      if(all){st.open=[];st.trackedKeys={};R={};}
+      if(all){st.open=[];st.trackedKeys={};st.pending={};R={};}
       showAllHistory=false;save();render();
       if(cloud)window.alert('Data hidden in THIS browser only. For permanent deletion from your laptop and all connected displays, use these buttons inside the Windows desktop app.');
       else window.alert('Browser saved simulated data cleared. Backup download initiated. Real Binance orders unaffected.');
