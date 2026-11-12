@@ -56,7 +56,7 @@ const state={
     Object.fromEntries(Object.entries(loaded.results).filter(([,r])=>
       Number(r?.analyzedAt)>Number(loaded.simTradesClearEpoch||0))):{},
   live:loaded.live&&typeof loaded.live==='object'?loaded.live:null,
-  markets:{},open:Array.isArray(loaded.open)?
+  markets:{},pending:loaded.strategyVersion===ACTIVE_STRATEGY&&loaded.pending&&typeof loaded.pending==='object'?loaded.pending:{},open:Array.isArray(loaded.open)?
     loaded.open.filter(x=>Number(x.open)>Number(loaded.simTradesClearEpoch||0)):[],
   simTradesClearEpoch:Number(loaded.simTradesClearEpoch)||0,
   historyClearEpoch:Number.isFinite(Number(loaded.historyClearEpoch))?
@@ -317,7 +317,56 @@ function settle(t,reason,price,grossR){
   persist();
   log('RESULT '+t.sym+' '+reason+' '+r.toFixed(3)+'R');
 }
+function priceConfirmationQueue(r){
+  if(r.status!=='confirm'||!r.plan)return;
+  const key=signalKey(r),p=r.plan,now=Date.now(),dir=r.dir==='long'?1:-1;
+  if(!key||state.trackedKeys[key]||state.pending[key]||Number(p.ck)<=Number(state.simTradesClearEpoch||0))return;
+  if(now-Number(p.ck)-60000>240000||now<Number(p.ck))return;
+  if(!(dir*(p.tp2-p.en)>0&&dir*(p.en-p.stop)>0))return;
+  state.pending[key]={sym:r.sym,dir:r.dir,key,referenceEntry:p.en,
+    referenceTarget:p.tp2,threshold:p.en+.25*(p.tp2-p.en),createdAt:now,
+    result:{...r,status:'watch',ok:false,executionReady:false,
+      reason:'Strategy passed; waiting for 25% favorable movement toward TP'}};
+  persist();
+}
+function updatePriceConfirmations(){
+  const now=Date.now();
+  for(const [key,c] of Object.entries(state.pending)){
+    const m=state.markets[c.sym],r=c.result,p=r.plan,dir=c.dir==='long'?1:-1;
+    if(!m||!(m.p>0)||now-m.at>30000)continue;
+    const progress=dir*(m.p-c.referenceEntry)/Math.abs(c.referenceTarget-c.referenceEntry);
+    if(dir*(m.p-p.stop)<=0){
+      delete state.pending[key];state.trackedKeys[key]=now;
+      state.results[c.sym]={...compactResult(r),plan:null,status:'watch',
+        reason:'Candidate invalidated: original structural stop reached before 25% confirmation'};
+      persist();continue;
+    }
+    if(progress>=.25){
+      // The simulated entry is the observed market price, not an invented earlier fill.
+      const risk=dir*(m.p-p.stop);
+      if(!(risk>0)){delete state.pending[key];continue;}
+      const plan={...p,en:m.p,sp:risk/m.p*100,tp1:m.p+dir*3*risk,
+        tp2:m.p+dir*3*risk,tp1pct:risk/m.p*300,tp2pct:risk/m.p*300,
+        originalSignalCandle:p.ck,referenceEntry:c.referenceEntry,
+        referenceTarget:c.referenceTarget,confirmationThreshold:c.threshold,
+        priceConfirmedAt:now,ck:now-60000};
+      const confirmed={...r,status:'confirm',ok:true,plan,price:m.p,
+        analyzedAt:now,priceConfirmedAt:now,confirmationProgress:progress,
+        confirmationThreshold:c.threshold,executionReady:false,
+        reason:'25% favorable progress reached; simulated entry at observed market price'};
+      if(register(confirmed))state.results[c.sym]=compactResult(confirmed);
+      else state.trackedKeys[key]=now;
+      delete state.pending[key];persist();
+    }else{
+      state.results[c.sym]={...compactResult(r),status:'watch',ok:false,
+        price:m.p,analyzedAt:now,confirmationProgress:Math.max(0,progress),
+        confirmationThreshold:c.threshold,reason:'Waiting for 25% favorable TP progress ('+
+          (Math.max(0,progress)*100).toFixed(1)+'% reached)'};
+    }
+  }
+}
 function monitor(){
+  updatePriceConfirmations();
   const now=Date.now(),fresh=state.lastPriceAt&&now-state.lastPriceAt<30_000;
   if(!fresh)return;
   for(const trade of [...state.open]){
@@ -431,10 +480,12 @@ async function scan(){
               chg:item.change,G:decision.checks||[]};
             record=compactResult(result);
             record.analyzedAt=Date.now();
+            const waiting=Object.values(state.pending).find(p=>p.sym===sym);
+            if(waiting)record={...compactResult(waiting.result),status:'watch',price:mark,analyzedAt:Date.now()};
             state.scanAnalyzed++;
             if(state.simTradesClearEpoch===clearGeneration&&
                result.status==='confirm'){
-              register(result); // Existing simulated results are unchanged.
+              priceConfirmationQueue(result); // Wait for 25% favorable movement.
               // Real trading remains off until the user explicitly arms it.
               if(liveBroker.state.armed&&config.exchange==='binance'&&
                  result.executionReady===true){
@@ -473,6 +524,7 @@ async function scan(){
     if((!interrupted&&state.scanAnalyzed>0)||
        (Object.keys(state.results).length===0&&state.scanAnalyzed>0)){
       state.results=nextResults;
+      for(const pending of Object.values(state.pending))state.results[pending.sym]={...compactResult(pending.result),status:'watch',analyzedAt:Date.now()};
       state.lastScanAt=Date.now();
       state.lastScanCount=completedRows.length;
       state.lastScanAnalyzed=state.scanAnalyzed;
@@ -519,7 +571,7 @@ async function scan(){
   }
 }
 function snapshot(fullHistory=false){
-  const active=new Set([...Object.keys(state.results),...state.open.map(x=>x.sym)]);
+  const active=new Set([...Object.keys(state.results),...state.open.map(x=>x.sym),...Object.values(state.pending).map(x=>x.sym)]);
   const markets={};
   for(const sym of active)if(state.markets[sym])markets[sym]=state.markets[sym];
   let history=state.history;
@@ -540,6 +592,7 @@ function snapshot(fullHistory=false){
     connection:state.connection,nextScanAt:state.nextScanAt,
     markets,results:Object.values(state.results),strategyVersion:ACTIVE_STRATEGY,
     open:state.open,history,historyTotal:totalHistory,
+    priceConfirmationRule:'25% original entry-to-TP distance',pendingCount:Object.keys(state.pending).length,
     historyClearEpoch:state.historyClearEpoch,
     simTradesClearEpoch:state.simTradesClearEpoch,
     trackedKeys:state.trackedKeys};
@@ -646,10 +699,10 @@ const server=http.createServer((req,res)=>{
           previousStrategy:state.strategyVersion,
           open:all?state.open:[],closed:state.history,
           scannedCoins:all?state.results:{},
-          trackedKeys:all?state.trackedKeys:{}
+          trackedKeys:all?state.trackedKeys:{},pending:all?state.pending:{}
         },null,2),{encoding:'utf8',flag:'wx'});
         if(all){
-          state.open=[];state.history=[];state.results={};
+          state.open=[];state.history=[];state.results={};state.pending={};
           state.trackedKeys={};state.scanRecent=[];
           state.scanned=0;state.scanTotal=0;state.scanAnalyzed=0;
           state.scanFailures=0;state.scanInsufficient=0;
@@ -728,7 +781,7 @@ const server=http.createServer((req,res)=>{
         if(was!==config.exchange&&liveBroker.state.armed)
           liveBroker.disarm('Market exchange changed');
         fs.writeFileSync(CONFIG_FILE,JSON.stringify(config,null,2));
-        if(was!==config.exchange){state.results={};state.markets={};lastTickers=[]}
+        if(was!==config.exchange){state.results={};state.pending={};state.markets={};lastTickers=[]}
         respond(res,200,{ok:true});
       }catch(e){respond(res,400,{error:e.message})}
     });
