@@ -177,7 +177,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
     <label>Data source<select id="ex"><option value="bybit">Bybit (recommended)</option><option value="binance">Binance</option></select></label>
     <label>Account ($)<input id="acct" type="number" value="2000"></label>
     <label>Risk % per trade<input id="risk" type="number" step="0.1" value="0.5"></label>
-    <span class="mut" style="font-size:12px">PDH / PDL 5m breakout: accumulation near prior-day level, liquidity manipulation sweep, directional displacement FVG, 50% gap fill and confirmed return close on a finished 5-minute candle. Simulated 3R target.</span>
+    <span class="mut" style="font-size:12px">PDL LONG / PDH SHORT 5m reversal: accumulation at the previous-day level, breakout liquidity sweep and reclaim, reversal displacement FVG, 50% gap fill and closed 5m return confirmation. Simulated 3R target.</span>
     <label>Fees maker+taker %<input id="fee" type="number" step="0.005" value="0.075"></label>
     <label>Min 24h volume ($M)<input id="minvol" type="number" value="0"></label>
     <label>Max coins to scan<input id="topn" type="number" value="600"></label>
@@ -276,12 +276,12 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
  <p class="paper-note"><b>Important:</b> Emergency Pause blocks future entries; it does not close already-open Binance positions. Existing Binance-side protective orders stay on the exchange. Realized P&L must be verified from Binance account history. This desktop software is not a replacement for monitoring your exchange account.</p>
 </section>
 
-<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins await PDH/PDL breakout, 5m accumulation, manipulation and FVG fill with a 5m return confirmation. Final TP stays 3R; targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
+<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins await PDL sweep/reclaim for LONG or PDH sweep/rejection for SHORT, accumulation, 5m FVG fill and return confirmation. Final TP stays 3R; targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 <section id="tradeResultsPanel"><h2>Automatic trades & results <span><button id="allResults" type="button" hidden>Show all results</button> <button id="clearHistory" type="button">Clear closed history</button> <button id="clearAllTrades" type="button" title="Clear open AND closed simulated trades and current coin analysis; never touches real Binance positions">Clear all simulated trades</button> <button id="csv" type="button">Export all CSV</button></span></h2>
   <p class="mut" style="font-size:12px">Open-trade Now, R and USDT P&amp;L use exchange quotes less than 45 seconds old and are estimates, not guaranteed fills or realized Binance balances. Stale quotes disable manual simulated closes. Open and closed simulated trades are shown together. "Clear closed history" keeps open trades; "Clear all simulated trades" also resets open simulations and current scanner coin rows (fresh scan results can appear again). Neither closes real Binance positions.</p>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
 
-<p class="mut" style="font-size:12px">The 5m strategy tracks previous-day high/low breakouts, accumulation, manipulation sweep and FVG fill / return confirmation, then and a strong volume-confirmed FVG retest candle. Final TP at 3R; real Binance orders disabled. Distribution is the anticipated 3R target. Real Binance order placement is disabled.</p>
+<p class="mut" style="font-size:12px">The 5m strategy tracks PDL LONG / PDH SHORT liquidity-sweep reversals, accumulation, manipulation and FVG fill / return confirmation, then and a strong volume-confirmed FVG retest candle. Final TP at 3R; real Binance orders disabled. Distribution is the anticipated 3R target. Real Binance order placement is disabled.</p>
 </main>
 <div id="tradeChartModal" class="trade-chart-modal" hidden>
   <div id="tradeChartDialog" class="trade-chart-dialog" role="dialog" aria-modal="true" aria-labelledby="tradeChartTitle" tabindex="-1">
@@ -615,7 +615,7 @@ function card(r){
  const checks=[
   ['Entry',fp(p.en)],['SL ('+f(p.sp,2)+'%)',fp(p.stop)],
   ['Final TP (3R)',fp(p.tp2)],['Target R:R','1 : 3'],
-  ['Strategy','PDH / PDL 5m breakout + accumulation / manipulation / FVG fill'],
+  ['Strategy','PDL LONG / PDH SHORT 5m sweep reversal + accumulation / manipulation / FVG fill'],
   ['Monthly RSI bias',f(rsi.monthly,1)],['Weekly RSI bias',f(rsi.weekly,1)],
   ['Daily RSI pullback',f(rsi.daily,1)],['5m RSI',f(rsi.intraday5m,1)],
   ['Required 5m divergence',rsi.divergence?'Confirmed':'Not confirmed'],
@@ -759,7 +759,7 @@ function renderScanInspector(){
   $('scanCoinTable').scrollTop=scroll;
   const recent=Array.isArray(meta.scanRecent)?meta.scanRecent.slice(0,4):[];
   $('scanHelp').textContent=(running?'Current scan is processing markets. ':'')+
-    'Prior-day high/low breakout, 5m accumulation, liquidity manipulation sweep, directional FVG, then at least half-gap fill and a CLOSED 5m price return with volume confirm a simulated trade. No 25% TP-distance waiting rule. '+
+    'PDL LONG / PDH SHORT sweep and reclaim, 5m accumulation, manipulation, reversal FVG and at least half-gap fill and a CLOSED 5m price return with volume confirm a simulated trade. No 25% TP-distance waiting rule. '+
     'LONG and SHORT require retest-candle volume > 1.10× preceding 5 one-minute candles. This does not prove institutional buying or selling. '+
     'Signals remain SIMULATED ONLY; SL beyond manipulation wick and TP fixed at 3R.'+
     (recent.length?' · Recently scanned: '+recent.map(x=>x.sym).join(', '):'');
@@ -1066,13 +1066,13 @@ function adoptLaptop(snapshot,source,online,lastSeen){
    storeTradeClearEpoch();
  }
  const allCutoff=simTradesClearEpoch;
- const strategyMatches=snapshot.strategyVersion==='PDH_PDL_AMD_FVG_BREAKOUT_5M_V1';
+ const strategyMatches=snapshot.strategyVersion==='PDL_LONG_PDH_SHORT_AMD_FVG_REVERSAL_5M_V2';
  R=strategyMatches?
     Object.fromEntries(snapshot.results.filter(x=>x&&x.sym&&
       (!allCutoff||Number(x.analyzedAt)>allCutoff)).map(x=>[x.sym,x])):{};
  if(!strategyMatches){
    scanMeta={...snapshot,scanPhase:'UPDATE_REQUIRED',
-     scanMessage:'Desktop scanner is on an older strategy. Update the Windows scanner to PDH/PDL AMD FVG 5m V1; browser fallback uses the new strategy. Existing history preserved.'};
+     scanMessage:'Desktop scanner is on an older strategy. Update the Windows scanner to PDL LONG / PDH SHORT AMD FVG 5m V2; browser fallback uses the new strategy. Existing history preserved.'};
  }
  M=snapshot.markets||{};
  st.open=snapshot.open.filter(item=>
