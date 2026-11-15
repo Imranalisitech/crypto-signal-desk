@@ -201,10 +201,10 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 
 <section id="realBinancePanel" class="paper-panel" hidden style="border-color:#d76262;background:linear-gradient(120deg,#321b24,#1d2736)">
  <div class="paper-heading">
-  <h2 style="color:#ffc1c1">Binance Futures — REAL Account</h2>
-  <b class="paper-only" style="background:#75232e;border-color:#e46666">REAL FUNDS · OFF UNTIL YOU ACTIVATE</b>
+  <h2 style="color:#ffc1c1">Binance Futures — Simulation Mode (Orders Disabled)</h2>
+  <b class="paper-only" style="background:#75232e;border-color:#e46666">REAL EXECUTION DISABLED</b>
  </div>
- <p class="paper-note">Live Binance USDⓈ-M Futures. New Dual Liquidity Reclaim double-sweep strategy signals are currently research-only and cannot place live orders. Your laptop can place actual futures orders <b>only after you explicitly enable live trading</b>. Futures trading can cause rapid losses and liquidation.</p>
+ <p class="paper-note">This RSI AMD FVG deployment is SIMULATION-ONLY. Real Binance orders are blocked by the laptop server, even if prior credentials remain saved. Existing exchange positions must be monitored independently.</p>
  <div id="liveStatus" class="paper-status">Live trading DISABLED. The real account is not connected.</div>
  <div id="liveBalance" class="paper-metrics"></div>
  <details class="paper-details" id="liveCredentials">
@@ -242,11 +242,11 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   <div id="liveRiskDraft" class="paper-note" aria-live="polite"></div>
   <button id="liveSaveRisk" type="button">Save trading preferences</button>
   <p class="paper-note"><b>Automatic SL / TP:</b> The setup supplies the initial structural SL and a final 3R TP. For the profit-lock simulation: at <b>50% of TP distance</b> protect <b>5% of the total entry-to-TP price range</b>; at <b>75% of TP distance</b> protect <b>50% of that range</b>. This applies equally to LONG and SHORT. These are PRICE levels, not guaranteed realized returns. A moved Binance stop requires working connection, confirmed active position, Binance order acceptance and explicit live activation. Existing protection stays in place if the replacement fails.</p>
-  <p class="paper-note">No spinner controls or periodic reset of unsaved values. Invalid or unsupported choices are explicitly rejected. The unvalidated Dual Liquidity Reclaim strategy cannot submit live orders automatically.</p>
+  <p class="paper-note">No spinner controls or periodic reset of unsaved values. Invalid or unsupported choices are explicitly rejected. The RSI AMD FVG strategy cannot submit real Binance orders in simulation mode.</p>
  </details>
  <div class="paper-status" style="background:#3d2631">
   <strong>3. Live execution control</strong>
-  <p class="paper-note">Default is OFF on every Windows startup. Activation can place REAL Binance Futures orders automatically when future signals qualify. Exchange-side stop-loss and take-profit protection is requested immediately after a confirmed fill; failures disable new entries and may require urgent manual action.</p>
+  <p class="paper-note">Simulation-only mode: activation of real Binance trading is disabled. Exchange-side stop-loss and take-profit protection is requested immediately after a confirmed fill; failures disable new entries and may require urgent manual action.</p>
   <label style="display:block;font-size:12px">Type exactly <b>ENABLE REAL BINANCE FUTURES AUTO TRADING</b>
    <input id="liveArmPhrase" type="text" autocomplete="off" spellcheck="false" style="width:100%;padding:8px;border-radius:6px;background:#101e30;color:#fff;border:1px solid #b96875" placeholder="Activation phrase (never saved)"/>
   </label>
@@ -261,12 +261,12 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
  <p class="paper-note"><b>Important:</b> Emergency Pause blocks future entries; it does not close already-open Binance positions. Existing Binance-side protective orders stay on the exchange. Realized P&L must be verified from Binance account history. This desktop software is not a replacement for monitoring your exchange account.</p>
 </section>
 
-<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins may await double liquidity, a newly formed FVG, its full fill, or the final direction-and-volume candle. Final TP stays 3R; targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
+<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins await RSI(14) alignment, a manipulation sweep, and an FVG retest with a closed 5m directional candle and volume. Final TP stays 3R; targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 <section id="tradeResultsPanel"><h2>Automatic trades & results <span><button id="allResults" type="button" hidden>Show all results</button> <button id="clearHistory" type="button">Clear closed history</button> <button id="clearAllTrades" type="button" title="Clear open AND closed simulated trades and current coin analysis; never touches real Binance positions">Clear all simulated trades</button> <button id="csv" type="button">Export all CSV</button></span></h2>
   <p class="mut" style="font-size:12px">Open and closed simulated trades are shown together. "Clear closed history" keeps open trades; "Clear all simulated trades" also resets open simulations and current scanner coin rows (fresh scan results can appear again). Neither closes real Binance positions.</p>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
 
-<p class="mut" style="font-size:12px">The laptop server tracks confirmed signals while running. Previous trade history remains saved. New signals require double liquidity, a reclaimed previous-day line, swing break, a fully filled newly formed FVG, then a fresh 1m direction-and-volume candle. LONG volume rises and SHORT volume decreases. RSI, funding and EMA remain inactive. Existing SL/TP and profit-lock continue; these new signals remain SIMULATED ONLY.</p>
+<p class="mut" style="font-size:12px">The laptop server records simulated RSI(14) + AMD + 5m FVG entries. Strict monthly/weekly RSI, daily pullback, 5m divergence and recovery, accumulation, liquidity manipulation and FVG retest candle with volume must align. Distribution is the anticipated 3R target. Real Binance order placement is disabled.</p>
 </main>
 <div id="tradeChartModal" class="trade-chart-modal" hidden>
   <div id="tradeChartDialog" class="trade-chart-dialog" role="dialog" aria-modal="true" aria-labelledby="tradeChartTitle" tabindex="-1">
@@ -539,7 +539,7 @@ function card(r){
  const checks=[
   ['Entry',fp(p.en)],['SL ('+f(p.sp,2)+'%)',fp(p.stop)],
   ['Final TP (3R / '+f(p.tp2pct,2)+'%)',fp(p.tp2)],['Target R:R','1 : '+f(p.rr,1)],
-  ['Strategy','Dual Liquidity Reclaim + FVG fill + volume (1m)'],
+  ['Strategy','RSI(14) strict + AMD + FVG (5m)'],
   ['Previous day high',fp(day.high)],['Previous day low',fp(day.low)],
   ['First stop run',fp(g.firstExtreme)],['Second deeper stop run',fp(g.secondExtreme)],
   ['Previous-day level reclaimed',g.levelReclaimed?'Yes':'No'],
@@ -664,13 +664,13 @@ function renderScanInspector(){
       Number.isFinite(storedPrice)&&storedPrice>0?
         '<span title="Last analyzed price — NOT live">'+fp(storedPrice)+' (saved)</span>':'—';
     const jha=r.fvg?.ok?
-      'Full FVG fill + '+(r.dir==='long'?'rising-volume BUY':'falling-volume SELL')+' candle':
+      '5m FVG retest + directional volume candle':
       r.fvg?.filled?'FVG filled — volume-confirmed candle pending':
       r.fvg?.formed?'New FVG formed — waiting for FULL gap fill':
-      r.liquidity?.ok?'Double liquidity confirmed — awaiting new FVG':
-      r.liquidity?.secondSweep?'Second grab — awaiting structure confirmation':
-      r.liquidity?.firstSweep?'First grab only — second grab required':
-      r.liquidity?.day?'No liquidity event':'Previous UTC day unavailable';
+      r.liquidity?.ok?'Manipulation sweep detected — FVG pending':
+      r.liquidity?.secondSweep?'Manipulation sweep observed':
+      r.liquidity?.firstSweep?'Manipulation sweep observed':
+      r.rsi?'RSI / AMD / FVG conditions pending':'Higher-timeframe RSI unavailable';
     return '<tr><td>'+link+'</td><td>'+safe(r.dir||'—')+'</td><td>'+
       priceCell+'</td><td>'+safe(c.name||'—')+
       '</td><td>'+safe(r.liquidity?.day?.high!=null?fp(r.liquidity.day.high):'—')+
@@ -687,9 +687,9 @@ function renderScanInspector(){
   $('scanCoinTable').scrollTop=scroll;
   const recent=Array.isArray(meta.scanRecent)?meta.scanRecent.slice(0,4):[];
   $('scanHelp').textContent=(running?'Current scan is processing markets. ':'')+
-    'After double liquidity, FVG and volume, wait for 25% favorable progress from original entry toward TP before confirming LONG or SHORT. '+
+    'Monthly/weekly RSI alignment, daily RSI pullback, 5m divergence/recovery, accumulation, liquidity sweep and FVG retest with a CLOSED directional candle and volume confirm the trade. The previous 25% price-distance gate is REMOVED. '+
     'LONG volume increases; SHORT volume decreases as requested. This does not prove institutional buying or selling. '+
-    'Signals remain SIMULATED ONLY; SL stays beyond second sweep and final TP stays 3R.'+
+    'Signals remain SIMULATED ONLY; SL beyond manipulation wick and TP fixed at 3R.'+
     (recent.length?' · Recently scanned: '+recent.map(x=>x.sym).join(', '):'');
 }
 function render(){
@@ -743,7 +743,7 @@ function render(){
 const wl=wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).slice(0,watchLimit);
 $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).length+' coins · scroll for more';
   $('wl').innerHTML=tbl(
- ['','Coin','Side','Price','Previous day level','FVG / volume stage','Score','Waiting for'],
+ ['','Coin','Side','Price','Accumulation boundary','FVG / volume stage','Score','Waiting for'],
  wl.map(r=>{
   const missing=r.G?r.G.filter(x=>!x.ok).map(x=>x.t):[];
   const g=r.liquidity||{};
@@ -754,7 +754,7 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
    '</td><td>'+boundary+'</td><td>'+
    (r.fvg?.filled?'Gap filled · volume pending':r.fvg?.formed?'FVG not fully filled':
     g.strongPressure?'Double sweep confirmed · FVG pending':
-    g.secondSweep?'Second sweep seen':g.firstSweep?'First sweep only':'Awaiting first grab')+'</td><td>'+
+    g.secondSweep?'Manipulation sweep seen':g.firstSweep?'Manipulation sweep seen':'Awaiting accumulation / sweep')+'</td><td>'+
    f(r.score,0)+'</td><td class="mut">'+(missing.join('; ')||r.reason||'—')+'</td></tr>';
  }), 'No candidates near yesterday high/low.');
  $('wl').scrollTop=watchScroll;
