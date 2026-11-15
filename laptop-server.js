@@ -38,7 +38,7 @@ const strategy=ctx.window.UnifiedStrategy;
 if(!strategy||typeof strategy.evaluate!=='function')throw Error('Missing unified-strategy.js');
 
 const loaded=readFile(STATE_FILE,{});
-const ACTIVE_STRATEGY='RSI14_AMD_FVG_DISTRIBUTION_5M_V1';
+const ACTIVE_STRATEGY='RSI14_AMD_FVG_ENTRY_1M_V2';
 // Keep old demo results in a local archive; no more paper orders run.
 if(loaded.paper&&typeof loaded.paper==='object'){
   const archive=path.join(BASE,'binance-paper-archive.json');
@@ -195,11 +195,11 @@ async function getJson(url){
   }
   throw Error('Market request failed');
 }
-const EXCHANGE_INTERVALS={'5m':'5','1d':'D','1w':'W','1M':'M'};
+const EXCHANGE_INTERVALS={'1m':'1','5m':'5','1d':'D','1w':'W','1M':'M'};
 const candleCache=new Map();
 async function candles(symbol,interval,count){
   const key=config.exchange+':'+symbol+':'+interval+':'+count;
-  const ttl=interval==='1M'?43200000:interval==='1w'?10800000:interval==='1d'?1200000:60000;
+  const ttl=interval==='1M'?43200000:interval==='1w'?10800000:interval==='1d'?1200000:interval==='5m'?60000:10000;
   const cached=candleCache.get(key);
   if(cached&&Date.now()-cached.at<ttl)return cached.bars;
   if(config.exchange==='bybit'){
@@ -222,7 +222,7 @@ function closed(bars,interval){
     if(!Number.isFinite(k.t)||!Number.isFinite(k.c))return false;
     const end=interval==='1M'?
       Date.UTC(new Date(k.t).getUTCFullYear(),new Date(k.t).getUTCMonth()+1,1):
-      k.t+(interval==='1w'?604800000:interval==='1d'?86400000:300000);
+      k.t+(interval==='1w'?604800000:interval==='1d'?86400000:interval==='5m'?300000:60000);
     return end<=now;
   });
 }
@@ -293,7 +293,7 @@ function register(r){
   const timestamp=Number(p.ck),now=Date.now();
   // Never open a simulated position on stale confirmation candles after
   // an offline period or several minutes of scanning backlog.
-  if(now-(timestamp+300000)<0||now-(timestamp+300000)>7*60_000)return false;
+  if(now-(timestamp+60000)<0||now-(timestamp+60000)>7*60_000)return false;
   if(![p.en,p.stop,p.tp2,p.sp].every(x=>Number.isFinite(x)&&x>0))return false;
   const dir=r.dir==='long'?1:-1;
   if(dir*(p.en-p.stop)<=0||dir*(p.tp2-p.en)<=0)return false;
@@ -304,7 +304,7 @@ function register(r){
     profitLockStage:0,
     tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,source:config.exchange,
     signalCandle:p.ck,open:now,realizedR:null,targetMode:'fixed3r',
-    confirmationMode:r.confirmationMode||'RSI14 strict + AMD + 5m FVG',
+    confirmationMode:r.confirmationMode||'RSI14 strict + AMD + 1m FVG',
     firstSweepPrice:p.firstSweepPrice??null,
     secondSweepPrice:p.secondSweepPrice??null,
     breakLevel:p.breakLevel??null,
@@ -313,7 +313,7 @@ function register(r){
     fvgFilledAt:p.fvgFilledAt||null,
     fvgVolumeRatio:p.fvgVolumeRatio??null,
     volumeDirection:p.volumeDirection||null,
-    timeframe:p.timeframe||'5m',
+    timeframe:p.timeframe||'1m',
     researchOnly:p.researchOnly===true,
     previousDayLevel:p.previousDayLevel||null};
   state.open.push(trade);
@@ -439,19 +439,19 @@ async function scan(){
           score:0,reason:'Waiting for strict RSI and AMD/FVG entry',
           analyzedAt:Date.now()};
         try{
-          const [rawMonthly,rawWeekly,rawDaily,raw5]=await Promise.all([
+          const [rawMonthly,rawWeekly,rawDaily,raw5,raw1]=await Promise.all([
             candles(sym,'1M',40),candles(sym,'1w',45),
-            candles(sym,'1d',65),candles(sym,'5m',190)]);
+            candles(sym,'1d',65),candles(sym,'5m',190),candles(sym,'1m',190)]);
           const barsMonthly=closed(rawMonthly,'1M'),barsWeekly=closed(rawWeekly,'1w'),
-            barsDaily=closed(rawDaily,'1d'),bars5=closed(raw5,'5m');
+            barsDaily=closed(rawDaily,'1d'),bars5=closed(raw5,'5m'),bars1=closed(raw1,'1m');
           if(barsMonthly.length<20||barsWeekly.length<20||
-             barsDaily.length<20||bars5.length<100){
+             barsDaily.length<20||bars5.length<100||bars1.length<100){
             record.status='insufficient';
-            record.reason='Strict RSI needs 20 monthly, 20 weekly, 20 daily and 100 closed 5m candles';
+            record.reason='Strict RSI needs 20 monthly, 20 weekly, 20 daily and 100 closed 5m + 1m candles';
             state.scanInsufficient++;
           }else{
             const mark=state.markets[sym]?.p||item.price;
-            const decision=strategy.evaluate({barsMonthly,barsWeekly,barsDaily,bars5,
+            const decision=strategy.evaluate({barsMonthly,barsWeekly,barsDaily,bars5,bars1,
               mark,account:config.account,risk:config.riskPct});
             const result={...decision,sym,price:mark,dir:decision.side,
               chg:item.change,G:decision.checks||[]};
@@ -557,7 +557,7 @@ function snapshot(fullHistory=false){
     connection:state.connection,nextScanAt:state.nextScanAt,
     markets,results:Object.values(state.results),strategyVersion:ACTIVE_STRATEGY,
     open:state.open,history,historyTotal:totalHistory,
-    confirmationRule:'RSI14 strict + 5m FVG retest candle, simulation only',pendingCount:0,
+    confirmationRule:'RSI14 strict (5m momentum) + 1m FVG retest candle, simulation only',pendingCount:0,
     historyClearEpoch:state.historyClearEpoch,
     simTradesClearEpoch:state.simTradesClearEpoch,
     trackedKeys:state.trackedKeys};
