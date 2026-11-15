@@ -79,8 +79,8 @@
    const inspect=(side)=>{
      const dir=side==='long'?1:-1;
      const macro=side==='long'?m>42&&w>50:m<58&&w<50;
-     // Slight widening from V2 (40–45 / 55–60), preserving the original
-     // higher-timeframe logic and mandatory 5m divergence + RSI recovery.
+     // Balanced daily zone compared with V4, retaining required weekly bias,
+     // 5m RSI divergence, structural sweep, FVG and volume.
      const pullback=side==='long'?d>=35&&d<=50:d>=50&&d<=65;
      const dv=divergence(bars5,r5,side,bars5.length);
      const reclaim=side==='long'?
@@ -146,7 +146,7 @@
            const plan={en:entry,stop,tp1:entry+dir*3*dist,tp2:entry+dir*3*dist,
              rr:3,sp:dist/entry*100,r$:Math.max(0,Number(account)*Number(risk)/100),
              ck:bar.t,timeframe:'1m',targetMode:'fixed3r',
-             setupType:'RSI14 selective / accumulation / manipulation / FVG retest / distribution target',
+             setupType:'RSI14 balanced / accumulation / manipulation / FVG retest / distribution target',
              fvgZone:{low,high},fvgFormedAt:c.t,fvgFilledAt:bar.t,
              volumeDirection:side,fvgVolumeRatio:avgVol>0?bar.v/avgVol:null,
              firstSweepPrice:side==='long'?candle.l:candle.h,
