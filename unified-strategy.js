@@ -65,13 +65,13 @@
    }
    return {ok:false};
  }
- function evaluate({barsMonthly,barsWeekly,barsDaily,bars5,mark,account=2000,risk=.5,now=Date.now()}={}){
+ function evaluate({barsMonthly,barsWeekly,barsDaily,bars5,bars1,mark,account=2000,risk=.5,now=Date.now()}={}){
    const empty=(reason)=>({status:'none',side:null,dir:null,ok:false,executionReady:false,
-     reason,score:0,checks:[],G:[],plan:null,confirmationMode:'RSI14 strict + AMD + 5m FVG',
-     strategyVersion:'RSI14_AMD_FVG_DISTRIBUTION_5M_V1'});
-   if(![barsMonthly,barsWeekly,barsDaily,bars5].every(Array.isArray)||
-      barsMonthly.length<20||barsWeekly.length<20||barsDaily.length<20||bars5.length<100||
-      !(mark>0))return empty('Insufficient CLOSED monthly, weekly, daily, or 5m candles for strict RSI');
+     reason,score:0,checks:[],G:[],plan:null,confirmationMode:'RSI14 strict (5m momentum) + AMD + 1m FVG',
+     strategyVersion:'RSI14_AMD_FVG_ENTRY_1M_V2'});
+   if(![barsMonthly,barsWeekly,barsDaily,bars5,bars1].every(Array.isArray)||
+      barsMonthly.length<20||barsWeekly.length<20||barsDaily.length<20||bars5.length<100||bars1.length<100||
+      !(mark>0))return empty('Insufficient CLOSED monthly, weekly, daily, 5m RSI or 1m entry candles');
    const rm=rsi(barsMonthly),rw=rsi(barsWeekly),rd=rsi(barsDaily),r5=rsi(bars5);
    const m=last(rm),w=last(rw),d=last(rd),intraday=last(r5);
    if(![m,w,d,intraday].every(isNum))return empty('Insufficient RSI(14) values');
@@ -91,27 +91,27 @@
        {ok:dv.ok,t:'5m price/RSI divergence confirmed at price pivots'},
        {ok:reclaim,t:side==='long'?'5m RSI recovered above 30':'5m RSI fell back below 70'}
      ];
-     const n=bars5.length;
-     // Only near-current setups: 5m accumulation zone, stop sweep/reclaim,
+     const n=bars1.length;
+     // Only near-current setups: 1m accumulation zone, stop sweep/reclaim,
      // directional displacement FVG, then a later retest confirming candle.
      let best=null;
      const begin=Math.max(24,n-55);
      for(let sweep=begin;sweep<n-5;sweep++){
-       const rangeBars=bars5.slice(sweep-16,sweep);
+       const rangeBars=bars1.slice(sweep-16,sweep);
        if(rangeBars.length!==16)continue;
        const hi=Math.max(...rangeBars.map(b=>b.h)),lo=Math.min(...rangeBars.map(b=>b.l));
        const width=hi-lo,base=(hi+lo)/2;
        if(!(width>0&&width/base<.06))continue;
-       const candle=bars5[sweep];
+       const candle=bars1[sweep];
        const swept=side==='long'?
          candle.l<lo&&candle.c>lo&&candle.c<hi:
          candle.h>hi&&candle.c<hi&&candle.c>lo;
        if(!swept)continue;
        // RSI divergence must precede the manipulation sweep, not occur later.
-       if(!dv.ok||dv.b>sweep||sweep-dv.b>40)continue;
+       if(!dv.ok||!bars5[dv.b]||bars5[dv.b].t>candle.t||candle.t-bars5[dv.b].t>40*300000)continue;
        // Require confirmed structural displacement away from swept liquidity.
        for(let f=sweep+2;f<=Math.min(n-3,sweep+14);f++){
-         const a=bars5[f-2],mid=bars5[f-1],c=bars5[f];
+         const a=bars1[f-2],mid=bars1[f-1],c=bars1[f];
          const gap=side==='long'?c.l-a.h:a.l-c.h;
          const low=side==='long'?a.h:c.h,high=side==='long'?c.l:a.l;
          const midBody=Math.abs(mid.c-mid.o);
@@ -123,26 +123,26 @@
            Math.max(candle.h,hi)+base*.00015;
          let invalid=false;
          for(let k=f+1;k<n;k++){
-           const bar=bars5[k];
+           const bar=bars1[k];
            if((side==='long'&&bar.l<=stop)||(side==='short'&&bar.h>=stop)){
              invalid=true;break;
            }
            const touched=bar.l<=high&&bar.h>=low;
            if(!touched)continue;
            // FVG candle must close in trade direction with a meaningful body,
-           // and volume must exceed the mean of five preceding 5m bars.
-           const preceding=bars5.slice(Math.max(0,k-5),k);
+           // and volume must exceed the mean of five preceding 1m bars.
+           const preceding=bars1.slice(Math.max(0,k-5),k);
            const avgVol=preceding.reduce((sum,x)=>sum+(+x.v||0),0)/preceding.length;
            const volumeOK=bar.v>avgVol*1.1;
            const confirmation=side==='long'?bullishCandle(bar):bearishCandle(bar);
            if(!volumeOK||!confirmation)continue;
            // Do not retroactively create a fresh entry from an old setup.
-           if(k<n-2||now-(bar.t+300000)>7*60000)continue;
+           if(k<n-2||now-(bar.t+60000)>7*60000)continue;
            const entry=bar.c,dist=dir*(entry-stop);
            if(!(dist>0))continue;
            const plan={en:entry,stop,tp1:entry+dir*3*dist,tp2:entry+dir*3*dist,
              rr:3,sp:dist/entry*100,r$:Math.max(0,Number(account)*Number(risk)/100),
-             ck:bar.t,timeframe:'5m',targetMode:'fixed3r',
+             ck:bar.t,timeframe:'1m',targetMode:'fixed3r',
              setupType:'RSI14 strict / accumulation / manipulation / FVG retest / distribution target',
              fvgZone:{low,high},fvgFormedAt:c.t,fvgFilledAt:bar.t,
              volumeDirection:side,fvgVolumeRatio:avgVol>0?bar.v/avgVol:null,
@@ -154,7 +154,7 @@
              divergence:dv,volumeRatio:plan.fvgVolumeRatio,
              fvg:{formed:true,filled:true,volumeConfirmed:true,low,high,
                formedAt:c.t,filledAt:bar.t,triggerTime:bar.t,triggerPrice:bar.c,
-               reason:'Directional closed 5m candle with volume at FVG retest'},
+               reason:'Directional closed 1m candle with volume at FVG retest'},
              pattern:{name:side==='long'?'Bullish FVG retest':'Bearish FVG retest',
                confirmTime:bar.t,confirmClose:bar.c}};
          }
@@ -162,7 +162,7 @@
      }
      checks.push({ok:!!best,t:'Accumulation range + manipulation liquidity sweep'},
        {ok:!!best,t:'Displacement formed directional 3-candle FVG'},
-       {ok:!!best,t:'Subsequent FVG retest + 5m directional closed candle and volume'});
+       {ok:!!best,t:'Subsequent FVG retest + 1m directional closed candle and volume'});
      const pass=macro&&pullback&&dv.ok&&reclaim&&!!best;
      const score=checks.filter(x=>x.ok).length/checks.length*100;
      return {side,dir:side,status:pass?'confirm':checks.some(x=>x.ok)?'watch':'none',
@@ -178,8 +178,8 @@
        fvg:best?.fvg||null,volumeRatio:best?.volumeRatio??null,
        rsi:{monthly:m,weekly:w,daily:d,intraday5m:intraday,
          divergence:dv.ok?dv:null,recovery:reclaim},
-       confirmationMode:'RSI14 strict + accumulation + manipulation + 5m FVG',
-       strategyVersion:'RSI14_AMD_FVG_DISTRIBUTION_5M_V1'};
+       confirmationMode:'RSI14 strict (5m momentum) + accumulation + manipulation + 1m FVG',
+       strategyVersion:'RSI14_AMD_FVG_ENTRY_1M_V2'};
    };
    const longs=inspect('long'),shorts=inspect('short');
    if(longs.ok&&shorts.ok)return {...longs,status:'watch',ok:false,plan:null,
@@ -189,5 +189,5 @@
    return longs.score>=shorts.score?longs:shorts;
  }
  root.UnifiedStrategy=Object.freeze({rsi,divergence,evaluate,
-   activeStrategy:'RSI14_AMD_FVG_DISTRIBUTION_5M_V1'});
+   activeStrategy:'RSI14_AMD_FVG_ENTRY_1M_V2'});
 })(typeof module!=='undefined'&&module.exports?module.exports:window);
