@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Crypto Signal Desk">
+<rect width="256" height="256" rx="46" fill="#0c1c2e"/>
+<rect x="19" y="19" width="218" height="218" rx="33" fill="#142d43" stroke="#365e77" stroke-width="4"/>
+<path d="M38 190H218M38 143H218M38 96H218" stroke="#315165" stroke-width="2" opacity=".7"/>
+<path d="M42 178L76 157L104 169L133 113L161 126L196 66L219 73" fill="none" stroke="#41e2bd" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="196" cy="66" r="9" fill="#f5dc93"/>
+<path d="M43 211H211" stroke="#8caac0" stroke-width="4" stroke-linecap="round"/>
+</svg>
