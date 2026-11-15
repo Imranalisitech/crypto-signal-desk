@@ -38,7 +38,7 @@ const strategy=ctx.window.UnifiedStrategy;
 if(!strategy||typeof strategy.evaluate!=='function')throw Error('Missing unified-strategy.js');
 
 const loaded=readFile(STATE_FILE,{});
-const ACTIVE_STRATEGY='RSI14_AMD_FVG_SCALP_1M_V3';
+const ACTIVE_STRATEGY='RSI14_AMD_FVG_STRICT_SCALP_1M_V4';
 // Keep old demo results in a local archive; no more paper orders run.
 if(loaded.paper&&typeof loaded.paper==='object'){
   const archive=path.join(BASE,'binance-paper-archive.json');
@@ -304,7 +304,7 @@ function register(r){
     profitLockStage:0,
     tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,source:config.exchange,
     signalCandle:p.ck,open:now,realizedR:null,targetMode:'fixed3r',
-    confirmationMode:r.confirmationMode||'RSI14 15m/5m scalp + 1m AMD FVG',
+    confirmationMode:r.confirmationMode||'RSI14 selective V2 + 5m divergence + 1m AMD FVG',
     firstSweepPrice:p.firstSweepPrice??null,
     secondSweepPrice:p.secondSweepPrice??null,
     breakLevel:p.breakLevel??null,
@@ -436,20 +436,22 @@ async function scan(){
            Date.now()<cooldownUntil)break;
         const item=scanUniverse[index++],sym=item.symbol;
         let record={sym,price:item.price,chg:item.change,dir:null,status:'none',
-          score:0,reason:'Waiting for 15m/5m RSI scalping and 1m AMD/FVG entry',
+          score:0,reason:'Waiting for selective HTF RSI, 5m divergence/recovery and 1m AMD/FVG entry',
           analyzedAt:Date.now()};
         try{
-          const [raw15,raw5,raw1]=await Promise.all([
-            candles(sym,'15m',100),candles(sym,'5m',120),candles(sym,'1m',170)]);
-          const bars15=closed(raw15,'15m'),bars5=closed(raw5,'5m'),
-            bars1=closed(raw1,'1m');
-          if(bars15.length<40||bars5.length<40||bars1.length<90){
+          const [rawMonthly,rawWeekly,rawDaily,raw5,raw1]=await Promise.all([
+            candles(sym,'1M',40),candles(sym,'1w',45),
+            candles(sym,'1d',65),candles(sym,'5m',190),candles(sym,'1m',190)]);
+          const barsMonthly=closed(rawMonthly,'1M'),barsWeekly=closed(rawWeekly,'1w'),
+            barsDaily=closed(rawDaily,'1d'),bars5=closed(raw5,'5m'),bars1=closed(raw1,'1m');
+          if(barsMonthly.length<20||barsWeekly.length<20||
+             barsDaily.length<20||bars5.length<100||bars1.length<100){
             record.status='insufficient';
-            record.reason='Scalp model needs 40 closed 15m + 40 closed 5m + 90 closed 1m candles';
+            record.reason='Selective V2 needs 20 completed monthly, 20 weekly, 20 daily and 100 5m/1m candles';
             state.scanInsufficient++;
           }else{
             const mark=state.markets[sym]?.p||item.price;
-            const decision=strategy.evaluate({bars15,bars5,bars1,
+            const decision=strategy.evaluate({barsMonthly,barsWeekly,barsDaily,bars5,bars1,
               mark,account:config.account,risk:config.riskPct});
             const result={...decision,sym,price:mark,dir:decision.side,
               chg:item.change,G:decision.checks||[]};
@@ -555,7 +557,7 @@ function snapshot(fullHistory=false){
     connection:state.connection,nextScanAt:state.nextScanAt,
     markets,results:Object.values(state.results),strategyVersion:ACTIVE_STRATEGY,
     open:state.open,history,historyTotal:totalHistory,
-    confirmationRule:'RSI14 scalp 15m/5m direction + 1m AMD FVG closed candle, simulation only',pendingCount:0,
+    confirmationRule:'Selective V2 RSI HTF + required 5m divergence/recovery + 1m AMD FVG, simulation only',pendingCount:0,
     historyClearEpoch:state.historyClearEpoch,
     simTradesClearEpoch:state.simTradesClearEpoch,
     trackedKeys:state.trackedKeys};
