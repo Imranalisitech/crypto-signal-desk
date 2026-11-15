@@ -227,9 +227,20 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
     <b>Live readiness:</b> <span id="liveReadinessText">Connection not verified · exchange positions unavailable · order execution locked</span>
   </div>
   <div class="paper-heading" style="gap:8px;flex-wrap:wrap;margin:8px 0 14px">
-    <button type="button" id="liveRefreshAccount">Refresh real account</button>
-    <a href="https://www.binance.com/en/futures" target="_blank" rel="noopener noreferrer" style="color:#a8d5ff">Open Binance Futures account</a>
+    <button type="button" id="liveRefreshAccount">Check secure Binance connection</button>
+    <a href="https://www.binance.com/en/my/settings/api-management" target="_blank" rel="noopener noreferrer" style="color:#a8d5ff">Binance API Management</a>
   </div>
+  <details id="secureBrokerSetup" class="paper-details" open>
+    <summary><b>1. Connect REAL Binance Futures — secure setup</b></summary>
+    <p class="paper-note">The installed website is a browser app, not the private Windows execution agent. A Binance website link cannot execute software signals. Your private Windows trading agent must be running and authenticated before live account data or automatic orders can be enabled.</p>
+    <div class="paper-settings">
+      <div><b>Step 1 — Create your API key</b><p class="paper-note">Use Binance API Management. Enable necessary Futures access only when ready, disable withdrawals, and restrict the key to your private agent IP when supported.</p></div>
+      <div><b>Step 2 — Connect in the private Windows agent</b><p class="paper-note">Enter API credentials only in a trusted, secured local program, never in this public dashboard or chat. Start the local trading service and verify account ownership.</p></div>
+      <div><b>Step 3 — Verify live safeguards</b><p class="paper-note">Confirm real balance and positions, exchange-side stop-loss/take-profit orders, daily-loss enforcement, duplicate prevention and automatic recovery after disconnections.</p></div>
+      <div><b>Step 4 — Enable after testing</b><p class="paper-note">Test order placement, fills, stop revisions and emergency pause using Binance test mode before separately authorizing real-money execution.</p></div>
+    </div>
+    <p class="paper-note"><b>Current status:</b> No authenticated agent connected to this browser installation. Risk settings saved below are preferences, not active exchange risk limits.</p>
+  </details>
  <details class="paper-details" id="liveCredentials">
   <summary>1. Connect your real Binance Futures API credentials securely</summary>
   <p class="paper-note">Create a Binance Futures API key with Futures trading permission, withdrawals disabled and IP restriction if available. Enter it here on your laptop only. Windows DPAPI encrypts credentials under your Windows account. Never share the secret in chat, GitHub or Render.</p>
@@ -1015,7 +1026,7 @@ async function downloadCompleteSetup(){
   let riskPlan=null;
   try{riskPlan=JSON.parse(localStorage.getItem(riskKey)||'null')}catch(_){}
   const sources=await Promise.all(['index.html','unified-strategy.js','profit-lock.js',
-    'trade-chart.js','binance-live-ui.js'].map(async path=>{
+    'trade-chart.js','binance-live-ui.js','server.js','package.json','manifest.webmanifest','sw.js'].map(async path=>{
     try{
       const res=await fetch(new URL(path,location.href),{cache:'no-store'});
       if(!res.ok)throw Error('HTTP '+res.status);
