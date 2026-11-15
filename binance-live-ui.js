@@ -5,8 +5,65 @@
  const panel=document.getElementById('realBinancePanel');
  if(!panel)return;
  const local=window.CRYPTO_LOCAL_SERVER===true;
- panel.hidden=!local;
- if(!local)return;
+ panel.hidden=false;
+ if(!local){
+   // Public browser installations cannot access the Windows DPAPI vault and
+   // MUST NOT transmit Binance credentials or order commands to Render.
+   const $=id=>document.getElementById(id);
+   const credentialPanel=$('liveCredentials');
+   const status=$('liveStatus'),balance=$('liveBalance');
+   const controls=document.querySelector('#realBinancePanel .paper-status[style*="background:#3d2631"]');
+   credentialPanel.hidden=true;
+   if(controls)controls.hidden=true;
+   $('liveOrders').innerHTML='<div class="empty">No authenticated Binance connection in browser mode. Real orders and account positions are not available here. Review actual positions directly in Binance.</div>';
+   $('liveEvents').innerHTML='<div class="empty">Browser risk-plan edits do not place trades or connect to Binance.</div>';
+   $('liveOrderCount').textContent='Not connected';
+   status.textContent='BINANCE LIVE SETUP — BROWSER DRAFT ONLY. No account linked, no live orders, no API credentials stored.';
+   status.style.background='#233647';
+   balance.innerHTML=[
+     ['Account connection','Not connected'],
+     ['Real USDT balance','Not available'],
+     ['Order execution','Disabled'],
+     ['Strategy','RSI(14) scalping + 1m AMD/FVG'],
+     ['Risk plan','Editable local draft']
+   ].map(([key,value])=>'<div><small>'+key+'</small><b>'+value+'</b></div>').join('');
+   const title=$('liveRiskSettings').querySelector('summary');
+   title.textContent='Binance Futures trade allocation and risk plan (browser draft)';
+   const note=$('liveRiskSettings').querySelector('p.paper-note');
+   note.textContent='This plan is stored in this browser only. It cannot retrieve your laptop’s settings or balance and cannot send real Binance orders. Confirm values yourself before any future separately authorized live integration.';
+   const previousKey='crypto_signal_desk_browser_live_risk_draft_v1';
+   let saved=null;try{saved=JSON.parse(localStorage.getItem(previousKey)||'null')}catch(_){}
+   const allowed=['maxLeverage','tradeMarginUSDT','riskPerTradePct','maxOrdersPerDay'];
+   const limits={maxLeverage:[1,125],tradeMarginUSDT:[1,100000],
+     riskPerTradePct:[0.01,5],maxOrdersPerDay:[1,1000]};
+   for(const el of document.querySelectorAll('[data-live-setting]')){
+     const name=el.dataset.liveSetting;
+     if(saved&&allowed.includes(name)&&Number.isFinite(saved[name]))
+       el.value=String(saved[name]);
+   }
+   const message=$('liveRiskDraft');
+   message.textContent='Draft only. The shown values are initial defaults unless you previously saved this browser’s plan. They are not verified account settings.';
+   $('liveSaveRisk').textContent='Save browser risk plan (no real orders)';
+   $('liveSaveRisk').addEventListener('click',()=>{
+     const next={};
+     for(const name of allowed){
+       const el=document.querySelector('[data-live-setting="'+name+'"]');
+       const value=Number(el.value),range=limits[name];
+       if(!Number.isFinite(value)||value<range[0]||value>range[1]||
+           (name==='maxLeverage'||name==='maxOrdersPerDay')&&!Number.isSafeInteger(value)){
+         message.textContent='Not saved: '+name+' must be between '+range[0]+' and '+range[1]+
+           ((name==='maxLeverage'||name==='maxOrdersPerDay')?' (whole number)':'')+'.';
+         el.focus();return;
+       }
+       next[name]=value;
+     }
+     try{
+       localStorage.setItem(previousKey,JSON.stringify(next));
+       message.textContent='Browser risk-plan draft saved on this device. This does NOT enable Binance trading or update your laptop settings.';
+     }catch(_){message.textContent='Could not save browser settings. Check storage permissions.'}
+   });
+   return;
+ }
  const $=id=>document.getElementById(id);
  const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
  const num=(v,d=2)=>Number.isFinite(Number(v))?Number(v).toLocaleString('en-US',{
