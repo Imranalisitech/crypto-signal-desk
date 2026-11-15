@@ -177,7 +177,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
     <label>Data source<select id="ex"><option value="bybit">Bybit (recommended)</option><option value="binance">Binance</option></select></label>
     <label>Account ($)<input id="acct" type="number" value="2000"></label>
     <label>Risk % per trade<input id="risk" type="number" step="0.1" value="0.5"></label>
-    <span class="mut" style="font-size:12px">RSI(14) scalping: 15m direction, 5m momentum, 1m accumulation, manipulation sweep, FVG and volume-confirmed 1m retest. RSI divergence and 30/70 recovery are optional confluences. Simulated 3R target.</span>
+    <span class="mut" style="font-size:12px">RSI(14) SELECTIVE V2: weekly and monthly RSI bias, slightly wider daily pullback, mandatory 5m divergence plus 35/65 recovery, 1m accumulation, liquidity sweep and strong volume-confirmed FVG retest. Simulated 3R target.</span>
     <label>Fees maker+taker %<input id="fee" type="number" step="0.005" value="0.075"></label>
     <label>Min 24h volume ($M)<input id="minvol" type="number" value="0"></label>
     <label>Max coins to scan<input id="topn" type="number" value="600"></label>
@@ -276,12 +276,12 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
  <p class="paper-note"><b>Important:</b> Emergency Pause blocks future entries; it does not close already-open Binance positions. Existing Binance-side protective orders stay on the exchange. Realized P&L must be verified from Binance account history. This desktop software is not a replacement for monitoring your exchange account.</p>
 </section>
 
-<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins await 15m and 5m RSI support, 1m accumulation and manipulation, then a 1m FVG retest with a closed directional candle and volume. Final TP stays 3R; targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
+<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins await higher-timeframe RSI alignment, required 5m divergence/recovery and 1m accumulation, manipulation and strong FVG retest candle with volume. Final TP stays 3R; targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 <section id="tradeResultsPanel"><h2>Automatic trades & results <span><button id="allResults" type="button" hidden>Show all results</button> <button id="clearHistory" type="button">Clear closed history</button> <button id="clearAllTrades" type="button" title="Clear open AND closed simulated trades and current coin analysis; never touches real Binance positions">Clear all simulated trades</button> <button id="csv" type="button">Export all CSV</button></span></h2>
   <p class="mut" style="font-size:12px">Open-trade Now, R and USDT P&amp;L use exchange quotes less than 45 seconds old and are estimates, not guaranteed fills or realized Binance balances. Stale quotes disable manual simulated closes. Open and closed simulated trades are shown together. "Clear closed history" keeps open trades; "Clear all simulated trades" also resets open simulations and current scanner coin rows (fresh scan results can appear again). Neither closes real Binance positions.</p>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
 
-<p class="mut" style="font-size:12px">The laptop server tracks simulated RSI(14) scalping entries: 15m trend, 5m momentum and 1m accumulation, liquidity manipulation and FVG retest candle with volume. No monthly/weekly/daily RSI requirements. Final TP at 3R; real Binance orders disabled. Distribution is the anticipated 3R target. Real Binance order placement is disabled.</p>
+<p class="mut" style="font-size:12px">The laptop server tracks SELECTIVE V2 RSI(14) entries with monthly/weekly/daily filters, required 5m RSI divergence and recovery, then 1m accumulation, manipulation and a strong FVG retest candle with volume. Final TP at 3R; real Binance orders disabled. Distribution is the anticipated 3R target. Real Binance order placement is disabled.</p>
 </main>
 <div id="tradeChartModal" class="trade-chart-modal" hidden>
   <div id="tradeChartDialog" class="trade-chart-dialog" role="dialog" aria-modal="true" aria-labelledby="tradeChartTitle" tabindex="-1">
@@ -455,10 +455,11 @@ async function scan(){
     R={};scanFailures=0;render();
     await pool(list,async x=>{
  const s=x.symbol,r=res[s];
- const [fifteen,five,one]=await Promise.all([
-   K(s,'15m',100),K(s,'5m',120),K(s,'1m',170)]);
+ const [monthly,weekly,daily,five,one]=await Promise.all([
+   K(s,'1M',40),K(s,'1w',45),K(s,'1d',65),K(s,'5m',190),K(s,'1m',190)]);
  const settings={
-  bars15:onlyClosed(fifteen,'15m'),bars5:onlyClosed(five,'5m'),
+  barsMonthly:onlyClosed(monthly,'1M'),barsWeekly:onlyClosed(weekly,'1w'),
+  barsDaily:onlyClosed(daily,'1d'),bars5:onlyClosed(five,'5m'),
   bars1:onlyClosed(one,'1m'),
   mark:M[s].p,account:n('acct'),risk:n('risk')
  };
@@ -526,7 +527,7 @@ function registerConfirmedTrade(r){
     open:now,signalCandle:p.ck,source:EX(),
     tp1h:false,targetMode:'fixed3r',profitLockStage:0,
     timeframe:p.timeframe||'1m',
-    confirmationMode:r.confirmationMode||'RSI14 scalp 15m/5m + 1m AMD FVG',
+    confirmationMode:r.confirmationMode||'RSI14 selective V2 HTF + 5m divergence + 1m AMD/FVG',
     fvgZone:p.fvgZone||null,fvgFormedAt:p.fvgFormedAt||null,
     fvgFilledAt:p.fvgFilledAt||null,fvgVolumeRatio:p.fvgVolumeRatio??null,
     volumeDirection:p.volumeDirection||null,
@@ -617,11 +618,11 @@ function card(r){
  const checks=[
   ['Entry',fp(p.en)],['SL ('+f(p.sp,2)+'%)',fp(p.stop)],
   ['Final TP (3R)',fp(p.tp2)],['Target R:R','1 : 3'],
-  ['Strategy','RSI(14) scalp: 15m/5m trend + 1m AMD/FVG'],
-  ['15m RSI trend',f(rsi.trend15m,1)],['5m RSI momentum',f(rsi.intraday5m,1)],
-  ['1m RSI entry',f(rsi.entry1m,1)],
-  ['1m RSI divergence',rsi.divergence?'Additional confluence':'Not required'],
-  ['1m RSI 30/70 recovery',rsi.recovery?'Additional confluence':'Not required'],
+  ['Strategy','RSI(14) SELECTIVE V2: HTF + 5m divergence + 1m AMD/FVG'],
+  ['Monthly RSI bias',f(rsi.monthly,1)],['Weekly RSI bias',f(rsi.weekly,1)],
+  ['Daily RSI pullback',f(rsi.daily,1)],['5m RSI',f(rsi.intraday5m,1)],
+  ['Required 5m divergence',rsi.divergence?'Confirmed':'Not confirmed'],
+  ['Required 5m 35/65 recovery',rsi.recovery?'Confirmed':'Not confirmed'],
   ['Manipulation sweep',r.liquidity?.sweepTime?'Confirmed':'Not available'],
   ['FVG entry zone',fv.formed?fp(fv.low)+' – '+fp(fv.high):'Not available'],
   ['FVG retest candle',fv.filled?'Closed 1m candle':'Waiting'],
@@ -761,8 +762,8 @@ function renderScanInspector(){
   $('scanCoinTable').scrollTop=scroll;
   const recent=Array.isArray(meta.scanRecent)?meta.scanRecent.slice(0,4):[];
   $('scanHelp').textContent=(running?'Current scan is processing markets. ':'')+
-    '15m RSI trend, supporting 5m RSI momentum, 1m accumulation, liquidity sweep and FVG retest with a CLOSED 1m directional candle and volume confirm a simulated trade. RSI divergence/recovery add confidence but do not block it. The previous 25% price-distance gate is REMOVED. '+
-    'LONG volume increases; SHORT volume decreases as requested. This does not prove institutional buying or selling. '+
+    'Monthly/weekly RSI bias, daily pullback, mandatory 5m divergence and 35/65 recovery, 1m accumulation, manipulation sweep and FVG retest with a CLOSED strong 1m directional candle and volume confirm a simulated trade. No 25% TP-distance waiting rule. '+
+    'LONG and SHORT require retest-candle volume > 1.10× preceding 5 one-minute candles. This does not prove institutional buying or selling. '+
     'Signals remain SIMULATED ONLY; SL beyond manipulation wick and TP fixed at 3R.'+
     (recent.length?' · Recently scanned: '+recent.map(x=>x.sym).join(', '):'');
 }
@@ -1068,13 +1069,13 @@ function adoptLaptop(snapshot,source,online,lastSeen){
    storeTradeClearEpoch();
  }
  const allCutoff=simTradesClearEpoch;
- const strategyMatches=snapshot.strategyVersion==='RSI14_AMD_FVG_SCALP_1M_V3';
+ const strategyMatches=snapshot.strategyVersion==='RSI14_AMD_FVG_STRICT_SCALP_1M_V4';
  R=strategyMatches?
     Object.fromEntries(snapshot.results.filter(x=>x&&x.sym&&
       (!allCutoff||Number(x.analyzedAt)>allCutoff)).map(x=>[x.sym,x])):{};
  if(!strategyMatches){
    scanMeta={...snapshot,scanPhase:'UPDATE_REQUIRED',
-     scanMessage:'Desktop scanner update required: install the RSI14 scalping (15m/5m RSI + 1m AMD/FVG) update. Existing trades preserved.'};
+     scanMessage:'Desktop scanner update required for SELECTIVE V2 RSI with required 5m divergence/recovery and 1m AMD/FVG. Existing history preserved.'};
  }
  M=snapshot.markets||{};
  st.open=snapshot.open.filter(item=>
