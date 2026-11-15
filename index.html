@@ -548,35 +548,31 @@ const trackedChartButton=(trade,kind)=>{
     '" data-id="'+tradeId+'" title="Show saved Entry, Stop Loss and Take Profit on original chart timeframe">View Entry / SL / TP chart</button>';
 };
 function card(r){
- const p=r.plan,key=signalKey(r);
+ const p=r.plan||{},key=signalKey(r);
  const tracking=st.open.some(x=>x.signalKey===key);
  const recorded=st.hist.some(x=>x.signalKey===key);
- const g=r.liquidity||{},fv=r.fvg||{},day=g.day||p.previousDayLevel||{};
+ const fv=r.fvg||{},rsi=r.rsi||{};
  const checks=[
   ['Entry',fp(p.en)],['SL ('+f(p.sp,2)+'%)',fp(p.stop)],
-  ['Final TP (3R / '+f(p.tp2pct,2)+'%)',fp(p.tp2)],['Target R:R','1 : '+f(p.rr,1)],
+  ['Final TP (3R)',fp(p.tp2)],['Target R:R','1 : 3'],
   ['Strategy','RSI(14) strict + AMD + FVG (5m)'],
-  ['Previous day high',fp(day.high)],['Previous day low',fp(day.low)],
-  ['First stop run',fp(g.firstExtreme)],['Second deeper stop run',fp(g.secondExtreme)],
-  ['Previous-day level reclaimed',g.levelReclaimed?'Yes':'No'],
-  ['Intervening swing broken',fp(g.structureBreakLevel)],
-  ['Initial structure',g.strongPressure?'Double sweep + 2 strong closed 1m candles':'Waiting'],
-  ['FVG zone',fv.formed?fp(fv.low)+' – '+fp(fv.high):'Not formed'],
-  ['Full FVG fill',fv.filled?'Completed after structure confirmation':'Waiting'],
-  ['Final '+(r.dir==='long'?'bullish':'bearish')+' candle',fv.volumeConfirmed?'Closed after full gap fill':'Waiting'],
-  ['Volume requirement',r.dir==='long'?'Increasing (≥1.25× 20-candle average)':
-    'Decreasing (≤0.80× 20-candle average)'],
-  ['Final candle volume',Number.isFinite(fv.volumeRatio)?
-    f(fv.volumeRatio,2)+'× 20-candle average':'—'],
-  ['Stop placement','Beyond SECOND swept wick'],
-  ['Execution','SIMULATED ONLY · New method not live-enabled']
+  ['Monthly RSI',f(rsi.monthly,1)],['Weekly RSI',f(rsi.weekly,1)],
+  ['Daily RSI pullback',f(rsi.daily,1)],['5m RSI',f(rsi.intraday5m,1)],
+  ['5m RSI divergence',rsi.divergence?'Confirmed':'Not available'],
+  ['5m RSI recovery',rsi.recovery?'Confirmed':'Not available'],
+  ['Manipulation sweep',r.liquidity?.sweepTime?'Confirmed':'Not available'],
+  ['FVG entry zone',fv.formed?fp(fv.low)+' – '+fp(fv.high):'Not available'],
+  ['FVG retest candle',fv.filled?'Closed 5m candle':'Waiting'],
+  ['Volume ratio',Number.isFinite(fv.volumeRatio)?f(fv.volumeRatio,2)+'× prior 5-candle average':'—'],
+  ['Stop placement','Beyond manipulation extreme'],
+  ['Execution','SIMULATED ONLY · Real Binance orders disabled']
  ];
  return '<div class="card '+r.dir+'" data-a="chart" data-s="'+r.sym+
   '" role="button" tabindex="0"><div class="ch"><button class="coin-chart" type="button" data-a="chart" data-s="'+r.sym+'">'+
   nm(r.sym)+'</button>'+star(r.sym)+'<span class="m">'+fp(M[r.sym]?.p||r.price||p.en)+'</span></div><table class="kv">'+
   checks.map(x=>'<tr><td>'+x[0]+'</td><td>'+x[1]+'</td></tr>').join('')+'</table>'+
-  '<div class="auto-track-state">'+(tracking?'● Automatically tracking this trade':
-    recorded?'✓ Result recorded automatically':'✓ Signal ready for automatic tracking')+'</div>'+
+  '<div class="auto-track-state">'+(tracking?'● Automatically tracking this simulated trade':
+    recorded?'✓ Simulated result recorded':'✓ Eligible for simulated tracking')+'</div>'+
   '<button class="p" data-a="chart" data-s="'+r.sym+'" style="margin-top:7px">View Entry / SL / TP chart</button></div>';
 }
 function renderScanInspector(){
@@ -1099,6 +1095,7 @@ async function remotePoll(){
  }
 }
 async function begin(){
+ if(!window.CRYPTO_LOCAL_SERVER && new URLSearchParams(location.search).get('browser')==='1')activateBrowserFallback();
  await remotePoll();
  if(!remoteMode)startBrowserScanner();
  setInterval(remotePoll,8000);
