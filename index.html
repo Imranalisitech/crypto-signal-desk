@@ -146,6 +146,13 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 .scan-controls button{border:1px solid #4f77a1;border-radius:6px;color:#d9edff;background:#244767;padding:7px 12px}
 .scan-subtext{font-size:11px;color:#b6c7d5;margin-top:9px}
 </style>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#102033">
+<style>
+#installAppBtn{background:#136d68;border:1px solid #359e93;color:white}
+#fallbackNotice{border:1px solid #b98e49;padding:12px;border-radius:9px;background:#26313d;color:#ffdda3;margin:12px 0;line-height:1.5}
+#fallbackNotice a{color:#a6d9ff;text-decoration:underline}
+</style>
 </head>
 <body>
 <main>
@@ -154,15 +161,23 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <button id="refreshScan" type="button" title="Refresh scanner data and dashboard">↻ Refresh scan</button>
     <button id="alert" type="button">Enable sound + notifications</button>
+    <button id="installAppBtn" type="button">Install as desktop app</button>
   </div>
 </header>
 <div id="serverMode" class="server-mode" hidden>Checking laptop scanner…</div>
+<div id="fallbackNotice" hidden role="status">
+  <b>Browser-only fallback scanner</b> — Your laptop scanner is not connected.
+  This mode scans a limited set of coins while this window remains open.
+  It is NOT an always-on background service and its simulated records are separate
+  from your Windows laptop history. Real Binance orders are disabled.
+  <a href="https://crypto-signal-desk.onrender.com" target="_blank" rel="noopener">Open online app</a>.
+</div>
 <details id="settingsPanel" style="margin-bottom:12px"><summary style="cursor:pointer;font-weight:600">Settings</summary>
   <div class="ctl">
     <label>Data source<select id="ex"><option value="bybit">Bybit (recommended)</option><option value="binance">Binance</option></select></label>
     <label>Account ($)<input id="acct" type="number" value="2000"></label>
     <label>Risk % per trade<input id="risk" type="number" step="0.1" value="0.5"></label>
-    <span class="mut" style="font-size:12px">Dual Liquidity Reclaim extended: two distinct liquidity grabs, previous-day reclaim, swing break and strong closed 1m buying/selling. Stop beyond second wick; TP at 3R.</span>
+    <span class="mut" style="font-size:12px">RSI(14) strict: monthly/weekly direction, daily pullback, 5m divergence and recovery, accumulation, manipulation sweep, FVG and volume-confirmed 5m retest. Simulated 3R target.</span>
     <label>Fees maker+taker %<input id="fee" type="number" step="0.005" value="0.075"></label>
     <label>Min 24h volume ($M)<input id="minvol" type="number" value="0"></label>
     <label>Max coins to scan<input id="topn" type="number" value="600"></label>
@@ -320,6 +335,7 @@ async function getTickers(){
   pi.forEach(x=>M[x.symbol]={p:+x.markPrice,fr:+x.lastFundingRate*100});
   return tk.map(x=>({symbol:x.symbol,chg:+x.priceChangePercent,vol:+x.quoteVolume}))}
 // Remote laptop snapshots replace browser-only tracking when available.
+let browserFallbackActive=false, browserScannerStarted=false, installPrompt=null;
 let remoteMode=!!window.CRYPTO_LOCAL_SERVER||localStorage.getItem('cryptoLaptopActivated')==='1',
     remoteSource=window.CRYPTO_LOCAL_SERVER?'local':remoteMode?'cloud':'browser',
     remoteOnline=false,remoteLastSeen=null,remoteHistoryTruncated=false,
@@ -330,7 +346,7 @@ if(!Array.isArray(st.open))st.open=[];
 if(!Array.isArray(st.hist))st.hist=[];
 if(!st.pending||typeof st.pending!=='object'||Array.isArray(st.pending))st.pending={};
 if(!st.trackedKeys||typeof st.trackedKeys!=='object'||Array.isArray(st.trackedKeys))st.trackedKeys={};
-const save=()=>{if(remoteMode)return;try{localStorage.setItem('scan1',JSON.stringify(st))}catch(e){}};
+const save=()=>{if(remoteMode)return;try{localStorage.setItem(browserFallbackActive?'crypto_browser_fallback_v1':'scan1',JSON.stringify(st))}catch(e){}};
 const IDS=['ex','acct','risk','fee','minvol','topn'];
 if(st.set.v!==4){st.set.v=4;st.set.topn=600;st.set.minvol=0;st.set.ex='bybit';save()}
 IDS.forEach(i=>{if(st.set[i]!=null)$(i).value=st.set[i]});
@@ -384,7 +400,7 @@ async function scan(){
   busy=true;const t0=Date.now();let wait=300;
   try{
     const tk=await getTickers();
-    const list=tk.filter(x=>x.symbol.endsWith('USDT')&&!/[_-]/.test(x.symbol)&&x.vol>=n('minvol')*1e6&&M[x.symbol]&&M[x.symbol].p>0).sort((a,b)=>b.vol-a.vol).slice(0,n('topn'));
+    const list=tk.filter(x=>x.symbol.endsWith('USDT')&&!/[_-]/.test(x.symbol)&&x.vol>=n('minvol')*1e6&&M[x.symbol]&&M[x.symbol].p>0).sort((a,b)=>b.vol-a.vol).slice(0,browserFallbackActive?Math.min(30,n('topn')):n('topn'));
     const res={};list.forEach(x=>res[x.symbol]={sym:x.symbol,chg:x.chg,vol:x.vol,status:'none'});
     R={};scanFailures=0;render();
     await pool(list,async x=>{
@@ -726,6 +742,8 @@ function render(){
       'Hide simulated trades and coin rows only in this browser. To clear source data on all devices use Windows desktop app.';
   }else{
     $('serverMode').hidden=true;$('settingsPanel').hidden=false;
+    $('fallbackNotice').hidden=!browserFallbackActive;
+    if(browserFallbackActive)$('stat').textContent='Browser-only scan (limited to 30 coins; active while this window stays open) · '+L.length+' coin results';
     $('clearHistory').disabled=false;$('clearAllTrades').disabled=false;
     $('clearHistory').textContent='Clear closed history';
     $('clearAllTrades').textContent='Clear all simulated trades';
@@ -1022,7 +1040,35 @@ function adoptLaptop(snapshot,source,online,lastSeen){
  }
  render();return true;
 }
+function activateBrowserFallback(){
+ if(browserFallbackActive)return;
+ browserFallbackActive=true;remoteMode=false;remoteSource='browser';
+ remoteOnline=false;remoteMarketFresh=false;scanMeta=null;
+ R={};M={};lastScan=null;err='';
+ // Never merge the Windows history into browser-only simulation.
+ const localSettings=st.set||{},pins=Array.isArray(st.pins)?st.pins:[];
+ try{
+   const old=JSON.parse(localStorage.getItem('crypto_browser_fallback_v1')||'{}');
+   st={open:Array.isArray(old.open)?old.open:[],
+     hist:Array.isArray(old.hist)?old.hist:[],
+     pins:Array.isArray(old.pins)?old.pins:pins,
+     trackedKeys:old.trackedKeys&&typeof old.trackedKeys==='object'?old.trackedKeys:{},
+     pending:{},set:localSettings};
+ }catch(_){st={open:[],hist:[],pins,trackedKeys:{},pending:{},set:localSettings};}
+ $('fallbackNotice').hidden=false;
+ $('topn').value='30';
+ render();startBrowserScanner();
+}
+function startBrowserScanner(){
+ if(browserScannerStarted)return;
+ browserScannerStarted=true;
+ render();scan();
+ if(EX()==='binance')ws();
+ else setInterval(async()=>{if(remoteMode||Date.now()<banUntil||busy)return;
+   try{await getTickers()}catch(_){}},10000);
+}
 async function remotePoll(){
+ if(browserFallbackActive)return;
  const local=!!window.CRYPTO_LOCAL_SERVER;
  const origin=local?'':'https://crypto-signal-desk-market-data.onrender.com';
  const endpoint=local?'/api/state':'/laptop/state';
@@ -1031,32 +1077,50 @@ async function remotePoll(){
   let data;
   try{
    const response=await fetch(origin+endpoint,{cache:'no-store',signal:controller.signal});
-   if(!response.ok)throw Error('Remote scanner '+response.status);
+   if(!response.ok)throw Error('Scanner response HTTP '+response.status);
    data=await response.json();
   }finally{clearTimeout(timer)}
   if(local){
-    // A successful localhost response proves the laptop server is running.
-    // Market-feed freshness is tracked separately from server connectivity.
-    adoptLaptop(data,'local',true,Date.now());
-  }else if(data.snapshot){
-    adoptLaptop(data.snapshot,'cloud',!!data.connected,data.lastSeen);
-  }else if(remoteMode&&remoteSource==='cloud'){
-    remoteOnline=false;render();
+    if(!adoptLaptop(data,'local',true,Date.now()))throw Error('Invalid laptop scanner response');
+  }else if(data?.snapshot&&data.connected){
+    if(!adoptLaptop(data.snapshot,'cloud',true,data.lastSeen))
+      throw Error('Invalid online scanner response');
+  }else{
+    // Stale laptop mirrors never count as active scanner connections.
+    activateBrowserFallback();
   }
  }catch(e){
-  if(remoteMode){remoteOnline=false;render()}
+  if(local){
+    remoteOnline=false;
+    $('serverMode').hidden=false;
+    $('serverMode').textContent='Local scanner unavailable. Open the online app for browser-only scanning: https://crypto-signal-desk.onrender.com';
+    render();
+  }else activateBrowserFallback();
  }
 }
 async function begin(){
  await remotePoll();
- if(!remoteMode){
-   render();scan();
-   if(EX()==='binance')ws();
-   else setInterval(async()=>{if(remoteMode||Date.now()<banUntil||busy)return;
-     try{await getTickers()}catch(e){}},5000);
- }
+ if(!remoteMode)startBrowserScanner();
  setInterval(remotePoll,8000);
  setInterval(()=>{if(!remoteMode)monitor();render()},5000);
+}
+window.addEventListener('beforeinstallprompt',event=>{
+ event.preventDefault();installPrompt=event;
+ $('installAppBtn').textContent='Install desktop app';
+});
+$('installAppBtn').addEventListener('click',async()=>{
+ if(installPrompt){
+   const prompt=installPrompt;installPrompt=null;
+   try{await prompt.prompt();await prompt.userChoice;}catch(_){}
+ }else{
+   window.alert('In Microsoft Edge: click the three-dot menu, choose Apps, then Install this site as an app. This uses the trusted browser installer; no downloaded CMD file is needed.');
+ }
+});
+window.addEventListener('appinstalled',()=>{
+ $('installAppBtn').hidden=true;
+});
+if('serviceWorker' in navigator && location.protocol==='https:'){
+ navigator.serviceWorker.register('/sw.js').catch(()=>{});
 }
 begin();
 </script>
