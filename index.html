@@ -278,7 +278,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 
 <section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins await 15m and 5m RSI support, 1m accumulation and manipulation, then a 1m FVG retest with a closed directional candle and volume. Final TP stays 3R; targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 <section id="tradeResultsPanel"><h2>Automatic trades & results <span><button id="allResults" type="button" hidden>Show all results</button> <button id="clearHistory" type="button">Clear closed history</button> <button id="clearAllTrades" type="button" title="Clear open AND closed simulated trades and current coin analysis; never touches real Binance positions">Clear all simulated trades</button> <button id="csv" type="button">Export all CSV</button></span></h2>
-  <p class="mut" style="font-size:12px">Open and closed simulated trades are shown together. "Clear closed history" keeps open trades; "Clear all simulated trades" also resets open simulations and current scanner coin rows (fresh scan results can appear again). Neither closes real Binance positions.</p>
+  <p class="mut" style="font-size:12px">Open-trade Now, R and USDT P&amp;L use exchange quotes less than 45 seconds old and are estimates, not guaranteed fills or realized Binance balances. Stale quotes disable manual simulated closes. Open and closed simulated trades are shown together. "Clear closed history" keeps open trades; "Clear all simulated trades" also resets open simulations and current scanner coin rows (fresh scan results can appear again). Neither closes real Binance positions.</p>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
 
 <p class="mut" style="font-size:12px">The laptop server tracks simulated RSI(14) scalping entries: 15m trend, 5m momentum and 1m accumulation, liquidity manipulation and FVG retest candle with volume. No monthly/weekly/daily RSI requirements. Final TP at 3R; real Binance orders disabled. Distribution is the anticipated 3R target. Real Binance order placement is disabled.</p>
@@ -356,11 +356,34 @@ const K=async(s,iv,l)=>{
   if(EX()==='bybit'){const j=await J(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${s}&interval=${BIV[iv]}&limit=${l}`);const bars=j.result.list.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5],q:+k[6],buyq:null})).reverse();HTFCACHE.set(key,{at:Date.now(),bars});return bars}
   const bars=(await J(`${B}klines?symbol=${s}&interval=${iv}&limit=${l}`,l<100?1:2)).map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5],q:+k[7],buyq:+k[10]}));HTFCACHE.set(key,{at:Date.now(),bars});return bars};
 async function getTickers(){
-  if(EX()==='bybit'){const j=await J('https://api.bybit.com/v5/market/tickers?category=linear');
-    return j.result.list.map(x=>{M[x.symbol]={p:+x.markPrice||+x.lastPrice,fr:+x.fundingRate*100,at:Date.now(),source:'bybit'};return{symbol:x.symbol,chg:+x.price24hPcnt*100,vol:+x.turnover24h}})}
+  if(EX()==='bybit'){
+    const j=await J('https://api.bybit.com/v5/market/tickers?category=linear');
+    if(!Array.isArray(j?.result?.list)||!j.result.list.length)throw Error('Bybit quotes unavailable');
+    const at=Date.now(),tickers=j.result.list.map(x=>{
+      const price=+x.markPrice||+x.lastPrice;
+      if(price>0)M[x.symbol]={p:price,fr:+x.fundingRate*100,at,source:'bybit'};
+      return{symbol:x.symbol,chg:+x.price24hPcnt*100,vol:+x.turnover24h}
+    });
+    lastQuoteRefreshAt=at;lastQuoteRefreshError='';return tickers;
+  }
   const[tk,pi]=await Promise.all([J(B+'ticker/24hr',40),J(B+'premiumIndex',10)]);
-  pi.forEach(x=>M[x.symbol]={p:+x.markPrice,fr:+x.lastFundingRate*100,at:Date.now(),source:'binance'});
-  return tk.map(x=>({symbol:x.symbol,chg:+x.priceChangePercent,vol:+x.quoteVolume}))}
+  if(!Array.isArray(tk)||!Array.isArray(pi)||!tk.length||!pi.length)
+    throw Error('Binance quotes unavailable');
+  const at=Date.now();
+  pi.forEach(x=>{
+    const price=+x.markPrice;
+    if(price>0)M[x.symbol]={p:price,fr:+x.lastFundingRate*100,at,source:'binance'};
+  });
+  lastQuoteRefreshAt=at;lastQuoteRefreshError='';
+  return tk.map(x=>({symbol:x.symbol,chg:+x.priceChangePercent,vol:+x.quoteVolume}))
+}
+async function refreshBrowserQuotes(){
+ if(remoteMode||quoteRefreshRunning||Date.now()<banUntil||document.hidden)return;
+ quoteRefreshRunning=true;
+ try{await getTickers();monitor()}
+ catch(e){lastQuoteRefreshError=String(e?.message||e).slice(0,100)}
+ finally{quoteRefreshRunning=false;render()}
+}
 // Remote laptop snapshots replace browser-only tracking when available.
 let browserFallbackActive=false, browserScannerStarted=false, installPrompt=null;
 let remoteMode=!!window.CRYPTO_LOCAL_SERVER||localStorage.getItem('cryptoLaptopActivated')==='1',
@@ -1098,8 +1121,8 @@ function startBrowserScanner(){
  browserScannerStarted=true;
  render();scan();
  if(EX()==='binance')ws();
- else setInterval(async()=>{if(remoteMode||Date.now()<banUntil||busy)return;
-   try{await getTickers()}catch(_){}},10000);
+ setInterval(refreshBrowserQuotes,12000);
+ refreshBrowserQuotes();
 }
 async function remotePoll(){
  if(browserFallbackActive)return;
