@@ -1,0 +1,18 @@
+{
+  "name": "Crypto Signal Desk — RSI AMD FVG",
+  "short_name": "Crypto Signal Desk",
+  "description": "RSI(14), accumulation, manipulation and 5-minute FVG simulation-only signal dashboard.",
+  "start_url": "/?browser=1",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#101923",
+  "theme_color": "#101923",
+  "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
