@@ -276,7 +276,18 @@ function signalKey(r){
 }
 function register(r){
   if(r.status!=='confirm'||!r.plan)return false;
-  const p=r.plan,key=signalKey(r);
+  const p={...r.plan},key=signalKey(r);
+  // Record a simulated fill only at the CURRENT fresh market price, never
+  // pretend an earlier 5m closing price was executed.
+  const quote=state.markets[r.sym];
+  if(!quote||Date.now()-quote.at>30000)return false;
+  const observed=quote.p;
+  const drift=Math.abs(observed-p.en),gapWidth=Math.abs((p.fvgZone?.high||p.en)-(p.fvgZone?.low||p.en));
+  if(drift>Math.max(p.en*.005,gapWidth*1.5))return false;
+  const sign=r.dir==='long'?1:-1,dist=sign*(observed-p.stop);
+  if(!(dist>0))return false;
+  p.en=observed;p.sp=dist/observed*100;p.tp1=observed+sign*3*dist;
+  p.tp2=p.tp1;
   if(!key||state.trackedKeys[key]||
      Number(r.plan?.ck)<=Number(state.simTradesClearEpoch||0))return false;
   const timestamp=Number(p.ck),now=Date.now();
@@ -772,9 +783,7 @@ const server=http.createServer((req,res)=>{
         }else if(action==='verify'){
           await liveBroker.verify();answer=liveBroker.status();
         }else if(action==='arm'){
-          if(config.exchange!=='binance')
-            throw Error('Select Binance in the scanner settings before activating live trading');
-          answer=await liveBroker.arm(data.phrase);
+          throw Error('Real Binance trading is disabled in this simulation-only RSI AMD FVG release');
         }else if(action==='disarm'){
           liveBroker.disarm('Paused from local desktop');answer=liveBroker.status();
         }else if(action==='settings'){
