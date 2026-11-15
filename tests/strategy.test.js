@@ -16,12 +16,12 @@ assert.equal(strategy.rsi(bars).at(-1),100,'continuous gains RSI=100');
 assert.equal(strategy.rsi(bars.map(x=>({...x,c:100}))).at(-1),50,'flat RSI=50');
 const falling=bars.map((x,i)=>({...x,c:200-i}));
 assert.equal(strategy.rsi(falling).at(-1),0,'continuous losses RSI=0');
-const empty=strategy.evaluate({barsMonthly:[],barsWeekly:[],barsDaily:[],bars5:[],mark:100});
+const empty=strategy.evaluate({barsMonthly:[],barsWeekly:[],barsDaily:[],bars5:[],bars1:[],mark:100});
 assert.equal(empty.status,'none');
 assert.equal(empty.executionReady,false);
-const now=Date.now(),n=127,base=now-n*300000;
+const now=Date.now(),n=127,base=now-(n+1)*60000;
 const longBars=Array.from({length:n},(_,i)=>({
-  t:base+i*300000,o:100,c:100.02,h:100.2,l:99.8,v:100
+  t:base+i*60000,o:100,c:100.02,h:100.2,l:99.8,v:100
 }));
 Object.assign(longBars[118],{o:100,c:99.9,h:100.1,l:99.4});
 Object.assign(longBars[119],{o:100,c:100.05,h:100.3,l:99.8});
@@ -31,6 +31,7 @@ for(let i=122;i<=124;i++)Object.assign(longBars[i],
   {o:100.95,c:100.9,h:101.05,l:100.8});
 Object.assign(longBars[125],{o:100.41,c:100.7,h:100.75,l:100.35,v:250});
 Object.assign(longBars[126],{o:100.75,c:100.78,h:100.9,l:100.7});
+const fiveMin=Array.from({length:127},(_,i)=>({t:now-(127-i)*300000,o:100,c:100.02,h:100.2,l:99.8,v:100}));
 const higher=Array.from({length:50},(_,i)=>({
   t:now-(50-i)*86400000,o:100,c:100+i,h:101+i,l:99+i,v:100
 }));
@@ -43,7 +44,7 @@ function isolated(side){
       'const rm=Array(barsMonthly.length).fill(60),rw=Array(barsWeekly.length).fill(60),rd=Array(barsDaily.length).fill(42),r5=Array(bars5.length).fill(35);r5[r5.length-10]=25;r5[r5.length-9]=35;':
       'const rm=Array(barsMonthly.length).fill(40),rw=Array(barsWeekly.length).fill(40),rd=Array(barsDaily.length).fill(58),r5=Array(bars5.length).fill(65);r5[r5.length-10]=75;r5[r5.length-9]=65;'
   ).replace('const dv=divergence(bars5,r5,side,bars5.length);',
-    "const dv=side==='"+side+"'?{ok:true,a:60,b:90}:{ok:false};");
+    "const dv=side==='"+side+"'?{ok:true,a:60,b:120}:{ok:false};");
   assert.notEqual(mocked,raw,'test hooks found');
   const context={window:{}};
   vm.runInNewContext(mocked,context);
@@ -55,13 +56,14 @@ for(const side of ['long','short']){
     longBars.map(x=>({...x,o:200-x.o,c:200-x.c,h:200-x.l,l:200-x.h}));
   const evalBars=arr=>model.evaluate({
     barsMonthly:higher,barsWeekly:higher,barsDaily:higher,
-    bars5:arr,mark:100,now
+    bars5:fiveMin,bars1:arr,mark:100,now
   });
   const found=evalBars(candles);
   assert.equal(found.status,'confirm',side+' positive setup');
   assert.equal(found.side,side);
   assert.equal(found.executionReady,false,'always simulation');
-  assert.equal(found.plan.timeframe,'5m');
+  assert.equal(found.plan.timeframe,'1m');
+  assert.equal(found.strategyVersion,'RSI14_AMD_FVG_ENTRY_1M_V2');
   assert.ok(Math.abs(Math.abs(found.plan.tp2-found.plan.en)/
     Math.abs(found.plan.en-found.plan.stop)-3)<1e-9,'3R target');
   const noVolume=candles.map(x=>({...x}));
@@ -75,4 +77,4 @@ for(const side of ['long','short']){
 const server=fs.readFileSync(path.join(root,'laptop-server.js'),'utf8');
 assert.ok(!server.includes('liveBroker.onSignal('),'no live order submit path');
 assert.ok(!server.includes('liveBroker.arm(data.phrase)'),'live arm is blocked');
-console.log('PASS: RSI basics, long/short FVG entry fixtures, volume/sweep veto, 3R, simulation-only checks');
+console.log('PASS: RSI basics, long/short 1m FVG entry fixtures, volume/sweep veto, 3R, simulation-only checks');
