@@ -31,7 +31,7 @@
     {ok:false,t:'Accumulation: range compression near previous-day level'},
     {ok:false,t:'Reversal closes beyond accumulation neckline'},
     {ok:false,t:'Directional three-candle 5m FVG after neckline breakout'},
-    {ok:false,t:'Subsequent pullback fills >=50% of FVG'},
+    {ok:false,t:'Subsequent neckline-area pullback fills >=50% of FVG'},
     {ok:false,t:'After pullback, CLOSED 5m candle returns beyond SAME neckline'}
    ];
    let setup=null,stage=0;
@@ -80,7 +80,10 @@
         const midpoint=(gapLow+gapHigh)/2;
         const touchedHalf=long?(+bar.l<=midpoint&&+bar.h>=gapLow):
                                (+bar.h>=midpoint&&+bar.l<=gapHigh);
-        if(touchedHalf&&retestedAt<0)retestedAt=k;
+        // Pullback must revisit the neckline area AND fill >=50% of FVG.
+        const necklineRetest=long?(+bar.l<=neckline+atr*.25):
+                                  (+bar.h>=neckline-atr*.25);
+        if(touchedHalf&&necklineRetest&&retestedAt<0)retestedAt=k;
         if(retestedAt<0)continue;
         checks[4].ok=true;stage=Math.max(stage,5);
         // No confirmation until price closes back across the SAME original
@@ -103,7 +106,7 @@
           previousDayLevel:level,previousDayHigh:pdh,previousDayLow:pdl,
           neckline,necklineBreakAt:+c.t,fvgRetestAt:+bars5[retestedAt].t,
           fvgZone:{low:gapLow,high:gapHigh},fvgFormedAt:+c.t,
-          fvgFilledAt:+bar.t,firstSweepPrice:long?+m.l:+m.h,
+          fvgFilledAt:+bars5[retestedAt].t,firstSweepPrice:long?+m.l:+m.h,
           secondSweepPrice:long?+m.l:+m.h,
           structureExtreme:long?+m.l:+m.h,researchOnly:true}};
       }
