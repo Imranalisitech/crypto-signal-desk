@@ -339,7 +339,9 @@ async function browserRequestPace(){
     const delay=Math.max(0,nextBrowserRequestAt-Date.now());
     if(delay)await sleep(delay);
     if(Date.now()<banUntil)throw Error('Exchange cooldown active');
-    nextBrowserRequestAt=Date.now()+(EX()==='bybit'?500:350);
+    // Controlled ~7 Bybit or ~5 Binance requests/sec, instead of 2/sec.
+    // Keep this shared queue for rate-limit safety and the full coin universe.
+    nextBrowserRequestAt=Date.now()+(EX()==='bybit'?145:200);
   }finally{release()}
 }
 const J=async(u,w=1)=>{
@@ -352,7 +354,10 @@ const J=async(u,w=1)=>{
 const K=async(s,iv,l)=>{
   const key=EX()+':'+s+':'+iv+':'+l,old=HTFCACHE.get(key);
   const ttl=iv==='1M'?43200000:iv==='1w'?10800000:iv==='1d'?1200000:iv==='15m'?120000:iv==='5m'?45000:10000;
-  if(old&&Date.now()-old.at<ttl)return old.bars;
+  // Completed prior-day OHLC cannot change during the same UTC day.
+  // Reuse daily candles within that UTC day; fetch again across UTC rollover.
+  const sameUtcDay=old&&new Date(old.at).toISOString().slice(0,10)===new Date().toISOString().slice(0,10);
+  if(old&&((iv==='1d'&&sameUtcDay)||(iv!=='1d'&&Date.now()-old.at<ttl)))return old.bars;
   if(EX()==='bybit'){const j=await J(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${s}&interval=${BIV[iv]}&limit=${l}`);const bars=j.result.list.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5],q:+k[6],buyq:null})).reverse();HTFCACHE.set(key,{at:Date.now(),bars});return bars}
   const bars=(await J(`${B}klines?symbol=${s}&interval=${iv}&limit=${l}`,l<100?1:2)).map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5],q:+k[7],buyq:+k[10]}));HTFCACHE.set(key,{at:Date.now(),bars});return bars};
 async function getTickers(){
@@ -453,6 +458,7 @@ async function scan(){
     const list=tk.filter(x=>x.symbol.endsWith('USDT')&&!/[_-]/.test(x.symbol)&&x.vol>=n('minvol')*1e6&&M[x.symbol]&&M[x.symbol].p>0).sort((a,b)=>b.vol-a.vol).slice(0,browserFallbackActive?Math.min(500,Math.max(1,Math.trunc(n('topn')||500))):n('topn'));
     const res={};list.forEach(x=>res[x.symbol]={sym:x.symbol,chg:x.chg,vol:x.vol,status:'none'});
     R={};scanFailures=0;render();
+    // More workers overlap network latency; request pacing remains centralized.
     await pool(list,async x=>{
  const s=x.symbol,r=res[s];
  const [daily,five]=await Promise.all([K(s,'1d',5),K(s,'5m',190)]);
@@ -464,7 +470,7 @@ async function scan(){
  Object.assign(r,signal);
  r.dir=signal.side;r.G=signal.checks||[];
  if(r.status==='confirm'&&r.plan)r.plan.ck=signal.pattern.confirmTime;
- },browserFallbackActive?3:10,(x,failure)=>{
+ },browserFallbackActive?8:10,(x,failure)=>{
       if(remoteMode)return;
       const r=res[x.symbol];
       if(failure){r.status='error';scanFailures++}
@@ -476,7 +482,7 @@ async function scan(){
     });
     if(remoteMode)return;
     if(Date.now()<banUntil){lim=false;wait=(banUntil-Date.now())/1000+5;err=banMsg()}
-    else{lastScan=new Date();err='';dur=Math.round((Date.now()-t0)/1000);if(lim){lim=false;wait=90;err=XN()+' rate limit reached, so the scanner is slowing down. Reduce the scan universe or the minimum trading volume threshold.'}}
+    else{lastScan=new Date();err='';dur=Math.round((Date.now()-t0)/1000);if(lim){lim=false;wait=90;err=XN()+' rate limit reached. The scanner is respecting the exchange cooldown; full scan quantity is unchanged.'}}
 
   }catch(e){if(Date.now()<banUntil){err=banMsg();wait=(banUntil-Date.now())/1000+5}else err='Could not load '+XN()+' data: '+e.message+'. Check your connection or VPN; retrying.'}
   busy=false;clearTimeout(liveRenderTimer);liveRenderTimer=null;render();if(!remoteMode)setTimeout(scan,wait*1000);
