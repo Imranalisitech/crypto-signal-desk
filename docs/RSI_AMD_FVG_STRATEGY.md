@@ -1,96 +1,34 @@
-# Crypto Signal Desk — RSI(14) + AMD + 1m FVG entry (simulation only)
+# Crypto Signal Desk — RSI(14) AMD/FVG Scalping V3 (simulation only)
 
-## Origin and scope
+## Current active model
 
-This model combines the RSI principles in the user's November 2026 video
-transcript with the user's requested **Accumulation → Manipulation → FVG entry
-→ Distribution target** framework.
+**Direction:** 15-minute RSI(14): LONG only when RSI > 50; SHORT only when RSI < 50.
 
-**Transcript-derived RSI rules:** RSI(14) measures momentum; RSI > 50 is
-bullish, RSI < 50 bearish; entering RSI 70 or 30 is NOT itself an opposite-side
-entry; recovery above 30 or drop below 70, price/RSI divergence, aligned
-higher-timeframe trends, confirmation candles and volume matter. The source
-presents a bullish strategy using monthly/weekly RSI >50 and daily RSI ~40–45.
+**Momentum:** 5-minute RSI(14) must be >= 45 for LONG or <= 55 for SHORT.
 
-**Implementation additions, not verbatim transcript rules:** mirrored bearish
-daily RSI 55–60, 16-candle accumulation range, sweep/reclaim, FVG gap sizing,
-volume multiplier, staleness limits, 3R target, and explicit 1m entry candle
-definitions.
+**1-minute setup:** RSI(14) must be >= 46 for LONG or <= 54 for SHORT. 1-minute RSI divergence and crosses back through 30/70 are additional confluences, not mandatory blockers. This is a deliberate **scalping adaptation**, not a direct quote from the original RSI transcript.
 
-## Exact programmatic rules
+**Accumulation:** A 12-candle 1m range narrower than 3.5% of midpoint. **Manipulation:** a 1m candle wicks beyond range high/low, then closes back inside. **Displacement:** within 12 bars, a directional three-candle FVG forms; the middle candle's body exceeds 1.15x the accumulation average. **Entry:** a later 1m candle revisits the FVG, closes in the trade direction and has volume >= 1.05x the preceding five 1m candles. **Distribution:** anticipated move toward 3R TP. SL is beyond manipulation wick with a small buffer, capped at 2% of the planned entry price.
 
-- RSI: Wilder's smoothed 14-period RSI, calculated separately on **completed** monthly (1M), weekly (1w), daily (1d), and 5-minute (5m) candles. The 1m series is used only for AMD/FVG entry detection.
-- LONG trend: monthly and weekly RSI both strictly above 50; latest daily RSI
-  40–45 inclusive.
-- SHORT trend: monthly and weekly RSI both strictly below 50; latest daily RSI
-  55–60 inclusive (mirrored design assumption).
-- Intraday divergence: two confirmed pivot lows where the latter price low
-  is lower but the RSI low higher by >1 point (LONG); two confirmed pivot highs
-  where price is higher and RSI lower by >1 point (SHORT).
-- LONG must have crossed RSI back above 30 from below in the last 30 closed
-  5m candles. SHORT must have crossed back below 70 from above.
-- Accumulation: 16 consecutive 1m candles with measurable high-low range
-  narrower than 6% of its midpoint.
-- Manipulation: a 1m candle wicks through the accumulation low (LONG) or
-  high (SHORT), but **closes back inside** the accumulated range.
-- The confirmed RSI divergence must precede this manipulation candle and
-  be within the preceding 40 completed 5m candles (RSI pivots are on 5m, not 1m).
-- Within 14 candles after manipulation, three consecutive 1m candles
-  establish a directionally aligned FVG: bullish third low > first high,
-  bearish third high < first low. Its width must exceed 0.01% of range midpoint.
-  The middle candle has a body >1.3x the accumulation average body and
-  closes beyond the range in the intended trade direction.
-- Price must **later** return into the FVG. The 1m retest candle must close
-  in the trade direction with a hammer/engulfing-like directional body and
-  volume >1.1x the prior five 1m bars' average volume. This is the
-  **CONFIRMED simulated entry event**. No extra 25% TP progress gate.
-- Initial stop is beyond the swept manipulation extreme plus a 0.015% price
-  buffer. Target is a single **3R** at the observed simulated entry price.
-  Distribution is the anticipated move toward this target, NOT a mandatory
-  pre-entry phase and not a guaranteed market outcome.
-- Only a near-current completed signal is eligible for new simulated tracking;
-  both stop-wick invalidation and fresh-price limits apply. Previously
-  recorded simulated and real-account history is not automatically erased.
-- Profit locks from the earlier model remain unchanged: at 50% progress to
-  TP, protect 5% of planned entry-TP price distance; at 75%, protect 50%.
-  These are not guaranteed fills.
+The 25% move-toward-TP gate is removed. Both LONG and SHORT setups run in **simulation-only** mode. Real Binance order submission and arming remain blocked.
 
-## Live-order safety
+## Why the previous model was too restrictive
 
-The deployed scanner calls only `register(result)` for simulation.
-The Binance real-order call has been removed. The server rejects requests to
-`/api/binance-live/arm`, and a locally started broker is disarmed.
-**Existing Binance positions or exchange orders are not automatically closed.**
-Users must review existing exchange positions in Binance.
+The older V2 required RSI alignment across monthly, weekly, daily and 5-minute charts, daily RSI confined to 40–45 or 55–60, and a strict RSI divergence plus 30/70 recovery before even evaluating the 1m AMD/FVG. These filters are more suitable for selective intraday/swing opportunities than active 1-minute scalps.
 
-## Limitations
+## Source and implementation distinction
 
-- Assets without at least 20 *completed monthly* candles cannot pass strict
-  validation. Other history minimums: 20 weekly, 20 daily, 100 five-minute and 100 one-minute.
-- The scan is intentionally strict and might produce few or no signals.
-- Scanning many symbols across four timeframes can take significant time,
-  especially on the first run; higher timeframe candles are cached.
-- A 1m retest candle is identified only after closing. The actual observed
-  simulated entry can differ from the candle close. Excessive price drift
-  prevents registration.
-- Scanner price sampling can miss brief intra-candle stops or gaps. Signals
-  are hypotheses, not evidence of institutional orders or proven win rate.
-- Tests include unit/controlled fixture scenarios, **not historical or
-  live-exchange backtests**. Do not use this as evidence of profitability.
+The user's RSI transcript explains RSI(14), directional RSI >/< 50, divergence, 30/70 recovery and multi-timeframe reading. Accumulation → Manipulation → FVG → Distribution and the numerical scalping thresholds are **user-requested methodology plus engineering assumptions**, not a formula given verbatim in the video.
+
+## Trade limits and caveats
+
+- New setups require only completed 15m, 5m and 1m bars. 40 15m, 40 5m and 90 1m completed bars are the minimum.
+- The browser fallback can attempt up to 500 eligible USDT perpetual markets but may require many minutes because of exchange rate limits. It runs only while the app stays open.
+- A completed scan is not a guarantee of timely simulated entries: the observed price may have moved by the time the scanner reaches a coin. The simulated-trade tracker refuses fills that are stale or too far from signal price.
+- More qualifying setups are possible than with the strict V2, but higher frequency also risks false signals; no historical win rate or full-day forward performance has been established.
+- An entry signal is not proof of institutional activity or a guaranteed profit. Real trading stays disabled.
+- Existing stored history and prior-model open simulations are preserved; the current active strategy has a new version tag so signals are not silently mixed.
 
 ## Testing
 
-Run `node tests/strategy.test.js` (Node.js >=20). This covers RSI extremes,
-closed-history guardrails, LONG/SHORT AMD/FVG fixtures under controlled RSI
-inputs, volume and liquidity-sweep rejection, 3R calculations and static
-real-order safety checks.
-
-## Local installation
-
-After stopping the laptop scanner, download the latest project source and
-replace only application code files. Preserve `laptop-config.json`,
-`laptop-state.json`, the locally encrypted Binance credential vault, logs,
-and backups. Restart with `node laptop-server.js` after running the tests.
-
-## November 15 correction — 1-minute entry
-The user clarified that the AMD entry was always intended for the **1-minute** chart. The 5-minute RSI divergence and RSI 30/70 recovery filters remain, but accumulation, manipulation sweep, directional FVG and its volume-confirmed candle are detected on completed 1-minute bars. The strategy version is `RSI14_AMD_FVG_ENTRY_1M_V2` so old 5-minute confirmations are not mislabeled as new ones. Existing recorded history is retained.
+Run `node tests/strategy.test.js` in the source directory. The fixture checks LONG and SHORT scalp structure, mandatory volume and sweep, RSI(14) arithmetic, a 3R planned target and no real Binance submission path. The test scenarios use controlled RSI inputs, so they do not establish real-market frequency or profitability.
