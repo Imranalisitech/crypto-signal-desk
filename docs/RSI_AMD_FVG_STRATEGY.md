@@ -1,4 +1,4 @@
-# Crypto Signal Desk — RSI(14) + AMD + 5m FVG (simulation only)
+# Crypto Signal Desk — RSI(14) + AMD + 1m FVG entry (simulation only)
 
 ## Origin and scope
 
@@ -14,13 +14,12 @@ presents a bullish strategy using monthly/weekly RSI >50 and daily RSI ~40–45.
 
 **Implementation additions, not verbatim transcript rules:** mirrored bearish
 daily RSI 55–60, 16-candle accumulation range, sweep/reclaim, FVG gap sizing,
-volume multiplier, staleness limits, 3R target, and explicit 5m candle
+volume multiplier, staleness limits, 3R target, and explicit 1m entry candle
 definitions.
 
 ## Exact programmatic rules
 
-- RSI: Wilder's smoothed 14-period RSI, calculated separately on **completed**
-  monthly (1M), weekly (1w), daily (1d), and 5-minute (5m) candles.
+- RSI: Wilder's smoothed 14-period RSI, calculated separately on **completed** monthly (1M), weekly (1w), daily (1d), and 5-minute (5m) candles. The 1m series is used only for AMD/FVG entry detection.
 - LONG trend: monthly and weekly RSI both strictly above 50; latest daily RSI
   40–45 inclusive.
 - SHORT trend: monthly and weekly RSI both strictly below 50; latest daily RSI
@@ -30,20 +29,20 @@ definitions.
   where price is higher and RSI lower by >1 point (SHORT).
 - LONG must have crossed RSI back above 30 from below in the last 30 closed
   5m candles. SHORT must have crossed back below 70 from above.
-- Accumulation: 16 consecutive 5m candles with measurable high-low range
+- Accumulation: 16 consecutive 1m candles with measurable high-low range
   narrower than 6% of its midpoint.
-- Manipulation: a 5m candle wicks through the accumulation low (LONG) or
+- Manipulation: a 1m candle wicks through the accumulation low (LONG) or
   high (SHORT), but **closes back inside** the accumulated range.
 - The confirmed RSI divergence must precede this manipulation candle and
-  be within the preceding 40 completed 5m candles.
-- Within 14 candles after manipulation, three consecutive 5m candles
+  be within the preceding 40 completed 5m candles (RSI pivots are on 5m, not 1m).
+- Within 14 candles after manipulation, three consecutive 1m candles
   establish a directionally aligned FVG: bullish third low > first high,
   bearish third high < first low. Its width must exceed 0.01% of range midpoint.
   The middle candle has a body >1.3x the accumulation average body and
   closes beyond the range in the intended trade direction.
-- Price must **later** return into the FVG. The 5m retest candle must close
+- Price must **later** return into the FVG. The 1m retest candle must close
   in the trade direction with a hammer/engulfing-like directional body and
-  volume >1.1x the prior five 5m bars' average volume. This is the
+  volume >1.1x the prior five 1m bars' average volume. This is the
   **CONFIRMED simulated entry event**. No extra 25% TP progress gate.
 - Initial stop is beyond the swept manipulation extreme plus a 0.015% price
   buffer. Target is a single **3R** at the observed simulated entry price.
@@ -67,11 +66,11 @@ Users must review existing exchange positions in Binance.
 ## Limitations
 
 - Assets without at least 20 *completed monthly* candles cannot pass strict
-  validation. Other history minimums: 20 weekly, 20 daily, 100 five-minute.
+  validation. Other history minimums: 20 weekly, 20 daily, 100 five-minute and 100 one-minute.
 - The scan is intentionally strict and might produce few or no signals.
 - Scanning many symbols across four timeframes can take significant time,
   especially on the first run; higher timeframe candles are cached.
-- A 5m retest candle is identified only after closing. The actual observed
+- A 1m retest candle is identified only after closing. The actual observed
   simulated entry can differ from the candle close. Excessive price drift
   prevents registration.
 - Scanner price sampling can miss brief intra-candle stops or gaps. Signals
@@ -92,3 +91,6 @@ After stopping the laptop scanner, download the latest project source and
 replace only application code files. Preserve `laptop-config.json`,
 `laptop-state.json`, the locally encrypted Binance credential vault, logs,
 and backups. Restart with `node laptop-server.js` after running the tests.
+
+## November 15 correction — 1-minute entry
+The user clarified that the AMD entry was always intended for the **1-minute** chart. The 5-minute RSI divergence and RSI 30/70 recovery filters remain, but accumulation, manipulation sweep, directional FVG and its volume-confirmed candle are detected on completed 1-minute bars. The strategy version is `RSI14_AMD_FVG_ENTRY_1M_V2` so old 5-minute confirmations are not mislabeled as new ones. Existing recorded history is retained.
