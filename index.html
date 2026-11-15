@@ -295,7 +295,8 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 const $=i=>document.getElementById(i),n=i=>parseFloat($(i).value);
 const f=(x,d=2)=>x==null||!isFinite(x)?'–':(+x).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
 const fp=x=>x==null?'–':f(x,x>=100?2:x>=1?4:6),nm=s=>s.replace('USDT','');
-const B='https://fapi.binance.com/fapi/v1/',EX=()=>$('ex').value,XN=()=>EX()==='bybit'?'Bybit':'Binance',BIV={'15m':'15','5m':'5','1m':'1'};
+const B='https://fapi.binance.com/fapi/v1/',EX=()=>$('ex').value,XN=()=>EX()==='bybit'?'Bybit':'Binance',BIV={'5m':'5','1d':'D','1w':'W','1M':'M'};
+const HTFCACHE=new Map();
 let banUntil=0,W=[];
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function gate(w){for(;;){const t=Date.now();W=W.filter(x=>t-x[0]<60000);if(W.reduce((a,x)=>a+x[1],0)+w<=1400)break;await sleep(400)}W.push([Date.now(),w])}
@@ -307,8 +308,11 @@ const J=async(u,w=1)=>{
   if(r.status===418||r.status===429||r.status===403){let t='';try{t=await r.text()}catch(e){}const m=/banned until (\d+)/.exec(t);setBan(m?+m[1]:Date.now()+(r.status===429?90000:EX()==='bybit'?600000:300000));throw new Error('HTTP '+r.status)}
   if(!r.ok)throw new Error('HTTP '+r.status);return r.json()};
 const K=async(s,iv,l)=>{
-  if(EX()==='bybit'){const j=await J(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${s}&interval=${BIV[iv]}&limit=${l}`);return j.result.list.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5],q:+k[6],buyq:null})).reverse()}
-  return(await J(`${B}klines?symbol=${s}&interval=${iv}&limit=${l}`,l<100?1:2)).map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5],q:+k[7],buyq:+k[10]}))};
+  const key=EX()+':'+s+':'+iv+':'+l,old=HTFCACHE.get(key);
+  const ttl=iv==='1M'?43200000:iv==='1w'?10800000:iv==='1d'?1200000:60000;
+  if(old&&Date.now()-old.at<ttl)return old.bars;
+  if(EX()==='bybit'){const j=await J(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${s}&interval=${BIV[iv]}&limit=${l}`);const bars=j.result.list.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5],q:+k[6],buyq:null})).reverse();HTFCACHE.set(key,{at:Date.now(),bars});return bars}
+  const bars=(await J(`${B}klines?symbol=${s}&interval=${iv}&limit=${l}`,l<100?1:2)).map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5],q:+k[7],buyq:+k[10]}));HTFCACHE.set(key,{at:Date.now(),bars});return bars};
 async function getTickers(){
   if(EX()==='bybit'){const j=await J('https://api.bybit.com/v5/market/tickers?category=linear');
     return j.result.list.map(x=>{M[x.symbol]={p:+x.markPrice||+x.lastPrice,fr:+x.fundingRate*100};return{symbol:x.symbol,chg:+x.price24hPcnt*100,vol:+x.turnover24h}})}
@@ -366,6 +370,14 @@ async function pool(items,fn,c=10,onDone=()=>{}){
   }));
 }
 
+function onlyClosed(bars,iv){
+  const now=Date.now()-1500;
+  return bars.filter(k=>{
+    const end=iv==='1M'?Date.UTC(new Date(k.t).getUTCFullYear(),new Date(k.t).getUTCMonth()+1,1):
+      k.t+(iv==='1w'?604800000:iv==='1d'?86400000:300000);
+    return Number.isFinite(k.t)&&Number.isFinite(k.c)&&end<=now;
+  });
+}
 async function scan(){
   if(remoteMode||busy)return;
   if(Date.now()<banUntil){err=banMsg();render();setTimeout(scan,banUntil-Date.now()+5000);return}
@@ -377,12 +389,11 @@ async function scan(){
     R={};scanFailures=0;render();
     await pool(list,async x=>{
  const s=x.symbol,r=res[s];
- const x15=await K(s,'15m',210);
- if(x15.length<66)return;
- const x1=await K(s,'1m',240);
- if(x1.length<36)return;
+ const [monthly,weekly,daily,five]=await Promise.all([
+   K(s,'1M',40),K(s,'1w',45),K(s,'1d',65),K(s,'5m',190)]);
  const settings={
-  bars15:x15.slice(0,-1),bars1:x1.slice(0,-1),
+  barsMonthly:onlyClosed(monthly,'1M'),barsWeekly:onlyClosed(weekly,'1w'),
+  barsDaily:onlyClosed(daily,'1d'),bars5:onlyClosed(five,'5m'),
   mark:M[s].p,account:n('acct'),risk:n('risk')
  };
  const signal=UnifiedStrategy.evaluate(settings);
@@ -394,12 +405,9 @@ async function scan(){
       const r=res[x.symbol];
       if(failure){r.status='error';scanFailures++}
       R[x.symbol]={...r};
-      const pending=Object.values(st.pending).find(p=>p.sym===x.symbol);
-      if(pending)R[x.symbol]={...pending.result,status:'watch',price:M[x.symbol]?.p||r.price};
       if(!failure&&r.status==='confirm'&&r.plan){
-        queueBrowserPriceConfirmation(r);
-        const pending=Object.values(st.pending).find(p=>p.sym===r.sym);
-        if(pending)R[r.sym]={...pending.result,status:'watch',price:M[r.sym]?.p||r.price};
+        const fresh=registerConfirmedTrade(r);
+        if(fresh)fire(r);
       }
     });
     if(remoteMode)return;
@@ -422,47 +430,16 @@ function signalKey(r){
   if(!r.sym||!['long','short'].includes(r.dir)||!(ck>0))return null;
   return [EX(),r.sym,r.dir,ck].join(':');
 }
-function queueBrowserPriceConfirmation(r){
-  const key=signalKey(r),p=r.plan,dir=r.dir==='long'?1:-1;
-  if(!key||st.trackedKeys[key]||st.pending[key]||!p)return;
-  if(!(dir*(p.tp2-p.en)>0&&dir*(p.en-p.stop)>0))return;
-  st.pending[key]={sym:r.sym,dir:r.dir,originalEntry:p.en,originalTarget:p.tp2,
-    threshold:p.en+.25*(p.tp2-p.en),result:{...r,status:'watch',ok:false,
-      reason:'Waiting for 25% favorable TP movement'}};save();
-}
-function monitorBrowserPending(){
-  for(const [key,pending] of Object.entries(st.pending)){
-    const p=pending.result.plan,px=M[pending.sym]?.p,dir=pending.dir==='long'?1:-1;
-    if(!(px>0)||!p)continue;
-    const progress=dir*(px-pending.originalEntry)/Math.abs(pending.originalTarget-pending.originalEntry);
-    if(dir*(px-p.stop)<=0){
-      delete st.pending[key];st.trackedKeys[key]=Date.now();
-      if(R[pending.sym])R[pending.sym]={...pending.result,plan:null,status:'watch',
-        reason:'Original stop breached before 25% confirmation'};
-      save();continue;
-    }
-    if(progress>=.25){
-      const risk=dir*(px-p.stop),now=Date.now();
-      if(!(risk>0)){delete st.pending[key];save();continue;}
-      const promoted={...pending.result,status:'confirm',ok:true,price:px,
-        analyzedAt:now,reason:'25% favorable progress confirmed; entry at observed price',
-        plan:{...p,en:px,sp:risk/px*100,tp1:px+dir*3*risk,tp2:px+dir*3*risk,
-          tp1pct:risk/px*300,tp2pct:risk/px*300,ck:now-60000,
-          originalSignalCandle:p.ck,referenceEntry:pending.originalEntry,
-          referenceTarget:pending.originalTarget,confirmationThreshold:pending.threshold}};
-      if(registerConfirmedTrade(promoted)){R[pending.sym]=promoted;fire(promoted);}
-      st.trackedKeys[key]=now;delete st.pending[key];save();
-    }else{
-      R[pending.sym]={...pending.result,status:'watch',price:px,
-        confirmationProgress:Math.max(0,progress),confirmationThreshold:pending.threshold,
-        reason:'Waiting for 25% favorable TP distance ('+
-          (Math.max(0,progress)*100).toFixed(1)+'% reached)'};
-    }
-  }
-}
 function registerConfirmedTrade(r){
   if(r.status!=='confirm'||!r.plan)return false;
-  const key=signalKey(r),p=r.plan;
+  const key=signalKey(r),p={...r.plan};
+  const observed=M[r.sym]?.p,base=p.en,side=r.dir==='long'?1:-1;
+  if(!(observed>0)||Math.abs(observed-base)>Math.max(base*.005,
+    Math.abs((p.fvgZone?.high||base)-(p.fvgZone?.low||base))*1.5))return false;
+  const risk=side*(observed-p.stop);
+  if(!(risk>0))return false;
+  p.en=observed;p.sp=risk/observed*100;
+  p.tp1=observed+side*3*risk;p.tp2=p.tp1;
   if(!key||st.trackedKeys[key]||
      Number(p.ck)<=simTradesClearEpoch)return false;
   if(![p.en,p.stop,p.tp2,p.sp].every(v=>Number.isFinite(v)&&v>0))return false;
@@ -482,8 +459,8 @@ function registerConfirmedTrade(r){
     stop0:p.stop,tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,
     open:now,signalCandle:p.ck,source:EX(),
     tp1h:false,targetMode:'fixed3r',profitLockStage:0,
-    timeframe:p.timeframe||'1m',
-    confirmationMode:r.confirmationMode||'Dual Liquidity Reclaim · FVG + volume',
+    timeframe:p.timeframe||'5m',
+    confirmationMode:r.confirmationMode||'RSI14 strict + AMD + 5m FVG',
     fvgZone:p.fvgZone||null,fvgFormedAt:p.fvgFormedAt||null,
     fvgFilledAt:p.fvgFilledAt||null,fvgVolumeRatio:p.fvgVolumeRatio??null,
     volumeDirection:p.volumeDirection||null,
@@ -514,7 +491,6 @@ function closeT(t,why,px,gross){
   st.open=st.open.filter(x=>x.id!==t.id);save();
 }
 function monitor(){
-  monitorBrowserPending();
   for(const t of [...st.open]){
     const px=M[t.sym]&&M[t.sym].p;
     if(!(px>0))continue;
@@ -1017,13 +993,13 @@ function adoptLaptop(snapshot,source,online,lastSeen){
    storeTradeClearEpoch();
  }
  const allCutoff=simTradesClearEpoch;
- const strategyMatches=snapshot.strategyVersion==='DUAL_LIQUIDITY_FVG_VOLUME_1M_CRYPTO_V3';
+ const strategyMatches=snapshot.strategyVersion==='RSI14_AMD_FVG_DISTRIBUTION_5M_V1';
  R=strategyMatches?
     Object.fromEntries(snapshot.results.filter(x=>x&&x.sym&&
       (!allCutoff||Number(x.analyzedAt)>allCutoff)).map(x=>[x.sym,x])):{};
  if(!strategyMatches){
    scanMeta={...snapshot,scanPhase:'UPDATE_REQUIRED',
-     scanMessage:'Desktop scanner update required: install the FVG + volume update. Existing trades are preserved; old signals are hidden.'};
+     scanMessage:'Desktop scanner update required: install the RSI14 + AMD + FVG 5m update. Existing trades preserved.'};
  }
  M=snapshot.markets||{};
  st.open=snapshot.open.filter(item=>
