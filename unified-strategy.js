@@ -107,6 +107,8 @@
          candle.l<lo&&candle.c>lo&&candle.c<hi:
          candle.h>hi&&candle.c<hi&&candle.c>lo;
        if(!swept)continue;
+       // RSI divergence must precede the manipulation sweep, not occur later.
+       if(!dv.ok||dv.b>sweep||sweep-dv.b>40)continue;
        // Require confirmed structural displacement away from swept liquidity.
        for(let f=sweep+2;f<=Math.min(n-3,sweep+14);f++){
          const a=bars5[f-2],mid=bars5[f-1],c=bars5[f];
@@ -122,7 +124,7 @@
          let invalid=false;
          for(let k=f+1;k<n;k++){
            const bar=bars5[k];
-           if(dir*(bar.l-stop)<=0&&side==='long'||side==='short'&&dir*(bar.h-stop)<=0){
+           if((side==='long'&&bar.l<=stop)||(side==='short'&&bar.h>=stop)){
              invalid=true;break;
            }
            const touched=bar.l<=high&&bar.h>=low;
