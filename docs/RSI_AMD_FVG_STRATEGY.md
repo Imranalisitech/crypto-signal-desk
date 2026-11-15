@@ -1,30 +1,40 @@
-# Crypto Signal Desk — Selective RSI14 AMD/FVG V4 (simulation only)
+# Crypto Signal Desk — Balanced RSI(14) AMD/FVG Scalping V5
 
-## Baseline restored: strict V2, not loose V3
+## Why this release exists
 
-Reinstated the historical V2 implementation from commit `20155e795dbc0180e033944e580c18e689d22536`, which required monthly/weekly/daily RSI bias, completed 5-minute RSI divergence and recovery, a 1-minute accumulation and liquidity sweep, 3-candle FVG, and a directional high-volume retest entry.
+The user requested a strategy slightly softer than Selective V4 but **not** a return to loose V3, whose simulated entries were reported to produce false signals. V5 is derived from strict V2 / selective V4. All signal decisions remain research/simulation-only.
 
-**Only the following V2 qualifiers have been loosened:**
-- LONG: weekly RSI > 50 and monthly RSI > 45 (originally > 50); SHORT: weekly RSI < 50 and monthly RSI < 55 (originally < 50).
-- LONG daily RSI pullback 38–48 (original 40–45); SHORT 52–62 (original 55–60).
-- RSI recovery across 35 for LONG and across 65 for SHORT (original 30/70), checked over the last 45 completed 5-minute candles instead of 30.
-- All RSI filters above are **still mandatory**; particularly **5m confirmed price/RSI divergence** is mandatory and must precede the liquidity manipulation sweep.
+## Balanced V5 gate logic
 
-**Original strict V2 structure retained:**
-- Accumulation is 16 consecutive completed 1m candles, with nonzero range less than 6% of midpoint.
-- A manipulation candle must wick below range low (LONG), or above range high (SHORT), and close back inside.
-- Within 14 more completed 1m candles, a three-candle directional FVG is formed by displacement with body > 1.3× prior accumulation average. Gap width > 0.01% of midpoint.
-- A subsequent **completed 1m retest candle** must touch the FVG, close in the trade direction with a meaningful body and volume > 1.10× average volume of previous five 1-minute candles.
-- The FVG entry must be recent (within 3m of candle close), the setup's stop must not have been hit, and the initial stop distance is capped at 2% to reject overly wide scalp risk.
-- Initial SL stays beyond the manipulation wick plus buffer, take-profit is one 3R distribution target. Previous 25%-toward-TP confirmation rule stays removed.
-- No exchange orders are placed. Broker arming and automatic real Binance Futures order submission remain disabled in the laptop code. The browser's Binance risk panel is a **local draft only**, not a real execution control.
+| Rule | LONG | SHORT | Required |
+|---|---|---|---|
+| Monthly RSI(14), completed candles | >42 | <58 | Yes |
+| Weekly RSI(14), completed candles | >50 | <50 | Yes |
+| Daily RSI(14) pullback | 35–50 | 50–65 | Yes |
+| 5m RSI price pivot divergence | Bullish | Bearish | **Yes** |
+| 5m RSI recovery **OR** momentum | Cross back above 35 **or** latest RSI >=45 | Cross below 65 **or** latest RSI <=55 | **Yes: either method** |
+| 1m accumulation range | 16 consecutive closed bars | Same | Yes |
+| 1m manipulation | Wick below range and close inside | Wick above range and close inside | **Yes** |
+| 1m displacement FVG | Three-candle directional gap, strong middle body | Mirror | **Yes** |
+| 1m FVG retest | Touch the gap, close bullish | Touch the gap, close bearish | **Yes** |
+| Retest volume | >1.10× preceding five 1m candle average | Same | **Yes** |
+| Risk | Initial stop beyond sweep with <=2% entry distance | Mirror | Yes |
+| TP | Exactly 3R from entry | Mirror | Yes |
 
-## Existing data and version separation
+The price/RSI divergence is required and must precede the sweep. The displacement body must exceed 1.3× accumulation mean body and the gap width exceed 0.01% of midpoint. An initial stop invalidation before retest rejects the setup. The confirmed retest candle must be recent (3-minute maximum lag). The previous 25%-toward-target wait remains removed.
 
-Strategy ID: `RSI14_AMD_FVG_STRICT_SCALP_1M_V4`. V3's less selective results are not loaded as current model signals. Previous simulated open trades and closed trade history are retained rather than erased or backdated, and older entries should not be interpreted as V4 confirmations.
+## Changes versus V4 (the only relaxed gates)
 
-## Limitations
+- Monthly RSI LONG threshold 45→42, SHORT threshold 55→58.
+- Daily RSI LONG zone 38–48→35–50, SHORT zone 52–62→50–65.
+- 5m RSI recovery is no longer the **only** confirmation option: when there is a mandatory confirmed RSI divergence, established weekly/monthly/daily bias, and complete mandatory AMD/FVG structure, sufficiently directional 5m RSI momentum may substitute for a recent RSI 35/65 crossing.
 
-The revised strategy is still demanding and can go hours without signals. Scanning 500 symbols over monthly, weekly, daily, 5m and 1m exchange series may take substantial time and trigger rate-limit cooldowns. Coins lacking 20 closed monthly candles will not qualify, even if they move sharply. Tests are controlled LONG/SHORT examples, not historical signal frequency, false-positive rate or profitability estimates.
+**Not relaxed:** weekly RSI bias, mandatory price/RSI divergence, liquidity sweep/reclaim, directional FVG displacement, FVG retest candle with volume, structural stop, 3R target.
 
-The user reported false signals in V3. This change intentionally prioritizes selectivity over frequent signals; more signals are not guaranteed.
+## Deployment, saved data and risk
+
+Strategy version: `RSI14_AMD_FVG_BALANCED_SCALP_1M_V5`. Older V3/V4 open simulated trade history is preserved, not rewritten or relabeled as V5. Current candidate signals use the V5 rules. The browser scanner can attempt up to 500 symbols, but scanning all required monthly, weekly, daily, 5m and 1m series may be slow or rate-limited. Coins with fewer than 20 completed monthly candles cannot pass.
+
+Live Binance order submission is disabled and real trading cannot be armed from the laptop server. Browser Binance risk inputs remain a local draft only.
+
+Synthetic long/short tests verify qualifying signals, 3R sizing, alternative 5m momentum path, and rejection without sweep or volume. **No actual daily signal-rate, win-rate, or real-market profit improvement has been established.** False positives may remain.
