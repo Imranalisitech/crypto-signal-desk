@@ -515,7 +515,13 @@ async function scan(){
     const list=priority.concat(rotated.filter(x=>!selected.has(x.symbol)).slice(0,capacity-priority.length));
     scanCursor=remainder.length?(scanCursor+Math.max(0,capacity-priority.length))%remainder.length:0;
     const res={};list.forEach(x=>res[x.symbol]={sym:x.symbol,chg:x.chg,vol:x.vol,status:'none'});
-    // Previous rows are retained and marked until refreshed, not reset each scan.
+    // Do not advertise an old confirmed setup as a current confirmation.
+    for(const item of Object.values(R)){
+      if(item.status==='confirm'){
+        item.status='watch';item.ok=false;item.plan=null;
+        item.reason='Previously confirmed; awaiting a fresh closed 5m setup';
+      }
+    }
     scanFailures=0;render();
     // More workers overlap network latency; request pacing remains centralized.
     await pool(list,async x=>{
@@ -894,7 +900,7 @@ function render(){
   $('nl').textContent=cl.length+' coins';$('ns').textContent=cs.length+' coins';
   // Stable watchlist: keep historical candidates visible, update same rows on rescans.
   // If an old setup ceases to qualify, show its current status rather than a stale trade.
-  const watchBySym=new Map(Object.values(watchMemory).map(r=>[r.sym,r]));
+  const watchBySym=new Map((remoteMode?[]:Object.values(watchMemory)).map(r=>[r.sym,r]));
   for(const r of L)if(watchBySym.has(r.sym)||r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym))
     watchBySym.set(r.sym,r);
   const wlAll=[...watchBySym.values()].sort((a,b)=>
@@ -1000,6 +1006,45 @@ $('watchSearch').addEventListener('input',()=>{watchQuery=$('watchSearch').value
 $('scanSearch').addEventListener('input',()=>{scanQuery=$('scanSearch').value.trim().toLowerCase();scanLimit=80;renderScanInspector()});
 $('scanFilter').addEventListener('change',()=>{scanFilter=$('scanFilter').value;scanLimit=80;renderScanInspector()});
 $('scanMore').addEventListener('click',()=>{scanLimit+=100;renderScanInspector()});
+async function downloadCompleteSetup(){
+ const button=$('downloadFullBackup'),label=button.textContent;
+ button.disabled=true;button.textContent='Preparing full backup…';
+ try{
+  // Never export Binance API keys, secrets, auth tokens or an encrypted vault.
+  const riskKey='crypto_signal_desk_browser_live_risk_draft_v1';
+  let riskPlan=null;
+  try{riskPlan=JSON.parse(localStorage.getItem(riskKey)||'null')}catch(_){}
+  const sources=await Promise.all(['index.html','unified-strategy.js','profit-lock.js',
+    'trade-chart.js','binance-live-ui.js'].map(async path=>{
+    try{
+      const res=await fetch(new URL(path,location.href),{cache:'no-store'});
+      if(!res.ok)throw Error('HTTP '+res.status);
+      return {path,content:await res.text()};
+    }catch(e){return {path,error:String(e.message||e)}}
+  }));
+  const payload={
+   format:'crypto-signal-desk-complete-setup-backup',version:2,
+   exportedAt:new Date().toISOString(),
+   source:remoteMode?'remote display snapshot':browserFallbackActive?'browser fallback':'browser',
+   note:'No API credentials, trading sessions, authenticated secrets or live Binance account state included. A live account requires separate secure reconnection.',
+   scanSettings:Object.fromEntries(IDS.map(id=>[id,$(id)?.value??null])),
+   tradeSettings:st.set||{},
+   riskPlan,
+   watchlist:{items:Object.values(watchMemory),scanCursor,pins:st.pins||[]},
+   scanResults:R,marketQuotes:M,
+   simulation:{open:st.open||[],history:st.hist||[],trackedKeys:st.trackedKeys||{},
+    historyClearEpoch,simTradesClearEpoch},
+   sourceFiles:sources
+  };
+  const json=JSON.stringify(payload,null,2),blob=new Blob([json],{type:'application/json'});
+  const url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download='Crypto_Signal_Desk_Full_Backup_'+new Date().toISOString().slice(0,10)+'.json';
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),30000);
+ }catch(e){window.alert('Backup failed: '+String(e.message||e))}
+ finally{button.disabled=false;button.textContent=label;}
+}
+$('downloadFullBackup').addEventListener('click',downloadCompleteSetup);
 $('refreshScan').addEventListener('click',async()=>{
  const button=$('refreshScan'),label=button.textContent;
  button.disabled=true;button.textContent='↻ Refreshing…';
@@ -1023,7 +1068,14 @@ $('refreshScan').addEventListener('click',async()=>{
  finally{button.disabled=false;button.textContent=label;}
 });
 
-$('wl').addEventListener('scroll',()=>{const el=$('wl');if(el.scrollTop+el.clientHeight>=el.scrollHeight-90){const all=Object.values(R).filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).filter(r=>r.sym.toLowerCase().includes(watchQuery));if(watchLimit<all.length){const pos=el.scrollTop;watchLimit+=50;render();el.scrollTop=pos}}});
+$('wl').addEventListener('scroll',()=>{
+ const el=$('wl');
+ if(el.scrollTop+el.clientHeight<el.scrollHeight-90)return;
+ const all=new Set([...Object.values(R).filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).map(x=>x.sym),
+  ...(!remoteMode?Object.keys(watchMemory):[])]);
+ const total=[...all].filter(sym=>sym.toLowerCase().includes(watchQuery)).length;
+ if(watchLimit<total){const pos=el.scrollTop;watchLimit+=50;render();el.scrollTop=pos;}
+});
 $('allResults').addEventListener('click',()=>{showAllHistory=!showAllHistory;render()});
 async function clearSimulatedData(mode){
   const all=mode==='all';
@@ -1069,7 +1121,9 @@ async function clearSimulatedData(mode){
       historyClearEpoch=Math.max(historyClearEpoch,Number(data.historyClearEpoch)||0);
       simTradesClearEpoch=Math.max(simTradesClearEpoch,Number(data.simTradesClearEpoch)||0);
       storeTradeClearEpoch();
-      if(all){st.open=[];R={};st.trackedKeys={};st.pending={};}
+      if(all){st.open=[];R={};st.trackedKeys={};st.pending={};
+        for(const sym of Object.keys(watchMemory))delete watchMemory[sym];
+        persistWatch();}
       st.hist=[];showAllHistory=false;render();
       await remotePoll();
       window.alert((all?
@@ -1094,7 +1148,9 @@ async function clearSimulatedData(mode){
       if(all)simTradesClearEpoch=Math.max(simTradesClearEpoch,moment);
       storeTradeClearEpoch();
       st.hist=[];
-      if(all){st.open=[];st.trackedKeys={};st.pending={};R={};}
+      if(all){st.open=[];st.trackedKeys={};st.pending={};R={};
+        for(const sym of Object.keys(watchMemory))delete watchMemory[sym];
+        persistWatch();}
       showAllHistory=false;save();render();
       if(cloud)window.alert('Data hidden in THIS browser only. For permanent deletion from your laptop and all connected displays, use these buttons inside the Windows desktop app.');
       else window.alert('Browser saved simulated data cleared. Backup download initiated. Real Binance orders unaffected.');
@@ -1186,6 +1242,8 @@ function activateBrowserFallback(){
  browserFallbackActive=true;remoteMode=false;remoteSource='browser';
  remoteOnline=false;remoteMarketFresh=false;scanMeta=null;
  R={};M={};lastScan=null;err='';
+ for(const item of Object.values(watchMemory))R[item.sym]={...item,status:'watch',
+   ok:false,plan:null,reason:'Previously watched; checking fresh 5m candles'};
  // Never merge the Windows history into browser-only simulation.
  const localSettings=st.set||{},pins=Array.isArray(st.pins)?st.pins:[];
  try{
