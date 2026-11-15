@@ -62,9 +62,9 @@ for(const side of ['long','short']){
   assert.equal(found.status,'confirm',side+' positive setup');
   assert.equal(found.side,side);
   assert.equal(found.executionReady,false,'always simulation');
-  assert.equal(found.checks.filter(c=>c.ok).length,found.checks.length,'all RSI filters and AMD required');
+  assert.equal(found.checks.filter(c=>c.ok).length,found.checks.length,'mandatory HTF, 5m divergence and AMD requirements');
   assert.equal(found.plan.timeframe,'1m');
-  assert.equal(found.strategyVersion,'RSI14_AMD_FVG_STRICT_SCALP_1M_V4');
+  assert.equal(found.strategyVersion,'RSI14_AMD_FVG_BALANCED_SCALP_1M_V5');
   assert.ok(Math.abs(Math.abs(found.plan.tp2-found.plan.en)/
     Math.abs(found.plan.en-found.plan.stop)-3)<1e-9,'3R target');
   const noVolume=candles.map(x=>({...x}));
@@ -78,4 +78,4 @@ for(const side of ['long','short']){
 const server=fs.readFileSync(path.join(root,'laptop-server.js'),'utf8');
 assert.ok(!server.includes('liveBroker.onSignal('),'no live order submit path');
 assert.ok(!server.includes('liveBroker.arm(data.phrase)'),'live arm is blocked');
-console.log('PASS: RSI basics, strict selective V2 long/short 1m FVG entry fixtures, volume/sweep veto, 3R, simulation-only checks');
+console.log('PASS: RSI basics, balanced V5 long/short 1m FVG entry fixtures, volume/sweep veto, 3R, simulation-only checks');
