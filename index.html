@@ -167,7 +167,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 <div id="serverMode" class="server-mode" hidden>Checking laptop scanner…</div>
 <div id="fallbackNotice" hidden role="status">
   <b>Browser-only fallback scanner</b> — Your laptop scanner is not connected.
-  This mode scans a limited set of coins while this window remains open.
+  This mode can scan up to 500 USDT perpetual coins while this window remains open. Full scans may be slow or temporarily rate-limited.
   It is NOT an always-on background service and its simulated records are separate
   from your Windows laptop history. Real Binance orders are disabled.
   <a href="https://crypto-signal-desk.onrender.com" target="_blank" rel="noopener">Open online app</a>.
@@ -312,14 +312,29 @@ const f=(x,d=2)=>x==null||!isFinite(x)?'–':(+x).toLocaleString('en-US',{minimu
 const fp=x=>x==null?'–':f(x,x>=100?2:x>=1?4:6),nm=s=>s.replace('USDT','');
 const B='https://fapi.binance.com/fapi/v1/',EX=()=>$('ex').value,XN=()=>EX()==='bybit'?'Bybit':'Binance',BIV={'5m':'5','1d':'D','1w':'W','1M':'M'};
 const HTFCACHE=new Map();
+let nextBrowserRequestAt=0, browserRequestSlot=Promise.resolve();
 let banUntil=0,W=[];
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function gate(w){for(;;){const t=Date.now();W=W.filter(x=>t-x[0]<60000);if(W.reduce((a,x)=>a+x[1],0)+w<=1400)break;await sleep(400)}W.push([Date.now(),w])}
 const setBan=t=>{banUntil=t;try{localStorage.setItem('ban_'+EX(),t)}catch(e){}};
 const banMsg=()=>XN()+' has temporarily blocked requests from this IP, usually for sending too many (HTTP 418/429/403). The scanner is paused until '+new Date(banUntil).toLocaleTimeString()+' and resumes by itself without sending anything meanwhile. You can switch the data source in Settings to keep scanning now.';
+async function browserRequestPace(){
+  if(!browserFallbackActive)return;
+  const previous=browserRequestSlot;
+  let release;browserRequestSlot=new Promise(resolve=>{release=resolve});
+  await previous;
+  try{
+    const delay=Math.max(0,nextBrowserRequestAt-Date.now());
+    if(delay)await sleep(delay);
+    if(Date.now()<banUntil)throw Error('Exchange cooldown active');
+    nextBrowserRequestAt=Date.now()+(EX()==='bybit'?500:350);
+  }finally{release()}
+}
 const J=async(u,w=1)=>{
   if(Date.now()<banUntil)throw new Error('HTTP 418');
-  await gate(w);const r=await fetch(u);
+  await gate(w);await browserRequestPace();
+  if(Date.now()<banUntil)throw new Error('HTTP 418');
+  const r=await fetch(u);
   if(r.status===418||r.status===429||r.status===403){let t='';try{t=await r.text()}catch(e){}const m=/banned until (\d+)/.exec(t);setBan(m?+m[1]:Date.now()+(r.status===429?90000:EX()==='bybit'?600000:300000));throw new Error('HTTP '+r.status)}
   if(!r.ok)throw new Error('HTTP '+r.status);return r.json()};
 const K=async(s,iv,l)=>{
@@ -400,7 +415,7 @@ async function scan(){
   busy=true;const t0=Date.now();let wait=300;
   try{
     const tk=await getTickers();
-    const list=tk.filter(x=>x.symbol.endsWith('USDT')&&!/[_-]/.test(x.symbol)&&x.vol>=n('minvol')*1e6&&M[x.symbol]&&M[x.symbol].p>0).sort((a,b)=>b.vol-a.vol).slice(0,browserFallbackActive?Math.min(30,n('topn')):n('topn'));
+    const list=tk.filter(x=>x.symbol.endsWith('USDT')&&!/[_-]/.test(x.symbol)&&x.vol>=n('minvol')*1e6&&M[x.symbol]&&M[x.symbol].p>0).sort((a,b)=>b.vol-a.vol).slice(0,browserFallbackActive?Math.min(500,Math.max(1,Math.trunc(n('topn')||500))):n('topn'));
     const res={};list.forEach(x=>res[x.symbol]={sym:x.symbol,chg:x.chg,vol:x.vol,status:'none'});
     R={};scanFailures=0;render();
     await pool(list,async x=>{
@@ -416,7 +431,7 @@ async function scan(){
  Object.assign(r,signal);
  r.dir=signal.side;r.G=signal.checks||[];
  if(r.status==='confirm'&&r.plan)r.plan.ck=signal.pattern.confirmTime;
- },10,(x,failure)=>{
+ },browserFallbackActive?3:10,(x,failure)=>{
       if(remoteMode)return;
       const r=res[x.symbol];
       if(failure){r.status='error';scanFailures++}
@@ -739,7 +754,7 @@ function render(){
   }else{
     $('serverMode').hidden=true;$('settingsPanel').hidden=false;
     $('fallbackNotice').hidden=!browserFallbackActive;
-    if(browserFallbackActive)$('stat').textContent='Browser-only scan (limited to 30 coins; active while this window stays open) · '+L.length+' coin results';
+    if(browserFallbackActive)$('stat').textContent='Browser-only scan (up to 500 coins; active while window stays open) · '+L.length+' coin results';
     $('clearHistory').disabled=false;$('clearAllTrades').disabled=false;
     $('clearHistory').textContent='Clear closed history';
     $('clearAllTrades').textContent='Clear all simulated trades';
@@ -1052,7 +1067,7 @@ function activateBrowserFallback(){
      pending:{},set:localSettings};
  }catch(_){st={open:[],hist:[],pins,trackedKeys:{},pending:{},set:localSettings};}
  $('fallbackNotice').hidden=false;
- $('topn').value='30';
+ $('topn').value='500';
  render();startBrowserScanner();
 }
 function startBrowserScanner(){
