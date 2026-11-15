@@ -38,7 +38,7 @@ const strategy=ctx.window.UnifiedStrategy;
 if(!strategy||typeof strategy.evaluate!=='function')throw Error('Missing unified-strategy.js');
 
 const loaded=readFile(STATE_FILE,{});
-const ACTIVE_STRATEGY='RSI14_AMD_FVG_STRICT_SCALP_1M_V4';
+const ACTIVE_STRATEGY='RSI14_AMD_FVG_BALANCED_SCALP_1M_V5';
 // Keep old demo results in a local archive; no more paper orders run.
 if(loaded.paper&&typeof loaded.paper==='object'){
   const archive=path.join(BASE,'binance-paper-archive.json');
@@ -436,7 +436,7 @@ async function scan(){
            Date.now()<cooldownUntil)break;
         const item=scanUniverse[index++],sym=item.symbol;
         let record={sym,price:item.price,chg:item.change,dir:null,status:'none',
-          score:0,reason:'Waiting for selective HTF RSI, 5m divergence/recovery and 1m AMD/FVG entry',
+          score:0,reason:'Waiting for balanced HTF RSI, required 5m divergence and 1m AMD/FVG entry',
           analyzedAt:Date.now()};
         try{
           const [rawMonthly,rawWeekly,rawDaily,raw5,raw1]=await Promise.all([
@@ -557,7 +557,7 @@ function snapshot(fullHistory=false){
     connection:state.connection,nextScanAt:state.nextScanAt,
     markets,results:Object.values(state.results),strategyVersion:ACTIVE_STRATEGY,
     open:state.open,history,historyTotal:totalHistory,
-    confirmationRule:'Selective V2 RSI HTF + required 5m divergence/recovery + 1m AMD FVG, simulation only',pendingCount:0,
+    confirmationRule:'Balanced V5 RSI HTF + required 5m divergence and recovery OR momentum + 1m AMD FVG, simulation only',pendingCount:0,
     historyClearEpoch:state.historyClearEpoch,
     simTradesClearEpoch:state.simTradesClearEpoch,
     trackedKeys:state.trackedKeys};
