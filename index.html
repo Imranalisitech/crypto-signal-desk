@@ -313,6 +313,18 @@ const fp=x=>x==null?'–':f(x,x>=100?2:x>=1?4:6),nm=s=>s.replace('USDT','');
 const B='https://fapi.binance.com/fapi/v1/',EX=()=>$('ex').value,XN=()=>EX()==='bybit'?'Bybit':'Binance',BIV={'1m':'1','5m':'5','15m':'15','1d':'D','1w':'W','1M':'M'};
 const HTFCACHE=new Map();
 let nextBrowserRequestAt=0, browserRequestSlot=Promise.resolve();
+const QUOTE_MAX_AGE_MS=45000;
+let lastQuoteRefreshAt=0,lastQuoteRefreshError='',quoteRefreshRunning=false;
+function quoteFresh(m){
+ return !!(m&&Number.isFinite(m.p)&&m.p>0&&Number.isFinite(m.at)&&
+   Date.now()-m.at>=0&&Date.now()-m.at<QUOTE_MAX_AGE_MS);
+}
+function quotedTradePrice(trade){
+ const m=M[trade.sym];
+ if(trade.source&&trade.source!==EX())return null;
+ if(remoteMode&&(!remoteOnline||!remoteMarketFresh))return null;
+ return quoteFresh(m)?m.p:null;
+}
 let banUntil=0,W=[];
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function gate(w){for(;;){const t=Date.now();W=W.filter(x=>t-x[0]<60000);if(W.reduce((a,x)=>a+x[1],0)+w<=1400)break;await sleep(400)}W.push([Date.now(),w])}
@@ -345,9 +357,9 @@ const K=async(s,iv,l)=>{
   const bars=(await J(`${B}klines?symbol=${s}&interval=${iv}&limit=${l}`,l<100?1:2)).map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5],q:+k[7],buyq:+k[10]}));HTFCACHE.set(key,{at:Date.now(),bars});return bars};
 async function getTickers(){
   if(EX()==='bybit'){const j=await J('https://api.bybit.com/v5/market/tickers?category=linear');
-    return j.result.list.map(x=>{M[x.symbol]={p:+x.markPrice||+x.lastPrice,fr:+x.fundingRate*100};return{symbol:x.symbol,chg:+x.price24hPcnt*100,vol:+x.turnover24h}})}
+    return j.result.list.map(x=>{M[x.symbol]={p:+x.markPrice||+x.lastPrice,fr:+x.fundingRate*100,at:Date.now(),source:'bybit'};return{symbol:x.symbol,chg:+x.price24hPcnt*100,vol:+x.turnover24h}})}
   const[tk,pi]=await Promise.all([J(B+'ticker/24hr',40),J(B+'premiumIndex',10)]);
-  pi.forEach(x=>M[x.symbol]={p:+x.markPrice,fr:+x.lastFundingRate*100});
+  pi.forEach(x=>M[x.symbol]={p:+x.markPrice,fr:+x.lastFundingRate*100,at:Date.now(),source:'binance'});
   return tk.map(x=>({symbol:x.symbol,chg:+x.priceChangePercent,vol:+x.quoteVolume}))}
 // Remote laptop snapshots replace browser-only tracking when available.
 let browserFallbackActive=false, browserScannerStarted=false, installPrompt=null;
@@ -464,7 +476,7 @@ function signalKey(r){
 function registerConfirmedTrade(r){
   if(r.status!=='confirm'||!r.plan)return false;
   const key=signalKey(r),p={...r.plan};
-  const observed=M[r.sym]?.p,base=p.en,side=r.dir==='long'?1:-1;
+  const observed=quotedTradePrice({sym:r.sym,source:EX()}),base=p.en,side=r.dir==='long'?1:-1;
   if(!(observed>0)||Math.abs(observed-base)>Math.max(base*.005,
     Math.abs((p.fvgZone?.high||base)-(p.fvgZone?.low||base))*1.5))return false;
   const risk=side*(observed-p.stop);
@@ -523,7 +535,7 @@ function closeT(t,why,px,gross){
 }
 function monitor(){
   for(const t of [...st.open]){
-    const px=M[t.sym]&&M[t.sym].p;
+    const px=quotedTradePrice(t);
     if(!(px>0))continue;
     const dir=t.dir==='long'?1:-1,unit=Math.abs(t.en-t.stop0);
     if(!(unit>0))continue;
@@ -551,7 +563,19 @@ function monitor(){
     // Legacy tracked trades also have no automatic time close.
   }
 }
-function ws(){const w=new WebSocket('wss://fstream.binance.com/ws/!markPrice@arr@1s');w.onmessage=e=>{try{for(const x of JSON.parse(e.data)){const m=M[x.s]||(M[x.s]={});m.p=+x.p;m.fr=+x.r*100}}catch(_){}};w.onclose=()=>setTimeout(ws,5000);w.onerror=()=>w.close()}
+function ws(){
+ const w=new WebSocket('wss://fstream.binance.com/ws/!markPrice@arr@1s');
+ w.onmessage=e=>{try{
+   const at=Date.now();
+   for(const x of JSON.parse(e.data)){
+     const price=+x.p;if(!(price>0))continue;
+     M[x.s]={...(M[x.s]||{}),p:price,fr:+x.r*100,at,source:'binance'};
+   }
+   lastQuoteRefreshAt=at;lastQuoteRefreshError='';
+ }catch(_){}};
+ w.onclose=()=>setTimeout(()=>{if(!remoteMode&&EX()==='binance')ws()},5000);
+ w.onerror=()=>w.close();
+}
 
 const tv=s=>`<a class="tvl" href="https://www.tradingview.com/chart/?symbol=${EX()==='bybit'?'BYBIT':'BINANCE'}:${s}.P" target="_blank" rel="noopener" title="Open ${nm(s)} chart in TradingView"><b>${nm(s)}</b></a>`;
 const pill=(c,t)=>`<span class="pill ${c}">${t}</span>`;
