@@ -177,7 +177,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
     <label>Data source<select id="ex"><option value="bybit">Bybit (recommended)</option><option value="binance">Binance</option></select></label>
     <label>Account ($)<input id="acct" type="number" value="2000"></label>
     <label>Risk % per trade<input id="risk" type="number" step="0.1" value="0.5"></label>
-    <span class="mut" style="font-size:12px">RSI(14) strict: monthly/weekly direction, daily pullback, 5m RSI divergence/recovery; 1m accumulation, manipulation sweep, FVG and volume-confirmed 1m retest. Simulated 3R target.</span>
+    <span class="mut" style="font-size:12px">RSI(14) scalping: 15m direction, 5m momentum, 1m accumulation, manipulation sweep, FVG and volume-confirmed 1m retest. RSI divergence and 30/70 recovery are optional confluences. Simulated 3R target.</span>
     <label>Fees maker+taker %<input id="fee" type="number" step="0.005" value="0.075"></label>
     <label>Min 24h volume ($M)<input id="minvol" type="number" value="0"></label>
     <label>Max coins to scan<input id="topn" type="number" value="600"></label>
@@ -281,7 +281,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   <p class="mut" style="font-size:12px">Open and closed simulated trades are shown together. "Clear closed history" keeps open trades; "Clear all simulated trades" also resets open simulations and current scanner coin rows (fresh scan results can appear again). Neither closes real Binance positions.</p>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
 
-<p class="mut" style="font-size:12px">The laptop server records simulated RSI(14) + AMD + 1m FVG entries. Strict monthly/weekly RSI, daily pullback, 5m divergence and recovery, accumulation, liquidity manipulation and FVG retest candle with volume must align. Distribution is the anticipated 3R target. Real Binance order placement is disabled.</p>
+<p class="mut" style="font-size:12px">The laptop server tracks simulated RSI(14) scalping entries: 15m trend, 5m momentum and 1m accumulation, liquidity manipulation and FVG retest candle with volume. No monthly/weekly/daily RSI requirements. Final TP at 3R; real Binance orders disabled. Distribution is the anticipated 3R target. Real Binance order placement is disabled.</p>
 </main>
 <div id="tradeChartModal" class="trade-chart-modal" hidden>
   <div id="tradeChartDialog" class="trade-chart-dialog" role="dialog" aria-modal="true" aria-labelledby="tradeChartTitle" tabindex="-1">
@@ -310,7 +310,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 const $=i=>document.getElementById(i),n=i=>parseFloat($(i).value);
 const f=(x,d=2)=>x==null||!isFinite(x)?'–':(+x).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
 const fp=x=>x==null?'–':f(x,x>=100?2:x>=1?4:6),nm=s=>s.replace('USDT','');
-const B='https://fapi.binance.com/fapi/v1/',EX=()=>$('ex').value,XN=()=>EX()==='bybit'?'Bybit':'Binance',BIV={'1m':'1','5m':'5','1d':'D','1w':'W','1M':'M'};
+const B='https://fapi.binance.com/fapi/v1/',EX=()=>$('ex').value,XN=()=>EX()==='bybit'?'Bybit':'Binance',BIV={'1m':'1','5m':'5','15m':'15','1d':'D','1w':'W','1M':'M'};
 const HTFCACHE=new Map();
 let nextBrowserRequestAt=0, browserRequestSlot=Promise.resolve();
 let banUntil=0,W=[];
@@ -339,7 +339,7 @@ const J=async(u,w=1)=>{
   if(!r.ok)throw new Error('HTTP '+r.status);return r.json()};
 const K=async(s,iv,l)=>{
   const key=EX()+':'+s+':'+iv+':'+l,old=HTFCACHE.get(key);
-  const ttl=iv==='1M'?43200000:iv==='1w'?10800000:iv==='1d'?1200000:iv==='5m'?60000:10000;
+  const ttl=iv==='1M'?43200000:iv==='1w'?10800000:iv==='1d'?1200000:iv==='15m'?120000:iv==='5m'?45000:10000;
   if(old&&Date.now()-old.at<ttl)return old.bars;
   if(EX()==='bybit'){const j=await J(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${s}&interval=${BIV[iv]}&limit=${l}`);const bars=j.result.list.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5],q:+k[6],buyq:null})).reverse();HTFCACHE.set(key,{at:Date.now(),bars});return bars}
   const bars=(await J(`${B}klines?symbol=${s}&interval=${iv}&limit=${l}`,l<100?1:2)).map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5],q:+k[7],buyq:+k[10]}));HTFCACHE.set(key,{at:Date.now(),bars});return bars};
@@ -405,7 +405,7 @@ function onlyClosed(bars,iv){
   const now=Date.now()-1500;
   return bars.filter(k=>{
     const end=iv==='1M'?Date.UTC(new Date(k.t).getUTCFullYear(),new Date(k.t).getUTCMonth()+1,1):
-      k.t+(iv==='1w'?604800000:iv==='1d'?86400000:iv==='5m'?300000:60000);
+      k.t+(iv==='1w'?604800000:iv==='1d'?86400000:iv==='15m'?900000:iv==='5m'?300000:60000);
     return Number.isFinite(k.t)&&Number.isFinite(k.c)&&end<=now;
   });
 }
@@ -420,11 +420,11 @@ async function scan(){
     R={};scanFailures=0;render();
     await pool(list,async x=>{
  const s=x.symbol,r=res[s];
- const [monthly,weekly,daily,five,one]=await Promise.all([
-   K(s,'1M',40),K(s,'1w',45),K(s,'1d',65),K(s,'5m',190),K(s,'1m',190)]);
+ const [fifteen,five,one]=await Promise.all([
+   K(s,'15m',100),K(s,'5m',120),K(s,'1m',170)]);
  const settings={
-  barsMonthly:onlyClosed(monthly,'1M'),barsWeekly:onlyClosed(weekly,'1w'),
-  barsDaily:onlyClosed(daily,'1d'),bars5:onlyClosed(five,'5m'),bars1:onlyClosed(one,'1m'),
+  bars15:onlyClosed(fifteen,'15m'),bars5:onlyClosed(five,'5m'),
+  bars1:onlyClosed(one,'1m'),
   mark:M[s].p,account:n('acct'),risk:n('risk')
  };
  const signal=UnifiedStrategy.evaluate(settings);
@@ -491,7 +491,7 @@ function registerConfirmedTrade(r){
     open:now,signalCandle:p.ck,source:EX(),
     tp1h:false,targetMode:'fixed3r',profitLockStage:0,
     timeframe:p.timeframe||'1m',
-    confirmationMode:r.confirmationMode||'RSI14 strict + AMD + 1m FVG',
+    confirmationMode:r.confirmationMode||'RSI14 scalp 15m/5m + 1m AMD FVG',
     fvgZone:p.fvgZone||null,fvgFormedAt:p.fvgFormedAt||null,
     fvgFilledAt:p.fvgFilledAt||null,fvgVolumeRatio:p.fvgVolumeRatio??null,
     volumeDirection:p.volumeDirection||null,
@@ -570,11 +570,11 @@ function card(r){
  const checks=[
   ['Entry',fp(p.en)],['SL ('+f(p.sp,2)+'%)',fp(p.stop)],
   ['Final TP (3R)',fp(p.tp2)],['Target R:R','1 : 3'],
-  ['Strategy','RSI(14) strict + AMD + FVG entry (1m)'],
-  ['Monthly RSI',f(rsi.monthly,1)],['Weekly RSI',f(rsi.weekly,1)],
-  ['Daily RSI pullback',f(rsi.daily,1)],['5m RSI',f(rsi.intraday5m,1)],
-  ['5m RSI divergence',rsi.divergence?'Confirmed':'Not available'],
-  ['5m RSI recovery',rsi.recovery?'Confirmed':'Not available'],
+  ['Strategy','RSI(14) scalp: 15m/5m trend + 1m AMD/FVG'],
+  ['15m RSI trend',f(rsi.trend15m,1)],['5m RSI momentum',f(rsi.intraday5m,1)],
+  ['1m RSI entry',f(rsi.entry1m,1)],
+  ['1m RSI divergence',rsi.divergence?'Additional confluence':'Not required'],
+  ['1m RSI 30/70 recovery',rsi.recovery?'Additional confluence':'Not required'],
   ['Manipulation sweep',r.liquidity?.sweepTime?'Confirmed':'Not available'],
   ['FVG entry zone',fv.formed?fp(fv.low)+' – '+fp(fv.high):'Not available'],
   ['FVG retest candle',fv.filled?'Closed 1m candle':'Waiting'],
@@ -714,7 +714,7 @@ function renderScanInspector(){
   $('scanCoinTable').scrollTop=scroll;
   const recent=Array.isArray(meta.scanRecent)?meta.scanRecent.slice(0,4):[];
   $('scanHelp').textContent=(running?'Current scan is processing markets. ':'')+
-    'Monthly/weekly RSI alignment, daily RSI pullback and 5m RSI divergence/recovery, then 1m accumulation, liquidity sweep and FVG retest with a CLOSED 1m directional candle and volume confirm the trade. The previous 25% price-distance gate is REMOVED. '+
+    '15m RSI trend, supporting 5m RSI momentum, 1m accumulation, liquidity sweep and FVG retest with a CLOSED 1m directional candle and volume confirm a simulated trade. RSI divergence/recovery add confidence but do not block it. The previous 25% price-distance gate is REMOVED. '+
     'LONG volume increases; SHORT volume decreases as requested. This does not prove institutional buying or selling. '+
     'Signals remain SIMULATED ONLY; SL beyond manipulation wick and TP fixed at 3R.'+
     (recent.length?' · Recently scanned: '+recent.map(x=>x.sym).join(', '):'');
@@ -1022,13 +1022,13 @@ function adoptLaptop(snapshot,source,online,lastSeen){
    storeTradeClearEpoch();
  }
  const allCutoff=simTradesClearEpoch;
- const strategyMatches=snapshot.strategyVersion==='RSI14_AMD_FVG_ENTRY_1M_V2';
+ const strategyMatches=snapshot.strategyVersion==='RSI14_AMD_FVG_SCALP_1M_V3';
  R=strategyMatches?
     Object.fromEntries(snapshot.results.filter(x=>x&&x.sym&&
       (!allCutoff||Number(x.analyzedAt)>allCutoff)).map(x=>[x.sym,x])):{};
  if(!strategyMatches){
    scanMeta={...snapshot,scanPhase:'UPDATE_REQUIRED',
-     scanMessage:'Desktop scanner update required: install the RSI14 + AMD + FVG 1m entry update. Existing trades preserved.'};
+     scanMessage:'Desktop scanner update required: install the RSI14 scalping (15m/5m RSI + 1m AMD/FVG) update. Existing trades preserved.'};
  }
  M=snapshot.markets||{};
  st.open=snapshot.open.filter(item=>
