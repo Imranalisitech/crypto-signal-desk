@@ -38,7 +38,7 @@ const strategy=ctx.window.UnifiedStrategy;
 if(!strategy||typeof strategy.evaluate!=='function')throw Error('Missing unified-strategy.js');
 
 const loaded=readFile(STATE_FILE,{});
-const ACTIVE_STRATEGY='DUAL_LIQUIDITY_FVG_VOLUME_1M_CRYPTO_V3';
+const ACTIVE_STRATEGY='RSI14_AMD_FVG_DISTRIBUTION_5M_V1';
 // Keep old demo results in a local archive; no more paper orders run.
 if(loaded.paper&&typeof loaded.paper==='object'){
   const archive=path.join(BASE,'binance-paper-archive.json');
@@ -117,6 +117,8 @@ function log(message){
 const liveBroker=new BinanceLiveBroker({
   dir:BASE,config:config.live,state:state.live,persist:persistImmediate,log
 });
+// This version is strictly SIMULATION ONLY. Never resume a previously armed broker.
+if(liveBroker.state.armed)liveBroker.disarm('RSI AMD FVG simulation-only deployment');
 state.live=liveBroker.state;
 config.live=liveBroker.config;
 function fault(message){
@@ -193,23 +195,36 @@ async function getJson(url){
   }
   throw Error('Market request failed');
 }
-const EXCHANGE_INTERVALS={'1m':'1','5m':'5','15m':'15'};
+const EXCHANGE_INTERVALS={'5m':'5','1d':'D','1w':'W','1M':'M'};
+const candleCache=new Map();
 async function candles(symbol,interval,count){
+  const key=config.exchange+':'+symbol+':'+interval+':'+count;
+  const ttl=interval==='1M'?43200000:interval==='1w'?10800000:interval==='1d'?1200000:60000;
+  const cached=candleCache.get(key);
+  if(cached&&Date.now()-cached.at<ttl)return cached.bars;
   if(config.exchange==='bybit'){
     const data=await getJson('https://api.bybit.com/v5/market/kline?category=linear&symbol='+
       encodeURIComponent(symbol)+'&interval='+EXCHANGE_INTERVALS[interval]+'&limit='+count);
     const list=data?.result?.list;
     if(!Array.isArray(list))throw Error('Bybit candle list unavailable');
-    return list.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]})).reverse();
+    const bars=list.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]})).reverse();
+    candleCache.set(key,{at:Date.now(),bars});return bars;
   }
   const data=await getJson('https://fapi.binance.com/fapi/v1/klines?symbol='+
     encodeURIComponent(symbol)+'&interval='+interval+'&limit='+count);
   if(!Array.isArray(data))throw Error('Binance candle list unavailable');
-  return data.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}));
+  const bars=data.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}));
+  candleCache.set(key,{at:Date.now(),bars});return bars;
 }
-function closed(bars,minutes){
-  const now=Date.now()-1500,span=minutes*60_000;
-  return bars.filter(k=>Number.isFinite(k.t)&&Number.isFinite(k.c)&&k.t+span<=now);
+function closed(bars,interval){
+  const now=Date.now()-1500;
+  return bars.filter(k=>{
+    if(!Number.isFinite(k.t)||!Number.isFinite(k.c))return false;
+    const end=interval==='1M'?
+      Date.UTC(new Date(k.t).getUTCFullYear(),new Date(k.t).getUTCMonth()+1,1):
+      k.t+(interval==='1w'?604800000:interval==='1d'?86400000:300000);
+    return end<=now;
+  });
 }
 let lastTickers=[],tickerRefreshPromise=null,lastTickerFetchAt=0;
 // Reuse the same in-flight ticker request. Previously, a concurrent scan
@@ -267,7 +282,7 @@ function register(r){
   const timestamp=Number(p.ck),now=Date.now();
   // Never open a simulated position on stale confirmation candles after
   // an offline period or several minutes of scanning backlog.
-  if(now-timestamp<0||now-(timestamp+60000)>4*60_000)return false;
+  if(now-(timestamp+300000)<0||now-(timestamp+300000)>7*60_000)return false;
   if(![p.en,p.stop,p.tp2,p.sp].every(x=>Number.isFinite(x)&&x>0))return false;
   const dir=r.dir==='long'?1:-1;
   if(dir*(p.en-p.stop)<=0||dir*(p.tp2-p.en)<=0)return false;
@@ -278,7 +293,7 @@ function register(r){
     profitLockStage:0,
     tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,source:config.exchange,
     signalCandle:p.ck,open:now,realizedR:null,targetMode:'fixed3r',
-    confirmationMode:r.confirmationMode||'Dual Liquidity Reclaim · FVG fill + directional 1m volume',
+    confirmationMode:r.confirmationMode||'RSI14 strict + AMD + 5m FVG',
     firstSweepPrice:p.firstSweepPrice??null,
     secondSweepPrice:p.secondSweepPrice??null,
     breakLevel:p.breakLevel??null,
@@ -287,7 +302,7 @@ function register(r){
     fvgFilledAt:p.fvgFilledAt||null,
     fvgVolumeRatio:p.fvgVolumeRatio??null,
     volumeDirection:p.volumeDirection||null,
-    timeframe:p.timeframe||'1m',
+    timeframe:p.timeframe||'5m',
     researchOnly:p.researchOnly===true,
     previousDayLevel:p.previousDayLevel||null};
   state.open.push(trade);
@@ -317,56 +332,7 @@ function settle(t,reason,price,grossR){
   persist();
   log('RESULT '+t.sym+' '+reason+' '+r.toFixed(3)+'R');
 }
-function priceConfirmationQueue(r){
-  if(r.status!=='confirm'||!r.plan)return;
-  const key=signalKey(r),p=r.plan,now=Date.now(),dir=r.dir==='long'?1:-1;
-  if(!key||state.trackedKeys[key]||state.pending[key]||Number(p.ck)<=Number(state.simTradesClearEpoch||0))return;
-  if(now-Number(p.ck)-60000>240000||now<Number(p.ck))return;
-  if(!(dir*(p.tp2-p.en)>0&&dir*(p.en-p.stop)>0))return;
-  state.pending[key]={sym:r.sym,dir:r.dir,key,referenceEntry:p.en,
-    referenceTarget:p.tp2,threshold:p.en+.25*(p.tp2-p.en),createdAt:now,
-    result:{...r,status:'watch',ok:false,executionReady:false,
-      reason:'Strategy passed; waiting for 25% favorable movement toward TP'}};
-  persist();
-}
-function updatePriceConfirmations(){
-  const now=Date.now();
-  for(const [key,c] of Object.entries(state.pending)){
-    const m=state.markets[c.sym],r=c.result,p=r.plan,dir=c.dir==='long'?1:-1;
-    if(!m||!(m.p>0)||now-m.at>30000)continue;
-    const progress=dir*(m.p-c.referenceEntry)/Math.abs(c.referenceTarget-c.referenceEntry);
-    if(dir*(m.p-p.stop)<=0){
-      delete state.pending[key];state.trackedKeys[key]=now;
-      state.results[c.sym]={...compactResult(r),plan:null,status:'watch',
-        reason:'Candidate invalidated: original structural stop reached before 25% confirmation'};
-      persist();continue;
-    }
-    if(progress>=.25){
-      // The simulated entry is the observed market price, not an invented earlier fill.
-      const risk=dir*(m.p-p.stop);
-      if(!(risk>0)){delete state.pending[key];continue;}
-      const plan={...p,en:m.p,sp:risk/m.p*100,tp1:m.p+dir*3*risk,
-        tp2:m.p+dir*3*risk,tp1pct:risk/m.p*300,tp2pct:risk/m.p*300,
-        originalSignalCandle:p.ck,referenceEntry:c.referenceEntry,
-        referenceTarget:c.referenceTarget,confirmationThreshold:c.threshold,
-        priceConfirmedAt:now,ck:now-60000};
-      const confirmed={...r,status:'confirm',ok:true,plan,price:m.p,
-        analyzedAt:now,priceConfirmedAt:now,confirmationProgress:progress,
-        confirmationThreshold:c.threshold,executionReady:false,
-        reason:'25% favorable progress reached; simulated entry at observed market price'};
-      if(register(confirmed))state.results[c.sym]=compactResult(confirmed);
-      state.trackedKeys[key]=now;
-      delete state.pending[key];persist();
-    }else{
-      state.results[c.sym]={...compactResult(r),status:'watch',ok:false,
-        price:m.p,analyzedAt:now,confirmationProgress:Math.max(0,progress),
-        confirmationThreshold:c.threshold,reason:'Waiting for 25% favorable TP progress ('+
-          (Math.max(0,progress)*100).toFixed(1)+'% reached)'};
-    }
-  }
-}
 function monitor(){
-  updatePriceConfirmations();
   const now=Date.now(),fresh=state.lastPriceAt&&now-state.lastPriceAt<30_000;
   if(!fresh)return;
   for(const trade of [...state.open]){
@@ -417,7 +383,7 @@ function compactResult(r){
     pattern:r.pattern,liquidity:r.liquidity,
     fvg:r.fvg,volumeRatio:r.volumeRatio??null,
     confirmationMode:r.confirmationMode,executionReady:r.executionReady,
-    reason:r.reason,
+    reason:r.reason,rsi:r.rsi||null,
     plan:r.plan,ok:r.ok};
 }
 let scanning=false;
@@ -459,41 +425,30 @@ async function scan(){
            Date.now()<cooldownUntil)break;
         const item=scanUniverse[index++],sym=item.symbol;
         let record={sym,price:item.price,chg:item.change,dir:null,status:'none',
-          score:0,reason:'Waiting for previous-day liquidity',
+          score:0,reason:'Waiting for strict RSI and AMD/FVG entry',
           analyzedAt:Date.now()};
         try{
-          const [raw15,raw1]=await Promise.all([
-            // Previous UTC day from 15m bars; Dual Liquidity Reclaim trigger on 1m.
-            candles(sym,'15m',210),candles(sym,'1m',240)]);
-          const bars15=closed(raw15,15),bars1=closed(raw1,1);
-          if(bars15.length<97||bars1.length<35){
+          const [rawMonthly,rawWeekly,rawDaily,raw5]=await Promise.all([
+            candles(sym,'1M',40),candles(sym,'1w',45),
+            candles(sym,'1d',65),candles(sym,'5m',190)]);
+          const barsMonthly=closed(rawMonthly,'1M'),barsWeekly=closed(rawWeekly,'1w'),
+            barsDaily=closed(rawDaily,'1d'),bars5=closed(raw5,'5m');
+          if(barsMonthly.length<20||barsWeekly.length<20||
+             barsDaily.length<20||bars5.length<100){
             record.status='insufficient';
-            record.reason='Insufficient closed candles (15m '+bars15.length+
-              ', 1m '+bars1.length+')';
+            record.reason='Strict RSI needs 20 monthly, 20 weekly, 20 daily and 100 closed 5m candles';
             state.scanInsufficient++;
           }else{
             const mark=state.markets[sym]?.p||item.price;
-            const decision=strategy.evaluate({
-              bars15,bars1,mark,account:config.account,risk:config.riskPct
-            });
+            const decision=strategy.evaluate({barsMonthly,barsWeekly,barsDaily,bars5,
+              mark,account:config.account,risk:config.riskPct});
             const result={...decision,sym,price:mark,dir:decision.side,
               chg:item.change,G:decision.checks||[]};
             record=compactResult(result);
             record.analyzedAt=Date.now();
-            const waiting=Object.values(state.pending).find(p=>p.sym===sym);
-            if(waiting)record={...compactResult(waiting.result),status:'watch',price:mark,analyzedAt:Date.now()};
             state.scanAnalyzed++;
-            if(state.simTradesClearEpoch===clearGeneration&&
-               result.status==='confirm'){
-              priceConfirmationQueue(result); // Wait for 25% favorable movement.
-              // Real trading remains off until the user explicitly arms it.
-              if(liveBroker.state.armed&&config.exchange==='binance'&&
-                 result.executionReady===true){
-                const bmark=state.markets[sym];
-                if(bmark&&Number.isFinite(bmark.p)&&Date.now()-bmark.at<30000)
-                  liveBroker.onSignal(result,'binance',bmark);
-              }
-            }
+            if(state.simTradesClearEpoch===clearGeneration&&result.status==='confirm')
+              register(result); // Simulated tracking ONLY; no real exchange orders.
           }
         }catch(e){
           if(e instanceof ExchangeRateLimitError){
@@ -524,7 +479,6 @@ async function scan(){
     if((!interrupted&&state.scanAnalyzed>0)||
        (Object.keys(state.results).length===0&&state.scanAnalyzed>0)){
       state.results=nextResults;
-      for(const pending of Object.values(state.pending))state.results[pending.sym]={...compactResult(pending.result),status:'watch',analyzedAt:Date.now()};
       state.lastScanAt=Date.now();
       state.lastScanCount=completedRows.length;
       state.lastScanAnalyzed=state.scanAnalyzed;
@@ -571,7 +525,7 @@ async function scan(){
   }
 }
 function snapshot(fullHistory=false){
-  const active=new Set([...Object.keys(state.results),...state.open.map(x=>x.sym),...Object.values(state.pending).map(x=>x.sym)]);
+  const active=new Set([...Object.keys(state.results),...state.open.map(x=>x.sym)]);
   const markets={};
   for(const sym of active)if(state.markets[sym])markets[sym]=state.markets[sym];
   let history=state.history;
@@ -592,7 +546,7 @@ function snapshot(fullHistory=false){
     connection:state.connection,nextScanAt:state.nextScanAt,
     markets,results:Object.values(state.results),strategyVersion:ACTIVE_STRATEGY,
     open:state.open,history,historyTotal:totalHistory,
-    priceConfirmationRule:'25% original entry-to-TP distance',pendingCount:Object.keys(state.pending).length,
+    confirmationRule:'RSI14 strict + 5m FVG retest candle, simulation only',pendingCount:0,
     historyClearEpoch:state.historyClearEpoch,
     simTradesClearEpoch:state.simTradesClearEpoch,
     trackedKeys:state.trackedKeys};
@@ -781,7 +735,7 @@ const server=http.createServer((req,res)=>{
         if(was!==config.exchange&&liveBroker.state.armed)
           liveBroker.disarm('Market exchange changed');
         fs.writeFileSync(CONFIG_FILE,JSON.stringify(config,null,2));
-        if(was!==config.exchange){state.results={};state.pending={};state.markets={};lastTickers=[]}
+        if(was!==config.exchange){state.results={};state.pending={};state.markets={};candleCache.clear();lastTickers=[]}
         respond(res,200,{ok:true});
       }catch(e){respond(res,400,{error:e.message})}
     });
