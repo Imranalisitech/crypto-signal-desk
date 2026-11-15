@@ -1,7 +1,7 @@
 'use strict';
 /*
  RSI(14) + Accumulation / Manipulation / Fair Value Gap / Distribution
- SELECTIVE SCALPING edition derived from the earlier STRICT V2 (not loose V3).
+ BALANCED SCALPING edition derived from STRICT V2/V4 (not loose V3).
  Original RSI transcript: RSI momentum, divergence, 30/70 recovery,
  higher timeframe hierarchy, candle and volume confirmation.
  AMD and FVG are additional user-approved entry criteria, not transcript rules.
@@ -68,8 +68,8 @@
  }
  function evaluate({barsMonthly,barsWeekly,barsDaily,bars5,bars1,mark,account=2000,risk=.5,now=Date.now()}={}){
    const empty=(reason)=>({status:'none',side:null,dir:null,ok:false,executionReady:false,
-     reason,score:0,checks:[],G:[],plan:null,confirmationMode:'RSI14 selective HTF + 5m divergence/recovery + 1m AMD/FVG',
-     strategyVersion:'RSI14_AMD_FVG_STRICT_SCALP_1M_V4'});
+     reason,score:0,checks:[],G:[],plan:null,confirmationMode:'RSI14 balanced weekly/daily + mandatory 5m divergence + 1m AMD/FVG',
+     strategyVersion:'RSI14_AMD_FVG_BALANCED_SCALP_1M_V5'});
    if(![barsMonthly,barsWeekly,barsDaily,bars5,bars1].every(Array.isArray)||
       barsMonthly.length<20||barsWeekly.length<20||barsDaily.length<20||bars5.length<100||bars1.length<100||
       !(mark>0))return empty('Insufficient CLOSED monthly, weekly, daily, 5m RSI or 1m entry candles');
@@ -78,19 +78,21 @@
    if(![m,w,d,intraday].every(isNum))return empty('Insufficient RSI(14) values');
    const inspect=(side)=>{
      const dir=side==='long'?1:-1;
-     const macro=side==='long'?m>45&&w>50:m<55&&w<50;
+     const macro=side==='long'?m>42&&w>50:m<58&&w<50;
      // Slight widening from V2 (40–45 / 55–60), preserving the original
      // higher-timeframe logic and mandatory 5m divergence + RSI recovery.
-     const pullback=side==='long'?d>=38&&d<=48:d>=52&&d<=62;
+     const pullback=side==='long'?d>=35&&d<=50:d>=50&&d<=65;
      const dv=divergence(bars5,r5,side,bars5.length);
      const reclaim=side==='long'?
        r5.slice(-45).some((v,i,a)=>i>0&&a[i-1]!=null&&a[i-1]<35&&v>=35):
        r5.slice(-45).some((v,i,a)=>i>0&&a[i-1]!=null&&a[i-1]>65&&v<=65);
+     const momentumOK=side==='long'?intraday>=45:intraday<=55;
+     const recoveryOrMomentum=reclaim||momentumOK;
      const checks=[
-       {ok:macro,t:'Weekly RSI >/<50 and monthly RSI soft confirmation '+side.toUpperCase()},
-       {ok:pullback,t:'Daily RSI selective pullback zone'},
-       {ok:dv.ok,t:'5m price/RSI divergence confirmed at price pivots'},
-       {ok:reclaim,t:side==='long'?'5m RSI recovered above 35':'5m RSI fell back below 65'}
+       {ok:macro,t:'Weekly RSI trend plus monthly soft alignment '+side.toUpperCase()},
+       {ok:pullback,t:'Daily RSI balanced pullback zone'},
+       {ok:dv.ok,t:'Mandatory 5m price/RSI pivot divergence'},
+       {ok:recoveryOrMomentum,t:side==='long'?'5m RSI recovery >35 OR momentum >=45':'5m RSI recovery <65 OR momentum <=55'}
      ];
      const n=bars1.length;
      // Only near-current setups: 1m accumulation zone, stop sweep/reclaim,
@@ -164,12 +166,12 @@
      checks.push({ok:!!best,t:'Accumulation range + manipulation liquidity sweep'},
        {ok:!!best,t:'Displacement formed directional 3-candle FVG'},
        {ok:!!best,t:'Subsequent FVG retest + 1m directional closed candle and volume'});
-     const pass=macro&&pullback&&dv.ok&&reclaim&&!!best;
+     const pass=macro&&pullback&&dv.ok&&recoveryOrMomentum&&!!best;
      const score=checks.filter(x=>x.ok).length/checks.length*100;
      return {side,dir:side,status:pass?'confirm':checks.some(x=>x.ok)?'watch':'none',
        ok:pass,score:pass?100:Math.min(99,Math.round(score)),
        executionReady:false,
-       reason:pass?'RSI14 selective V2 bias + AMD sweep + FVG retest confirmed: distribution is target':
+       reason:pass?'RSI14 balanced V5 + mandatory 5m divergence + AMD/FVG retest confirmed: distribution is target':
           checks.find(x=>!x.ok)?.t||'Waiting for complete setup',
        checks,G:checks,plan:pass?best.plan:null,
        pattern:pass?best.pattern:null,
@@ -178,9 +180,9 @@
          range:best.range,sweepTime:best.sweepTime}:null,
        fvg:best?.fvg||null,volumeRatio:best?.volumeRatio??null,
        rsi:{monthly:m,weekly:w,daily:d,intraday5m:intraday,
-         divergence:dv.ok?dv:null,recovery:reclaim},
-       confirmationMode:'RSI14 selective HTF + 5m divergence/recovery + 1m AMD/FVG',
-       strategyVersion:'RSI14_AMD_FVG_STRICT_SCALP_1M_V4'};
+         divergence:dv.ok?dv:null,recovery:reclaim,momentumAlternative:momentumOK},
+       confirmationMode:'RSI14 balanced weekly/daily + mandatory 5m divergence + 1m AMD/FVG',
+       strategyVersion:'RSI14_AMD_FVG_BALANCED_SCALP_1M_V5'};
    };
    const longs=inspect('long'),shorts=inspect('short');
    if(longs.ok&&shorts.ok)return {...longs,status:'watch',ok:false,plan:null,
@@ -190,5 +192,5 @@
    return longs.score>=shorts.score?longs:shorts;
  }
  root.UnifiedStrategy=Object.freeze({rsi,divergence,evaluate,
-   activeStrategy:'RSI14_AMD_FVG_STRICT_SCALP_1M_V4'});
+   activeStrategy:'RSI14_AMD_FVG_BALANCED_SCALP_1M_V5'});
 })(typeof module!=='undefined'&&module.exports?module.exports:window);
