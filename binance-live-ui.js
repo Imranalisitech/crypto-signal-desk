@@ -26,7 +26,9 @@
    $('liveEvents').textContent='No live account audit available without a secure connection.';
    $('liveOrderCount').textContent='Not connected';
    $('liveRefreshAccount').addEventListener('click',()=>{
-     $('liveStatus').textContent='Secure local agent is not connected. Open the Windows trading application to enable verified account data.';
+     const setup=$('secureBrokerSetup');
+     if(setup){setup.open=true;setup.scrollIntoView({behavior:'smooth',block:'center'});}
+     $('liveStatus').textContent='No authenticated private Binance agent is attached. Follow the secure connection steps below; this website cannot use an API key directly.';
    });
    const title=$('liveRiskSettings').querySelector('summary');
    title.textContent='Real trading allocation and risk limits';
@@ -79,6 +81,7 @@
     'Real Binance account not connected — trading OFF')+
     (status.lastError?' · '+status.lastError:'')+(msg?' · '+msg:'');
   $('liveStatus').style.background=armed?'#7a2431':'#233647';
+  if(connected&&$('secureBrokerSetup'))$('secureBrokerSetup').open=false;
   $('liveReadinessText').textContent=armed?'LIVE TRADING ARMED — monitor exchange positions continuously':
     connected?(status.executionReady&&status.dailyLossGuardReady&&status.protectiveOrdersReady?
       'Private execution engine verified · daily-loss & protective-order guards ready · manual activation required':
