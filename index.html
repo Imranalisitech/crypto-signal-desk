@@ -818,25 +818,24 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
   $('allResults').hidden=H.length<=100;
   $('allResults').textContent=showAllHistory?'Show latest 100':'Show all '+H.length+' results';
   const openRows=[...st.open].sort((a,b)=>(b.open||0)-(a.open||0)).map(o=>{
-    const market=M[o.sym];
-    const fresh=!remoteMode||
-      remoteOnline&&remoteMarketFresh&&market&&Number(market.at)>0&&
-      Date.now()-Number(market.at)<45000;
-    const px=fresh&&Number.isFinite(Number(market?.p))&&Number(market.p)>0?
-      Number(market.p):null;
+    const market=M[o.sym],px=quotedTradePrice(o);
     const sg=o.dir==='long'?1:-1,risk=Math.abs(o.en-o.stop0);
-    const liveR=px!==null&&risk>0?(px-o.en)*sg/risk:null;
+    const grossR=px!==null&&risk>0?(px-o.en)*sg/risk:null;
+    const feeRate=n('fee'),feeR=grossR!==null&&Number.isFinite(feeRate)&&o.sp>0?feeRate/o.sp:0;
+    const liveR=grossR===null?null:grossR-feeR;
+    const budget=Number(o['r$']),estimatedPnl=liveR!==null&&Number.isFinite(budget)?liveR*budget:null;
+    const quoteAge=px===null?null:Math.max(0,Math.floor((Date.now()-market.at)/1000));
     const action=remoteMode&&remoteSource!=='local'?'Close from laptop':
       '<button type="button" data-a="close" data-s="'+o.id+'" '+
-      (remoteMode&&!remoteMarketFresh?'disabled title="Fresh exchange price required"':'')+
+      (px===null?'disabled title="Fresh exchange quote required"':'')+
       '>Close manually</button>';
     return '<tr><td><b>OPEN</b></td><td>'+new Date(o.open).toLocaleString()+
       '</td><td>'+tv(o.sym)+'</td><td>'+
       pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())+'</td><td>'+fp(o.en)+
-      '</td><td>'+(px===null?'— (stale)':fp(px))+'</td><td>'+fp(o.stop)+
+      '</td><td>'+(px===null?'— (stale)':fp(px)+' ('+quoteAge+'s)')+'</td><td>'+fp(o.stop)+
       '</td><td>'+fp(o.tp2)+'</td><td class="'+(liveR===null?'mut':liveR>=0?'long-t':'short-t')+
-      '">'+(liveR===null?'—':f(liveR)+' R (live)')+
-      '</td><td>—</td><td>'+Math.round((Date.now()-o.open)/60000)+'m open'+
+      '">'+(liveR===null?'— (stale)':f(liveR)+' R (est.)')+
+      '</td><td>'+(estimatedPnl===null?'— (stale)':'$'+f(estimatedPnl)+' (est.)')+'</td><td>'+Math.round((Date.now()-o.open)/60000)+'m open'+
       (o.profitLockStage?' · SL lock stage '+o.profitLockStage:'')+'</td><td>'+
       trackedChartButton(o,'open')+'</td><td>'+action+'</td></tr>';
   });
@@ -882,7 +881,7 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b
         return remotePoll();
       }).catch(error=>window.alert(error.message));
     }else{
-      const price=M[trade.sym]&&M[trade.sym].p,risk=Math.abs(trade.en-trade.stop0);
+      const price=quotedTradePrice(trade),risk=Math.abs(trade.en-trade.stop0);
       if(!(price>0&&risk>0)){window.alert('Market price unavailable. Close after the feed resumes.');return;}
       const sign=trade.dir==='long'?1:-1;
       closeT(trade,'Closed manually (simulated only)',price,sign*(price-trade.en)/risk);
