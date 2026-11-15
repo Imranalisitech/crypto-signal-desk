@@ -38,12 +38,13 @@
       input.value=String(status.config[input.dataset.liveSetting]);
     input.disabled=busy||armed;
   }
-  $('liveArm').disabled=busy||armed||!connected;
+  $('liveArm').disabled=true; // Simulation-only release: hard-disabled UI and backend.
   $('liveDisarm').disabled=busy||!armed;
-  $('liveConnect').disabled=busy||armed;
-  $('liveVerify').disabled=busy||armed||!saved;
+  $('liveArmPhrase').disabled=true;
+  $('liveConnect').disabled=true;
+  $('liveVerify').disabled=true;
   $('liveDisconnect').disabled=busy||armed||!saved;
-  $('liveSaveRisk').disabled=busy||armed;
+  $('liveSaveRisk').disabled=true;
   const orders=Array.isArray(status.orders)?status.orders:[];
   $('liveOrderCount').textContent=orders.length+' entries';
   const td=s=>'<td>'+h(s)+'</td>';
