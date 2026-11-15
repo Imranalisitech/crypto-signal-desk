@@ -253,11 +253,15 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
      <input data-live-setting="maxOrdersPerDay" type="text" inputmode="numeric" autocomplete="off" value="2" placeholder="Number of daily entries"/>
      <small>Maximum NEW real Binance Futures orders each UTC day. Simulated signal tracking is not limited.</small>
    </label>
+   <label>Maximum daily loss limit (USD)
+     <input data-live-setting="maxDailyLossUSD" type="text" inputmode="decimal" autocomplete="off" value="25" placeholder="e.g. 25"/>
+     <small>Daily loss budget for your risk-plan draft (UTC day). Browser mode does not execute orders or enforce this limit against Binance positions.</small>
+   </label>
   </div>
   <div id="liveRiskDraft" class="paper-note" aria-live="polite"></div>
   <button id="liveSaveRisk" type="button">Save trading preferences</button>
   <p class="paper-note"><b>Automatic SL / TP:</b> The setup supplies the initial structural SL and a final 3R TP. For the profit-lock simulation: at <b>50% of TP distance</b> protect <b>5% of the total entry-to-TP price range</b>; at <b>75% of TP distance</b> protect <b>50% of that range</b>. This applies equally to LONG and SHORT. These are PRICE levels, not guaranteed realized returns. A moved Binance stop requires working connection, confirmed active position, Binance order acceptance and explicit live activation. Existing protection stays in place if the replacement fails.</p>
-  <p class="paper-note">No spinner controls or periodic reset of unsaved values. Invalid or unsupported choices are explicitly rejected. The PDH/PDL AMD FVG strategy cannot submit real Binance orders in simulation mode.</p>
+  <p class="paper-note">No spinner controls or periodic reset of unsaved values. Invalid or unsupported choices are explicitly rejected. No real Binance orders can be submitted in simulation mode.</p>
  </details>
  <div class="paper-status" style="background:#3d2631">
   <strong>3. Live execution control</strong>
