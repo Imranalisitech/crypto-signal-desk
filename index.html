@@ -216,12 +216,19 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 
 <section id="realBinancePanel" class="paper-panel" hidden style="border-color:#d76262;background:linear-gradient(120deg,#321b24,#1d2736)">
  <div class="paper-heading">
-  <h2 style="color:#ffc1c1">Binance Futures — Simulation Mode (Orders Disabled)</h2>
-  <b class="paper-only" style="background:#75232e;border-color:#e46666">REAL EXECUTION DISABLED</b>
+  <h2 style="color:#ffc1c1">Binance Futures — Real Trading Dashboard</h2>
+  <b class="paper-only" style="background:#75232e;border-color:#e46666">LIVE CONNECTION REQUIRED</b>
  </div>
- <p class="paper-note">Your previous Binance Futures risk setup is available below. In a browser installation, you can save a <b>local risk-plan draft</b> (allocation, risk percentage, leverage and daily order limit), but Binance credentials, balances and orders cannot be retrieved from your Windows laptop. All new signals remain <b>SIMULATION ONLY</b>; existing exchange positions must be monitored independently.</p>
- <div id="liveStatus" class="paper-status">Live trading DISABLED. The real account is not connected.</div>
+ <p class="paper-note">Manage your Binance Futures account connection, position monitoring, order controls and risk limits here. Live balance and positions are displayed only after a verified secure local connection. For safety, this public website does not accept API secrets or place orders directly.</p>
+ <div id="liveStatus" class="paper-status">Real Binance Futures account not connected. Execution is locked until secure verification and explicit activation.</div>
  <div id="liveBalance" class="paper-metrics"></div>
+  <div id="liveTradingChecklist" class="paper-status" style="font-size:12px">
+    <b>Live readiness:</b> <span id="liveReadinessText">Connection not verified · exchange positions unavailable · order execution locked</span>
+  </div>
+  <div class="paper-heading" style="gap:8px;flex-wrap:wrap;margin:8px 0 14px">
+    <button type="button" id="liveRefreshAccount">Refresh real account</button>
+    <a href="https://www.binance.com/en/futures" target="_blank" rel="noopener noreferrer" style="color:#a8d5ff">Open Binance Futures account</a>
+  </div>
  <details class="paper-details" id="liveCredentials">
   <summary>1. Connect your real Binance Futures API credentials securely</summary>
   <p class="paper-note">Create a Binance Futures API key with Futures trading permission, withdrawals disabled and IP restriction if available. Enter it here on your laptop only. Windows DPAPI encrypts credentials under your Windows account. Never share the secret in chat, GitHub or Render.</p>
@@ -255,17 +262,17 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
    </label>
    <label>Maximum daily loss limit (USD)
      <input data-live-setting="maxDailyLossUSD" type="text" inputmode="decimal" autocomplete="off" value="25" placeholder="e.g. 25"/>
-     <small>Daily loss budget for your risk-plan draft (UTC day). Browser mode does not execute orders or enforce this limit against Binance positions.</small>
+     <small>Maximum permitted daily loss in USD (UTC). The value is editable; automatic blocking requires a verified live execution engine.</small>
    </label>
   </div>
   <div id="liveRiskDraft" class="paper-note" aria-live="polite"></div>
   <button id="liveSaveRisk" type="button">Save trading preferences</button>
   <p class="paper-note"><b>Automatic SL / TP:</b> The setup supplies the initial structural SL and a final 3R TP. For the profit-lock simulation: at <b>50% of TP distance</b> protect <b>5% of the total entry-to-TP price range</b>; at <b>75% of TP distance</b> protect <b>50% of that range</b>. This applies equally to LONG and SHORT. These are PRICE levels, not guaranteed realized returns. A moved Binance stop requires working connection, confirmed active position, Binance order acceptance and explicit live activation. Existing protection stays in place if the replacement fails.</p>
-  <p class="paper-note">No spinner controls or periodic reset of unsaved values. Invalid or unsupported choices are explicitly rejected. No real Binance orders can be submitted in simulation mode.</p>
+  <p class="paper-note">Settings are not overwritten while editing. The daily loss limit must be enforced and audited by the live execution engine before automatic trading can be enabled.</p>
  </details>
  <div class="paper-status" style="background:#3d2631">
   <strong>3. Live execution control</strong>
-  <p class="paper-note">Simulation-only mode: activation of real Binance trading is disabled. No new real Binance orders or real exchange-side SL/TP orders will be submitted by this strategy. Any positions placed previously require separate monitoring in Binance.</p>
+  <p class="paper-note">Real execution requires a verified private Binance connection, server-side daily-loss enforcement, exchange-confirmed stop-loss and take-profit protection, and explicit activation. If these safeguards are unavailable, orders remain locked. Existing Binance positions must be monitored independently.</p>
   <label style="display:block;font-size:12px">Type exactly <b>ENABLE REAL BINANCE FUTURES AUTO TRADING</b>
    <input id="liveArmPhrase" type="text" autocomplete="off" spellcheck="false" style="width:100%;padding:8px;border-radius:6px;background:#101e30;color:#fff;border:1px solid #b96875" placeholder="Activation phrase (never saved)"/>
   </label>
@@ -274,9 +281,9 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
    <button id="liveDisarm" type="button" style="background:#79402e">EMERGENCY PAUSE — No new orders</button>
   </div>
  </div>
- <h3>Real Binance order audit <small id="liveOrderCount"></small></h3>
+ <h3>Real Binance orders &amp; open positions <small id="liveOrderCount"></small></h3>
  <div class="tw" id="liveOrders"></div>
- <h3>Real-account safety events</h3><div class="tw" id="liveEvents"></div>
+ <h3>Real trading safety &amp; execution events</h3><div class="tw" id="liveEvents"></div>
  <p class="paper-note"><b>Important:</b> Emergency Pause blocks future entries; it does not close already-open Binance positions. Existing Binance-side protective orders stay on the exchange. Realized P&L must be verified from Binance account history. This desktop software is not a replacement for monitoring your exchange account.</p>
 </section>
 
