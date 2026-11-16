@@ -910,12 +910,19 @@ function render(){
   // Every processed coin belongs to the live monitoring table.
   // A scanned coin is NOT automatically a qualified trade.
   for(const r of L)if(r.sym)watchBySym.set(r.sym,r);
+  // Highest CURRENT V4 strategy progress first; keep the same coins across scans.
+  // Legacy Windows scores must never be ranked as valid V4 technical scores.
+  const watchRank=r=>r.verifiedStrategy===false||r.status==='unverified'?-1:
+    Number.isFinite(Number(r.score))?Math.max(0,Math.min(100,Number(r.score))):-1;
   const wlAll=[...watchBySym.values()].sort((a,b)=>
-    (a.firstSeen||0)-(b.firstSeen||0)||a.sym.localeCompare(b.sym));
+    watchRank(b)-watchRank(a)||
+    (b.status==='confirm'?1:0)-(a.status==='confirm'?1:0)||
+    (Number(b.lastScanAt||b.analyzedAt)||0)-(Number(a.lastScanAt||a.analyzedAt)||0)||
+    a.sym.localeCompare(b.sym));
 const wl=wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).slice(0,watchLimit);
-$('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).length+' monitored coins · scroll for more';
+$('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).length+' monitored coins · highest V4 score first · scroll for more';
   $('wl').innerHTML=tbl(
- ['','Coin','Side','Price','Neckline','FVG / retest stage','Progress','Status / Waiting for'],
+ ['','Coin','Side','Price','Neckline','FVG / retest stage','Score ↓','Status / Waiting for'],
  wl.map(r=>{
   const missing=r.G?r.G.filter(x=>!x.ok).map(x=>x.t):[];
   const g=r.liquidity||{};
@@ -927,7 +934,7 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
    (r.fvg?.filled?'Exact neckline retested · close pending':r.fvg?.formed?'FVG not fully filled':
     g.strongPressure?'Double sweep confirmed · FVG pending':
     g.secondSweep?'Manipulation sweep seen':g.firstSweep?'Manipulation sweep seen':'Awaiting accumulation / sweep')+'</td><td>'+
-   f(r.score,0)+'</td><td class="mut">'+((r.status==='none'?'Not currently qualified · ':r.status==='error'?'Data refresh error · ':'')+
+   (watchRank(r)<0?'—':f(watchRank(r),0))+'</td><td class="mut">'+((r.status==='none'?'Not currently qualified · ':r.status==='error'?'Data refresh error · ':'')+
      (r.status==='unverified'?'Windows scanner update required · ':
       missing.join('; ')||r.reason||'Monitoring'))+'</td></tr>';
  }), 'No processed coins received yet.');
@@ -1228,7 +1235,7 @@ function adoptLaptop(snapshot,source,online,lastSeen){
        lastSeen:Date.now(),verifiedStrategy:true};
    }else{
      R[item.sym]={sym:item.sym,price:item.price,chg:item.chg,vol:item.vol,
-       status:'unverified',side:null,dir:null,ok:false,score:0,checks:[],G:[],
+       status:'unverified',side:null,dir:null,ok:false,score:null,checks:[],G:[],
        plan:null,reason:'Scanned by older Windows strategy — V4 setup not evaluated',
        analyzedAt:item.analyzedAt,firstSeen:old?.firstSeen||Date.now(),
        lastSeen:Date.now(),verifiedStrategy:false};
