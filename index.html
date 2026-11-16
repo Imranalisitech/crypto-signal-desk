@@ -452,7 +452,7 @@ function persistWatch(){
  try{localStorage.setItem(WATCH_STORE,JSON.stringify({cursor:scanCursor,
   items:entries.map(x=>({sym:x.sym,status:x.status,side:x.side,dir:x.dir,
    score:x.score,reason:x.reason,checks:x.checks,G:x.G,
-   liquidity:x.liquidity,fvg:x.fvg,plan:x.plan,
+   liquidity:x.liquidity,fvg:x.fvg,plan:x.plan,trends:x.trends,
    firstSeen:x.firstSeen,lastSeen:x.lastSeen,lastScanAt:x.lastScanAt,
    previousDayLevel:x.previousDayLevel,previousDayHigh:x.previousDayHigh,
    previousDayLow:x.previousDayLow}))}))}catch(_){}
@@ -531,7 +531,7 @@ async function scan(){
     for(const item of Object.values(R)){
       if(item.status==='confirm'){
         item.status='watch';item.ok=false;item.plan=null;
-        item.reason='Previously confirmed; awaiting a fresh closed 5m setup';
+        item.reason='Previously confirmed; awaiting monthly/weekly trend and fresh 5m confirmation';
       }
     }
     scanFailures=0;render();
