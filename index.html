@@ -187,7 +187,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 <div id="ban"></div>
 <div class="kpi" id="kpi"></div>
 <section id="scanInspector" class="scan-health">
- <div class="scan-top"><h2>Live market scanning & data</h2><span id="scanPhase" class="scan-tag">Loading scanner status</span></div>
+ <div class="scan-top"><h2>Live market scanning & data</h2><span id="scanPhase" class="scan-tag">Loading scanner status</span><button type="button" id="useCurrentBrowserScanner" hidden>Run approved 5m strategy in browser</button></div>
  <div id="scanDescription" class="scan-detail">Checking your laptop scanner...</div>
  <progress id="scanBar" max="1" value="0"></progress>
  <div class="scan-metrics" id="scanCounters"></div>
@@ -751,6 +751,7 @@ function renderScanInspector(){
     remoteMode&&!remoteMarketFresh&&phase==='RUNNING'?'WAITING FOR EXCHANGE PRICES':
     labels[phase]||phase;
   $('scanPhase').textContent=scanBadge;
+  $('useCurrentBrowserScanner').hidden=!(remoteMode&&remoteOnline&&phase==='UPDATE_REQUIRED');
   $('scanBar').max=Math.max(1,total);
   $('scanBar').value=Math.max(0,Math.min(processed,total||1));
   const stamp=last?new Date(last).toLocaleString():'None yet';
@@ -1279,6 +1280,11 @@ function activateBrowserFallback(){
  $('topn').value='500';
  render();startBrowserScanner();
 }
+$('useCurrentBrowserScanner').addEventListener('click',()=>{
+ if(!window.confirm('Switch this window to the approved 5-minute V4 browser scanner? The existing Windows scanner will not be modified. Browser scans run only while this app stays open, and no real Binance orders will be placed.'))return;
+ try{localStorage.removeItem('cryptoLaptopActivated')}catch(_){}
+ activateBrowserFallback();
+});
 function startBrowserScanner(){
  if(browserScannerStarted)return;
  browserScannerStarted=true;
