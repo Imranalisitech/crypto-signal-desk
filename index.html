@@ -907,10 +907,40 @@ function render(){
   $('kpi').innerHTML=[['Long signals',cl.length],['Short signals',cs.length],['Watching',L.filter(r=>r.status==='watch').length],
     [remoteMode&&!remoteMarketFresh?'Saved open trades':'Open trades',st.open.length],
     ['Today',t.length+' trades'],['Today result',f(dr)+' R']].map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join('');
-  $('cl').innerHTML=cl.length?cl.map(r=>card(r)).join(''):'<div class="empty">No confirmed long setups right now.</div>';
-  $('cs').innerHTML=cs.length?cs.map(r=>card(r)).join(''):'<div class="empty">No confirmed short setups right now.</div>';
+  // Current confirmed 5m setups and open tracked simulations are distinct.
+  // An older Windows trade may be open even when its originating strategy is
+  // not the approved V5; never silently treat that as a NEW confirmation.
+  const trackedLong=st.open.filter(o=>o&&o.dir==='long'&&o.sym&&
+    !cl.some(r=>r.sym===o.sym&&signalKey(r)===o.signalKey));
+  const trackedShort=st.open.filter(o=>o&&o.dir==='short'&&o.sym&&
+    !cs.some(r=>r.sym===o.sym&&signalKey(r)===o.signalKey));
+  function trackedCard(o){
+    const safeText=x=>String(x??'').replace(/[&<>"']/g,c=>({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const q=quotedTradePrice(o);
+    const verified=!!(R[o.sym]?.verifiedStrategy===true&&
+      R[o.sym]?.status==='confirm'&&R[o.sym]?.plan?.ck===o.signalCandle);
+    const label=verified?'Open tracked V5 simulation':'Open tracked simulation · strategy unverified';
+    return '<div class="card '+o.dir+'"><div class="ch"><b>'+safeText(o.sym)+'</b>'+
+      '<span class="m">'+safeText(label)+'</span></div>'+
+      '<table class="kv"><tr><td>Entry</td><td>'+fp(o.en)+'</td></tr>'+
+      '<tr><td>Stop loss</td><td>'+fp(o.stop)+'</td></tr>'+
+      '<tr><td>Final TP</td><td>'+fp(o.tp2)+'</td></tr>'+
+      '<tr><td>Live market price</td><td>'+(q===null?'Unavailable / stale':fp(q))+'</td></tr>'+
+      '<tr><td>Started</td><td>'+safeText(o.open?new Date(o.open).toLocaleString():'Unknown')+'</td></tr>'+
+      '<tr><td>Signal validation</td><td>'+safeText(verified?'Current V5 verified':'Historical / older scanner; NOT a fresh V5 confirmation')+'</td></tr></table>'+
+      '<div class="auto-track-state">Open SIMULATED trade · exchange order NOT verified</div>'+
+      trackedChartButton(o,'open')+'</div>';
+  }
+  $('cl').innerHTML=(cl.length?cl.map(r=>card(r)).join(''):'')+
+    (trackedLong.length?'<div class="mut">Open tracked LONG trades</div>'+trackedLong.map(trackedCard).join(''):'')||
+    '<div class="empty">No confirmed or open long setups right now.</div>';
+  $('cs').innerHTML=(cs.length?cs.map(r=>card(r)).join(''):'')+
+    (trackedShort.length?'<div class="mut">Open tracked SHORT trades</div>'+trackedShort.map(trackedCard).join(''):'')||
+    '<div class="empty">No confirmed or open short setups right now.</div>';
   $('cl').scrollTop=longScroll;$('cs').scrollTop=shortScroll;
-  $('nl').textContent=cl.length+' coins';$('ns').textContent=cs.length+' coins';
+  $('nl').textContent=cl.length+' fresh confirmed · '+trackedLong.length+' open tracked';
+  $('ns').textContent=cs.length+' fresh confirmed · '+trackedShort.length+' open tracked';
   // Stable watchlist: keep historical candidates visible, update same rows on rescans.
   // If an old setup ceases to qualify, show its current status rather than a stale trade.
   const watchBySym=new Map((remoteMode?[]:Object.values(watchMemory)).map(r=>[r.sym,r]));
