@@ -178,7 +178,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
     <label>Data source<select id="ex"><option value="bybit">Bybit (recommended)</option><option value="binance">Binance</option></select></label>
     <label>Account ($)<input id="acct" type="number" value="2000"></label>
     <label>Risk % per trade<input id="risk" type="number" step="0.1" value="0.5"></label>
-    <span class="mut" style="font-size:12px">PDL LONG / PDH SHORT 5m reversal: liquidity sweep, neckline breakout, directional FVG, retest of neckline area filling at least 50% of the FVG, then a CLOSED candle beyond the SAME neckline. Simulated 3R target.</span>
+    <span class="mut" style="font-size:12px"></span>
     <label>Fees maker+taker %<input id="fee" type="number" step="0.005" value="0.075"></label>
     <label>Min 24h volume ($M)<input id="minvol" type="number" value="0"></label>
     <label>Max coins to scan<input id="topn" type="number" value="600"></label>
@@ -299,12 +299,12 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
  <p class="paper-note"><b>Important:</b> Emergency Pause blocks future entries; it does not close already-open Binance positions. Existing Binance-side protective orders stay on the exchange. Realized P&L must be verified from Binance account history. This desktop software is not a replacement for monitoring your exchange account.</p>
 </section>
 
-<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist coins require a PDL/PDH liquidity sweep, breakout beyond the accumulation neckline, 5m FVG, neckline-area pullback filling at least 50% of the FVG, and a second close beyond that neckline. Final TP stays 3R; targets are not guaranteed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
+<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist retains previously identified setups and updates them on every scan; signals require a fresh completed 5m entry candle.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 <section id="tradeResultsPanel"><h2>Automatic trades & results <span><button id="allResults" type="button" hidden>Show all results</button> <button id="clearHistory" type="button">Clear closed history</button> <button id="clearAllTrades" type="button" title="Clear open AND closed simulated trades and current coin analysis; never touches real Binance positions">Clear all simulated trades</button> <button id="csv" type="button">Export all CSV</button></span></h2>
   <p class="mut" style="font-size:12px">Open-trade Now, R and USDT P&amp;L use exchange quotes less than 45 seconds old and are estimates, not guaranteed fills or realized Binance balances. Stale quotes disable manual simulated closes. Open and closed simulated trades are shown together. "Clear closed history" keeps open trades; "Clear all simulated trades" also resets open simulations and current scanner coin rows (fresh scan results can appear again). Neither closes real Binance positions.</p>
   <div class="stats" id="stats"></div><canvas id="eq"></canvas><div class="tw" id="hs" style="margin-top:8px"></div></section>
 
-<p class="mut" style="font-size:12px">The 5m strategy waits for a PDL LONG / PDH SHORT sweep, first break beyond the accumulation neckline, 5m FVG, neckline-area pullback and >=50% FVG fill, then a second closed 5m candle beyond that neckline. Final TP at 3R; real Binance orders disabled. Distribution is the anticipated 3R target. Real Binance order placement is disabled.</p>
+<p class="mut" style="font-size:12px">Real Binance orders remain locked until the private execution system is verified.</p>
 </main>
 <div id="tradeChartModal" class="trade-chart-modal" hidden>
   <div id="tradeChartDialog" class="trade-chart-dialog" role="dialog" aria-modal="true" aria-labelledby="tradeChartTitle" tabindex="-1">
@@ -707,21 +707,17 @@ function card(r){
  const p=r.plan||{},key=signalKey(r);
  const tracking=st.open.some(x=>x.signalKey===key);
  const recorded=st.hist.some(x=>x.signalKey===key);
- const fv=r.fvg||{},rsi=r.rsi||{};
+ const fv=r.fvg||{};
  const checks=[
   ['Entry',fp(p.en)],['SL ('+f(p.sp,2)+'%)',fp(p.stop)],
   ['Final TP (3R)',fp(p.tp2)],['Target R:R','1 : 3'],
-  ['Strategy','PDL LONG / PDH SHORT 5m sweep reversal + accumulation / manipulation / FVG fill'],
-  ['Monthly RSI bias',f(rsi.monthly,1)],['Weekly RSI bias',f(rsi.weekly,1)],
-  ['Daily RSI pullback',f(rsi.daily,1)],['5m RSI',f(rsi.intraday5m,1)],
-  ['Required 5m divergence',rsi.divergence?'Confirmed':'Not confirmed'],
-  ['5m recovery OR momentum',rsi.recovery?'Recovery confirmed':rsi.momentumAlternative?'Momentum confirmed':'Not confirmed'],
-  ['Manipulation sweep',r.liquidity?.sweepTime?'Confirmed':'Not available'],
-  ['FVG entry zone',fv.formed?fp(fv.low)+' – '+fp(fv.high):'Not available'],
-  ['FVG retest candle',fv.filled?'Closed 1m candle':'Waiting'],
-  ['Volume ratio',Number.isFinite(fv.volumeRatio)?f(fv.volumeRatio,2)+'× prior 5-candle average':'—'],
-  ['Stop placement','Beyond manipulation extreme'],
-  ['Execution','SIMULATED ONLY · Real Binance orders disabled']
+  ['Previous-day level',fp(p.previousDayLevel)],
+  ['Neckline',fp(p.neckline)],
+  ['Sweep',r.liquidity?.sweepTime?'Confirmed':'Pending'],
+  ['Three-candle FVG',fv.formed?fp(fv.low)+' – '+fp(fv.high):'Pending'],
+  ['Exact neckline retest',fv.filled?'Confirmed':'Pending'],
+  ['Entry confirmation','Second CLOSED 5m candle'],
+  ['Execution','Signal tracking only · real orders disabled']
  ];
  return '<div class="card '+r.dir+'" data-a="chart" data-s="'+r.sym+
   '" role="button" tabindex="0"><div class="ch"><button class="coin-chart" type="button" data-a="chart" data-s="'+r.sym+'">'+
@@ -831,14 +827,11 @@ function renderScanInspector(){
     const priceCell=Number.isFinite(livePrice)&&livePrice>0?fp(livePrice):
       Number.isFinite(storedPrice)&&storedPrice>0?
         '<span title="Last analyzed price — NOT live">'+fp(storedPrice)+' (saved)</span>':'—';
-    const jha=r.fvg?.ok?
-      '1m FVG retest + directional volume candle':
-      r.fvg?.filled?'FVG filled — volume-confirmed candle pending':
-      r.fvg?.formed?'New FVG formed — waiting for FULL gap fill':
-      r.liquidity?.ok?'Manipulation sweep detected — FVG pending':
-      r.liquidity?.secondSweep?'Manipulation sweep observed':
-      r.liquidity?.firstSweep?'Manipulation sweep observed':
-      r.rsi?'RSI / AMD / FVG conditions pending':'Higher-timeframe RSI unavailable';
+    const jha=r.status==='confirm'?'Exact neckline retest + second close confirmed':
+      r.fvg?.filled?'Retest completed, waiting for confirming close':
+      r.fvg?.formed?'FVG formed, waiting for exact neckline retest':
+      r.liquidity?.ok?'Sweep completed, waiting for neckline breakout':
+      'Waiting for approved price-action setup';
     return '<tr><td>'+link+'</td><td>'+safe(r.dir||'—')+'</td><td>'+
       priceCell+'</td><td>'+safe(c.name||'—')+
       '</td><td>'+safe(r.liquidity?.day?.high!=null?fp(r.liquidity.day.high):'—')+
@@ -919,7 +912,7 @@ function render(){
 const wl=wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).slice(0,watchLimit);
 $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).length+' retained coins · scroll for more';
   $('wl').innerHTML=tbl(
- ['','Coin','Side','Price','Accumulation boundary','FVG / volume stage','Score','Status / Waiting for'],
+ ['','Coin','Side','Price','Neckline','FVG / retest stage','Progress','Status / Waiting for'],
  wl.map(r=>{
   const missing=r.G?r.G.filter(x=>!x.ok).map(x=>x.t):[];
   const g=r.liquidity||{};
@@ -928,7 +921,7 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
    (r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'—')+
    '</td><td>'+fp(M[r.sym]?.p||r.price)+
    '</td><td>'+boundary+'</td><td>'+
-   (r.fvg?.filled?'FVG filled · neckline close pending':r.fvg?.formed?'FVG not fully filled':
+   (r.fvg?.filled?'Exact neckline retested · close pending':r.fvg?.formed?'FVG not fully filled':
     g.strongPressure?'Double sweep confirmed · FVG pending':
     g.secondSweep?'Manipulation sweep seen':g.firstSweep?'Manipulation sweep seen':'Awaiting accumulation / sweep')+'</td><td>'+
    f(r.score,0)+'</td><td class="mut">'+((r.status==='none'?'Not currently qualified · ':r.status==='error'?'Data refresh error · ':'')+
@@ -1219,13 +1212,13 @@ function adoptLaptop(snapshot,source,online,lastSeen){
    storeTradeClearEpoch();
  }
  const allCutoff=simTradesClearEpoch;
- const strategyMatches=snapshot.strategyVersion==='PDL_LONG_PDH_SHORT_NECKLINE_FVG_RETEST_5M_V3';
+ const strategyMatches=snapshot.strategyVersion==='PDL_PDH_ONLY_NECKLINE_EXACT_RETEST_5M_V4';
  R=strategyMatches?
     Object.fromEntries(snapshot.results.filter(x=>x&&x.sym&&
       (!allCutoff||Number(x.analyzedAt)>allCutoff)).map(x=>[x.sym,x])):{};
  if(!strategyMatches){
    scanMeta={...snapshot,scanPhase:'UPDATE_REQUIRED',
-     scanMessage:'Desktop scanner is on an older strategy. Update the Windows scanner to PDL LONG / PDH SHORT AMD FVG 5m V2; browser fallback uses the new strategy. Existing history preserved.'};
+     scanMessage:'Windows scanner strategy differs from the approved neckline-only V4. Update the Windows agent to this exact version; previous results are not accepted as current confirmed signals.'};
  }
  M=snapshot.markets||{};
  st.open=snapshot.open.filter(item=>
