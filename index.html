@@ -616,6 +616,9 @@ function registerConfirmedTrade(r){
   if(st.open.some(t=>t.signalKey===key)||st.hist.some(t=>t.signalKey===key)){
     st.trackedKeys[key]=Date.now();save();return false;
   }
+  // Never start a second overlapping simulated position for the same coin and side.
+  // This affects only browser simulations; never touches actual exchange orders.
+  if(st.open.some(t=>t.sym===r.sym&&t.dir===r.dir))return false;
   const now=Date.now();
   const track={
     id:now+'-'+Math.random().toString(36).slice(2,8),
@@ -932,15 +935,36 @@ function render(){
       '<div class="auto-track-state">Open SIMULATED trade · exchange order NOT verified</div>'+
       trackedChartButton(o,'open')+'</div>';
   }
+  // Group distinct older trades by coin/side for display only.
+  // Keep every original trade intact in st.open and Automatic Trades & Results.
+  const groupTracked=items=>{
+    const groups=new Map();
+    for(const o of items){
+      const key=o.sym+':'+o.dir;
+      if(!groups.has(key))groups.set(key,[]);
+      groups.get(key).push(o);
+    }
+    return [...groups.values()].map(records=>{
+      const latest=[...records].sort((a,b)=>Number(b.open||0)-Number(a.open||0))[0];
+      return {latest,count:records.length};
+    });
+  };
+  const openLongGroups=groupTracked(trackedLong),openShortGroups=groupTracked(trackedShort);
+  const trackedGroupedCard=group=>trackedCard(group.latest).replace(
+    '<div class="auto-track-state">',
+    (group.count>1?'<div class="mut" style="padding:6px 0">There are '+group.count+
+      ' distinct open records for this coin. Showing the latest here; all individual entries remain in Automatic Trades & Results.</div>':'')+
+    '<div class="auto-track-state">'
+  );
   $('cl').innerHTML=(cl.length?cl.map(r=>card(r)).join(''):'')+
-    (trackedLong.length?'<div class="mut">Open tracked LONG trades</div>'+trackedLong.map(trackedCard).join(''):'')||
+    (openLongGroups.length?'<div class="mut">Open tracked LONG coins</div>'+openLongGroups.map(trackedGroupedCard).join(''):'')||
     '<div class="empty">No confirmed or open long setups right now.</div>';
   $('cs').innerHTML=(cs.length?cs.map(r=>card(r)).join(''):'')+
-    (trackedShort.length?'<div class="mut">Open tracked SHORT trades</div>'+trackedShort.map(trackedCard).join(''):'')||
+    (openShortGroups.length?'<div class="mut">Open tracked SHORT coins</div>'+openShortGroups.map(trackedGroupedCard).join(''):'')||
     '<div class="empty">No confirmed or open short setups right now.</div>';
   $('cl').scrollTop=longScroll;$('cs').scrollTop=shortScroll;
-  $('nl').textContent=cl.length+' fresh confirmed · '+trackedLong.length+' open tracked';
-  $('ns').textContent=cs.length+' fresh confirmed · '+trackedShort.length+' open tracked';
+  $('nl').textContent=cl.length+' fresh confirmed · '+openLongGroups.length+' open coins';
+  $('ns').textContent=cs.length+' fresh confirmed · '+openShortGroups.length+' open coins';
   // Stable watchlist: keep historical candidates visible, update same rows on rescans.
   // If an old setup ceases to qualify, show its current status rather than a stale trade.
   const watchBySym=new Map((remoteMode?[]:Object.values(watchMemory)).map(r=>[r.sym,r]));
