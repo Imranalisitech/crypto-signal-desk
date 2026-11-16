@@ -767,8 +767,9 @@ function renderScanInspector(){
     ['Processed',processed+' / '+(total||'?')],
     ['Evaluated this scan',analyzed],
     ['Last scan evaluated',meta.lastScanAnalyzed??'—'],['Saved coin data',results.length],
-    ['Confirmed',results.filter(x=>x.status==='confirm').length],
+    ['Confirmed',results.filter(x=>x.verifiedStrategy!==false&&x.status==='confirm').length],
     ['Watching',results.filter(x=>x.status==='watch').length],
+    ['Unverified legacy',results.filter(x=>x.status==='unverified').length],
     ['Errors',failures],['Insufficient candles',insufficient]
   ];
   $('scanCounters').innerHTML=data.map(x=>'<span>'+x[0]+': <b>'+x[1]+'</b></span>').join('');
@@ -856,7 +857,7 @@ function renderScanInspector(){
 function render(){
   const watchScroll=$('wl').scrollTop,longScroll=$('cl').scrollTop,shortScroll=$('cs').scrollTop;
   renderScanInspector();
-  const L=Object.values(R),cf=L.filter(r=>r.status==='confirm'),cl=cf.filter(r=>r.dir==='long'),cs=cf.filter(r=>r.dir==='short'),t=today(),dr=t.reduce((a,x)=>a+x.r,0);
+  const L=Object.values(R),cf=L.filter(r=>r.status==='confirm'&&r.verifiedStrategy!==false),cl=cf.filter(r=>r.dir==='long'),cs=cf.filter(r=>r.dir==='short'),t=today(),dr=t.reduce((a,x)=>a+x.r,0);
   $('dot').className='dot '+(err?'bad':lastScan?'ok':'');
   if(remoteMode){
     const origin=remoteSource==='local'?'Windows laptop server':'Windows laptop via Render';
@@ -905,18 +906,19 @@ function render(){
   // Stable watchlist: keep historical candidates visible, update same rows on rescans.
   // If an old setup ceases to qualify, show its current status rather than a stale trade.
   const watchBySym=new Map((remoteMode?[]:Object.values(watchMemory)).map(r=>[r.sym,r]));
-  for(const r of L)if(watchBySym.has(r.sym)||r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym))
-    watchBySym.set(r.sym,r);
+  // Every processed coin belongs to the live monitoring table.
+  // A scanned coin is NOT automatically a qualified trade.
+  for(const r of L)if(r.sym)watchBySym.set(r.sym,r);
   const wlAll=[...watchBySym.values()].sort((a,b)=>
     (a.firstSeen||0)-(b.firstSeen||0)||a.sym.localeCompare(b.sym));
 const wl=wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).slice(0,watchLimit);
-$('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).length+' retained coins · scroll for more';
+$('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).length+' monitored coins · scroll for more';
   $('wl').innerHTML=tbl(
  ['','Coin','Side','Price','Neckline','FVG / retest stage','Progress','Status / Waiting for'],
  wl.map(r=>{
   const missing=r.G?r.G.filter(x=>!x.ok).map(x=>x.t):[];
   const g=r.liquidity||{};
-  const boundary=g.level!=null?fp(g.level):'—';
+  const boundary=g.neckline!=null?fp(g.neckline):'—';
   return '<tr><td>'+star(r.sym)+'</td><td>'+tv(r.sym)+'</td><td>'+
    (r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'—')+
    '</td><td>'+fp(M[r.sym]?.p||r.price)+
@@ -925,8 +927,9 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
     g.strongPressure?'Double sweep confirmed · FVG pending':
     g.secondSweep?'Manipulation sweep seen':g.firstSweep?'Manipulation sweep seen':'Awaiting accumulation / sweep')+'</td><td>'+
    f(r.score,0)+'</td><td class="mut">'+((r.status==='none'?'Not currently qualified · ':r.status==='error'?'Data refresh error · ':'')+
-     (missing.join('; ')||r.reason||'—'))+'</td></tr>';
- }), 'No candidates near yesterday high/low.');
+     (r.status==='unverified'?'Windows scanner update required · ':
+      missing.join('; ')||r.reason||'Monitoring'))+'</td></tr>';
+ }), 'No processed coins received yet.');
  $('wl').scrollTop=watchScroll;
   // Open and closed simulated trades share one table; only closed rows
   // count toward win rate / realized P&L.
@@ -1075,7 +1078,7 @@ $('refreshScan').addEventListener('click',async()=>{
 $('wl').addEventListener('scroll',()=>{
  const el=$('wl');
  if(el.scrollTop+el.clientHeight<el.scrollHeight-90)return;
- const all=new Set([...Object.values(R).filter(r=>r.status==='watch'||r.status==='confirm'||st.pins.includes(r.sym)).map(x=>x.sym),
+ const all=new Set([...Object.values(R).map(x=>x.sym),
   ...(!remoteMode?Object.keys(watchMemory):[])]);
  const total=[...all].filter(sym=>sym.toLowerCase().includes(watchQuery)).length;
  if(watchLimit<total){const pos=el.scrollTop;watchLimit+=50;render();el.scrollTop=pos;}
@@ -1212,13 +1215,27 @@ function adoptLaptop(snapshot,source,online,lastSeen){
    storeTradeClearEpoch();
  }
  const allCutoff=simTradesClearEpoch;
- const strategyMatches=snapshot.strategyVersion==='PDL_PDH_ONLY_NECKLINE_EXACT_RETEST_5M_V4';
- R=strategyMatches?
-    Object.fromEntries(snapshot.results.filter(x=>x&&x.sym&&
-      (!allCutoff||Number(x.analyzedAt)>allCutoff)).map(x=>[x.sym,x])):{};
+ const strategyMatches=snapshot.strategyVersion===UnifiedStrategy.activeStrategy;
+ // Maintain every processed coin in the dashboard between laptop scans.
+ // Only the exact V4 strategy may yield actionable/confirmed signals.
+ for(const item of snapshot.results){
+   if(!item||typeof item.sym!=='string'||!/^[A-Z0-9]{2,24}USDT$/.test(item.sym))continue;
+   if(allCutoff&&Number(item.analyzedAt)<=allCutoff)continue;
+   const old=R[item.sym];
+   if(strategyMatches){
+     R[item.sym]={...item,firstSeen:old?.firstSeen||Date.now(),
+       lastSeen:Date.now(),verifiedStrategy:true};
+   }else{
+     R[item.sym]={sym:item.sym,price:item.price,chg:item.chg,vol:item.vol,
+       status:'unverified',side:null,dir:null,ok:false,score:0,checks:[],G:[],
+       plan:null,reason:'Scanned by older Windows strategy — V4 setup not evaluated',
+       analyzedAt:item.analyzedAt,firstSeen:old?.firstSeen||Date.now(),
+       lastSeen:Date.now(),verifiedStrategy:false};
+   }
+ }
  if(!strategyMatches){
    scanMeta={...snapshot,scanPhase:'UPDATE_REQUIRED',
-     scanMessage:'Windows scanner strategy differs from the approved neckline-only V4. Update the Windows agent to this exact version; previous results are not accepted as current confirmed signals.'};
+     scanMessage:'Windows scanner is processing coins with an older strategy. Coin rows remain visible, but all signals are unverified until the Windows scanner uses V4.'};
  }
  M=snapshot.markets||{};
  st.open=snapshot.open.filter(item=>
