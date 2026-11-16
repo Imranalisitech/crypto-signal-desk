@@ -2,15 +2,14 @@
 /*
  ONE AND ONLY trade-entry method:
  5-minute PDL LONG / PDH SHORT double-structure neckline retest.
- Price action + three-candle FVG with mandatory monthly & weekly
- price-structure trend alignment. Daily and 4h are never veto filters.
- No RSI, EMA, volume, OB, divergence or momentum indicators.
+ Price action + three-candle FVG only. No RSI, EMA, volume, OB, HTF bias,
+ divergence, momentum score or indicator filters.
  All OHLCV inputs must be FINISHED 5m candles, chronological.
  PDL/PDH are from the previous fully CLOSED UTC day.
  This module computes simulated signals and NEVER places exchange orders.
 */
 (function(root){
- const VERSION='PDL_PDH_NECKLINE_MW_TREND_5M_V5';
+ const VERSION='PDL_PDH_ONLY_NECKLINE_EXACT_RETEST_5M_V4';
  const num=x=>Number(x);
  const valid=b=>b&&[b.t,b.o,b.h,b.l,b.c].every(x=>Number.isFinite(num(x)))&&
    num(b.h)>=Math.max(num(b.o),num(b.c),num(b.l))&&
@@ -18,19 +17,7 @@
  const hi=a=>Math.max(...a.map(b=>num(b.h)));
  const lo=a=>Math.min(...a.map(b=>num(b.l)));
  const stamp=b=>num(b.t);
- // Trend definition: among the last THREE completely CLOSED candles, the
- // latest must close beyond the oldest close and make a higher high OR higher
- // low (reverse for SHORT). Neutral/missing data NEVER validates an entry.
- function structureTrend(bars){
-  if(!Array.isArray(bars)||bars.length<3||!bars.every(valid))return 'unknown';
-  const recent=bars.slice(-3),first=recent[0],last=recent[2];
-  const up=num(last.c)>num(first.c)&&
-     (num(last.h)>num(first.h)||num(last.l)>num(first.l));
-  const down=num(last.c)<num(first.c)&&
-     (num(last.h)<num(first.h)||num(last.l)<num(first.l));
-  return up?'up':down?'down':'sideways';
- }
- function evaluate({barsDaily,bars5,barsMonthly,barsWeekly,mark,account=2000,risk=.5,now=Date.now()}={}){
+ function evaluate({barsDaily,bars5,mark,account=2000,risk=.5,now=Date.now()}={}){
   const base={status:'none',side:null,dir:null,ok:false,executionReady:false,
     score:0,checks:[],G:[],plan:null,strategyVersion:VERSION,
     confirmationMode:'PDL LONG / PDH SHORT 5m sweep → neckline breakout → 3-bar FVG → exact neckline retest → next closed candle'};
@@ -42,8 +29,6 @@
   const day=barsDaily[barsDaily.length-1],pdl=num(day.l),pdh=num(day.h);
   if(!(pdh>pdl))return empty('Invalid previous-day range');
   const n=bars5.length;
-  const monthlyTrend=structureTrend(barsMonthly);
-  const weeklyTrend=structureTrend(barsWeekly);
   function inspect(side){
    const long=side==='long',sg=long?1:-1,level=long?pdl:pdh;
    const checks=[
@@ -51,9 +36,7 @@
     {ok:false,t:'5m close '+(long?'ABOVE':'BELOW')+' original accumulation neckline'},
     {ok:false,t:'Directional three-candle FVG formed on the breakout move'},
     {ok:false,t:'Later pullback retests EXACT same neckline from '+(long?'above':'below')+' and fills >=50% FVG'},
-    {ok:false,t:'A later CLOSED 5m '+(long?'bullish':'bearish')+' candle confirms beyond SAME neckline'},
-    {ok:monthlyTrend===(long?'up':'down'),t:'Monthly closed-candle trend must be '+(long?'UP':'DOWN')},
-    {ok:weeklyTrend===(long?'up':'down'),t:'Weekly closed-candle trend must be '+(long?'UP':'DOWN')}
+    {ok:false,t:'A later CLOSED 5m '+(long?'bullish':'bearish')+' candle confirms beyond SAME neckline'}
    ];
    let found=null;
    // Include the most recent ~16 hours of closed 5m structure; no extra indicators.
@@ -111,17 +94,13 @@
        if(!confirmed)break;
        checks[4].ok=true;
        if(k!==n-1||now-(stamp(b2)+300000)>360000)break;
-       // Mandatory monthly AND weekly agreement at the moment of entry.
-       // Daily and 4-hour may be countertrend; they are never blockers.
-       if(monthlyTrend!==(long?'up':'down')||weeklyTrend!==(long?'up':'down'))break;
        const entry=num(b2.c),distance=sg*(entry-stop);
        if(!(distance>0))break;
        const target=entry+sg*3*distance;
        const plan={en:entry,stop,tp1:target,tp2:target,rr:3,
         sp:distance/entry*100,'r$':Math.max(0,num(account)*num(risk)/100),
         ck:stamp(b2),timeframe:'5m',targetMode:'fixed3r',
-        setupType:'PDL/PDH sweep + neckline + FVG + exact retest + second 5m close + monthly/weekly trend', 
-        monthlyTrend,weeklyTrend,
+        setupType:'PDL/PDH sweep + first neckline break + FVG + exact neckline retest + second close',
         previousDayLevel:level,previousDayHigh:pdh,previousDayLow:pdl,
         neckline,necklineBreakAt:stamp(bars5[first]),
         fvgZone:{low:gapLow,high:gapHigh},fvgFormedAt:stamp(c),
@@ -145,8 +124,8 @@
    const score=pass?100:Math.round(checks.filter(x=>x.ok).length/checks.length*100);
    return {...base,side,dir:side,status:pass?'confirm':score?'watch':'none',
     ok:pass,score,checks,G:checks,executionReady:false,
-    reason:pass?'Exact neckline retest, SECOND 5m close, monthly and weekly trend confirmed':
-      checks.find(x=>!x.ok)?.t||'Awaiting exact neckline and monthly/weekly alignment',
+    reason:pass?'Exact neckline retest and SECOND 5m close confirmed':
+      checks.find(x=>!x.ok)?.t||'Awaiting exact neckline entry',
     plan:found?.plan||null,
     pattern:found?{name:long?'PDL long neckline rebreak':'PDH short neckline rebreak',
       confirmTime:stamp(found.bar),confirmClose:num(found.bar.c)}:null,
@@ -156,7 +135,6 @@
       formedAt:found.gapFormedAt,filledAt:found.retestAt,
       triggerTime:stamp(found.bar),triggerPrice:num(found.bar.c)}:null,
     neckline:found?.neckline??null,
-    trends:{monthly:monthlyTrend,weekly:weeklyTrend,daily:'not a blocker',fourHour:'not a blocker'},
     previousDayLevel:level,previousDayHigh:pdh,previousDayLow:pdl};
   }
   const longs=inspect('long'),shorts=inspect('short');
