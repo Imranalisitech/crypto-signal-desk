@@ -187,7 +187,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 <div id="ban"></div>
 <div class="kpi" id="kpi"></div>
 <section id="scanInspector" class="scan-health">
- <div class="scan-top"><h2>Live market scanning & data</h2><span id="scanPhase" class="scan-tag">Loading scanner status</span><button type="button" id="useCurrentBrowserScanner" hidden>Run approved 5m + trend strategy in browser</button></div>
+ <div class="scan-top"><h2>Live market scanning & data</h2><span id="scanPhase" class="scan-tag">Loading scanner status</span><button type="button" id="useCurrentBrowserScanner" hidden>Run approved 5m neckline strategy in browser</button></div>
  <div id="scanDescription" class="scan-detail">Checking your laptop scanner...</div>
  <progress id="scanBar" max="1" value="0"></progress>
  <div class="scan-metrics" id="scanCounters"></div>
@@ -215,7 +215,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   <section><h2>Confirmed SHORT <small id="ns"></small></h2><div class="cards" id="cs"></div></section>
 </div>
 
-<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist updates after each coin scan; monthly and weekly trends must agree with the trade direction. Daily and 4h countertrends are allowed.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
+<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist updates after each coin scan and ranks setups by 5-minute PDL/PDH sweep, FVG and exact neckline-retest progress.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 
 <section id="realBinancePanel" class="paper-panel" hidden style="border-color:#d76262;background:linear-gradient(120deg,#321b24,#1d2736)">
  <div class="paper-heading">
@@ -531,19 +531,16 @@ async function scan(){
     for(const item of Object.values(R)){
       if(item.status==='confirm'){
         item.status='watch';item.ok=false;item.plan=null;
-        item.reason='Previously confirmed; awaiting monthly/weekly trend and fresh 5m confirmation';
+        item.reason='Previously confirmed; awaiting a fresh closed 5m setup';
       }
     }
     scanFailures=0;render();
     // More workers overlap network latency; request pacing remains centralized.
     await pool(list,async x=>{
  const s=x.symbol,r=res[s];
- const [daily,five,monthly,weekly]=await Promise.all([
-   K(s,'1d',5),K(s,'5m',190),K(s,'1M',5),K(s,'1w',6)
- ]);
+ const [daily,five]=await Promise.all([K(s,'1d',5),K(s,'5m',190)]);
  const settings={
   barsDaily:onlyClosed(daily,'1d'),bars5:onlyClosed(five,'5m'),
-  barsMonthly:onlyClosed(monthly,'1M'),barsWeekly:onlyClosed(weekly,'1w'),
   mark:M[s].p,account:n('acct'),risk:n('risk')
  };
  const signal=UnifiedStrategy.evaluate(settings);
@@ -718,9 +715,6 @@ function card(r){
  const checks=[
   ['Entry',fp(p.en)],['SL ('+f(p.sp,2)+'%)',fp(p.stop)],
   ['Final TP (3R)',fp(p.tp2)],['Target R:R','1 : 3'],
-  ['Monthly trend (required)',String(r.trends?.monthly||'Unknown').toUpperCase()],
-  ['Weekly trend (required)',String(r.trends?.weekly||'Unknown').toUpperCase()],
-  ['Daily / 4h trend','Countertrend allowed'],
   ['Previous-day level',fp(p.previousDayLevel)],
   ['Neckline',fp(p.neckline)],
   ['Sweep',r.liquidity?.sweepTime?'Confirmed':'Pending'],
@@ -983,7 +977,7 @@ function render(){
 const wl=wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).slice(0,watchLimit);
 $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).length+' monitored coins · highest current-strategy score first · scroll for more';
   $('wl').innerHTML=tbl(
- ['','Coin','Side','Price','Monthly / Weekly','Neckline','FVG / retest stage','Score ↓','Status / Waiting for'],
+ ['','Coin','Side','Price','Neckline','FVG / retest stage','Score ↓','Status / Waiting for'],
  wl.map(r=>{
   const missing=r.G?r.G.filter(x=>!x.ok).map(x=>x.t):[];
   const g=r.liquidity||{};
@@ -991,7 +985,7 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
   return '<tr><td>'+star(r.sym)+'</td><td>'+tv(r.sym)+'</td><td>'+
    (r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'—')+
    '</td><td>'+fp(M[r.sym]?.p||r.price)+
-   '</td><td>'+[r.trends?.monthly||'—',r.trends?.weekly||'—'].join(' / ')+'</td><td>'+boundary+'</td><td>'+
+   '</td><td>'+boundary+'</td><td>'+
    (r.fvg?.filled?'Exact neckline retested · close pending':r.fvg?.formed?'FVG not fully filled':
     g.strongPressure?'Double sweep confirmed · FVG pending':
     g.secondSweep?'Manipulation sweep seen':g.firstSweep?'Manipulation sweep seen':'Awaiting accumulation / sweep')+'</td><td>'+
@@ -1297,14 +1291,14 @@ function adoptLaptop(snapshot,source,online,lastSeen){
    }else{
      R[item.sym]={sym:item.sym,price:item.price,chg:item.chg,vol:item.vol,
        status:'unverified',side:null,dir:null,ok:false,score:null,checks:[],G:[],
-       plan:null,reason:'Scanned by older Windows strategy — approved monthly/weekly trend setup not evaluated',
+       plan:null,reason:'Scanned by older Windows strategy — approved neckline-only setup not evaluated',
        analyzedAt:item.analyzedAt,firstSeen:old?.firstSeen||Date.now(),
        lastSeen:Date.now(),verifiedStrategy:false};
    }
  }
  if(!strategyMatches){
    scanMeta={...snapshot,scanPhase:'UPDATE_REQUIRED',
-     scanMessage:'Windows scanner uses an older strategy. Coin rows remain visible, but only the approved monthly/weekly trend version may confirm trades.'};
+     scanMessage:'Windows scanner uses an older strategy. Coin rows remain visible, but only the approved neckline-only version may confirm trades.'};
  }
  M=snapshot.markets||{};
  st.open=snapshot.open.filter(item=>
@@ -1349,7 +1343,7 @@ function activateBrowserFallback(){
  render();startBrowserScanner();
 }
 $('useCurrentBrowserScanner').addEventListener('click',()=>{
- if(!window.confirm('Switch to the approved 5-minute neckline + monthly/weekly trend scanner? The existing Windows scanner will not be modified. Browser scans run only while this app stays open, and no real Binance orders will be placed.'))return;
+ if(!window.confirm('Switch to the approved 5-minute neckline-only scanner? The existing Windows scanner will not be modified. Browser scans run only while this app stays open, and no real Binance orders will be placed.'))return;
  try{localStorage.removeItem('cryptoLaptopActivated')}catch(_){}
  activateBrowserFallback();
 });
