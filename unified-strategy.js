@@ -70,7 +70,7 @@
       const stop=long?Math.min(num(m.l),oldLow)*(1-0.0001):
                       Math.max(num(m.h),oldHigh)*(1+0.0001);
       let retest=-1;
-      for(let k=f+1;k<n-1&&k<=f+24;k++){
+      for(let k=f+1;k<n&&k<=f+24;k++){
        const b2=bars5[k];
        if(long?num(b2.l)<=stop:num(b2.h)>=stop)break;
        // EXACT neckline touch, with rejection/holding on the intended side.
