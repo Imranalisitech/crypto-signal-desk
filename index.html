@@ -287,7 +287,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   </div>
   <div id="liveRiskDraft" class="paper-note" aria-live="polite"></div>
   <button id="liveSaveRisk" type="button">Save trading preferences</button>
-  <p class="paper-note"><b>Automatic SL / TP:</b> The setup supplies the initial structural SL and a final 3R TP. For the profit-lock simulation: at <b>50% of TP distance</b> protect <b>5% of the total entry-to-TP price range</b>; at <b>75% of TP distance</b> protect <b>50% of that range</b>. This applies equally to LONG and SHORT. These are PRICE levels, not guaranteed realized returns. A moved Binance stop requires working connection, confirmed active position, Binance order acceptance and explicit live activation. Existing protection stays in place if the replacement fails.</p>
+  <p class="paper-note"><b>Automatic SL / TP:</b> The current <b>1-minute research setup</b> supplies structural SL and a hypothetical 2R TP with a 36-minute paper research horizon. Existing historical simulations may retain their prior 3R profit-lock settings. No current 1-minute signal automatically places, revises or closes real Binance orders. Any future real order protection requires verified private execution and exchange acknowledgements.</p>
   <p class="paper-note">Settings are not overwritten while editing. The daily loss limit must be enforced and audited by the live execution engine before automatic trading can be enabled.</p>
  </details>
  <div class="paper-status" style="background:#3d2631">
@@ -558,7 +558,7 @@ async function scan(){
     for(const item of Object.values(R)){
       if(item.status==='confirm'){
         item.status='watch';item.ok=false;item.plan=null;
-        item.reason='Previously confirmed; awaiting a fresh closed 5m setup';
+        item.reason='Previously confirmed; awaiting a fresh closed 1m setup';
       }
     }
     scanFailures=0;render();
@@ -615,7 +615,8 @@ async function scan(){
 function recordLiveSuggestion(r){
   // UI alerts are independent of the simulated portfolio's position limit.
   if(r.status!=='confirm'||!r.plan||r.strategyVersion!==UnifiedStrategy.activeStrategy||
-     !/^[A-Z0-9]{2,24}USDT$/.test(r.sym))return;
+     !/^[A-Z0-9]{2,24}USDT$/.test(r.sym)||
+     !(Number(r.vol)>=10_000_000))return;
   const key=signalKey(r),ck=Number(r.plan.ck);
   if(!key||!(ck>0)||Date.now()-(ck+60000)>120000||
      liveSuggestions.some(x=>x.key===key))return;
@@ -1085,7 +1086,7 @@ function render(){
   // Every processed coin belongs to the live monitoring table.
   // A scanned coin is NOT automatically a qualified trade.
   for(const r of L)if(r.sym)watchBySym.set(r.sym,r);
-  // Sort current V2 scalp scores first; older Windows scores remain unverified.
+  // Sort current 1m study scores first; older Windows scores remain unverified.
   const watchRank=r=>r.verifiedStrategy===false||r.status==='unverified'||
     (r.strategyVersion&&r.strategyVersion!==UnifiedStrategy.activeStrategy)?-1:
     r.score!=null&&Number.isFinite(Number(r.score))?
@@ -1482,12 +1483,51 @@ $('useCurrentBrowserScanner').addEventListener('click',()=>{
  try{localStorage.removeItem('cryptoLaptopActivated')}catch(_){}
  activateBrowserFallback();
 });
+let fastWatchRunning=false;
+async function fastWatchScan(){
+ if(!browserScannerStarted||remoteMode||fastWatchRunning||document.hidden||
+    Date.now()<banUntil)return;
+ const candidates=Object.values(R).filter(x=>x&&x.verifiedStrategy!==false&&
+   x.strategyVersion===UnifiedStrategy.activeStrategy&&
+   /^[A-Z0-9]{2,24}USDT$/.test(x.sym)&&Number(x.score)>=45)
+   .sort((a,b)=>(Number(b.score)||0)-(Number(a.score)||0)).slice(0,20);
+ if(!candidates.length)return;
+ fastWatchRunning=true;
+ let next=0;
+ try{
+  await Promise.all(Array.from({length:4},async()=>{
+   while(next<candidates.length&&!remoteMode){
+    const candidate=candidates[next++],symbol=candidate.sym,started=Date.now();
+    try{
+     const [one,five]=await Promise.all([K(symbol,'1m',200),K(symbol,'5m',110)]);
+     const sig=UnifiedStrategy.evaluate({
+       bars1:onlyClosed(one,'1m'),bars5:onlyClosed(five,'5m'),
+       mark:M[symbol]?.p,account:n('acct'),risk:n('risk')
+     });
+     if(remoteMode||Number(R[symbol]?.lastScanAt)>started)continue;
+     const updated={...candidate,...sig,sym:symbol,lastScanAt:Date.now(),
+       lastSeen:Date.now(),verifiedStrategy:true};
+     R[symbol]=updated;watchMemory[symbol]=updated;
+     if(sig.status==='confirm'&&sig.plan){
+       recordLiveSuggestion(updated);
+       registerConfirmedTrade(updated);
+     }
+     queueLiveRender();
+    }catch(_){}
+   }
+  }));
+  persistWatch();
+ }finally{fastWatchRunning=false;}
+}
 function startBrowserScanner(){
  if(browserScannerStarted)return;
  browserScannerStarted=true;
  render();scan();
  if(EX()==='binance')ws();
  setInterval(refreshBrowserQuotes,12000);
+ // Higher-priority rescans for the 20 most promising watched coins.
+ // Broad discovery still scans up to 500; suggestions remain in-browser only.
+ setInterval(fastWatchScan,60000);
  refreshBrowserQuotes();
 }
 async function remotePoll(){
@@ -1506,7 +1546,11 @@ async function remotePoll(){
   if(local){
     if(!adoptLaptop(data,'local',true,Date.now()))throw Error('Invalid laptop scanner response');
   }else if(data?.snapshot&&data.connected){
-    if(!adoptLaptop(data.snapshot,'cloud',true,data.lastSeen))
+    if(data.snapshot.strategyVersion!==UnifiedStrategy.activeStrategy){
+      // Older Windows scanner snapshots must never override approved 1m rules.
+      // Its original records remain untouched on the laptop and server.
+      activateBrowserFallback();
+    }else if(!adoptLaptop(data.snapshot,'cloud',true,data.lastSeen))
       throw Error('Invalid online scanner response');
   }else{
     // Stale laptop mirrors never count as active scanner connections.
