@@ -187,7 +187,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 <div id="ban"></div>
 <div class="kpi" id="kpi"></div>
 <section id="scanInspector" class="scan-health">
- <div class="scan-top"><h2>Live market scanning & data</h2><span id="scanPhase" class="scan-tag">Loading scanner status</span><button type="button" id="useCurrentBrowserScanner" hidden>Run new scalping scanner in browser</button></div>
+ <div class="scan-top"><h2>Live market scanning & data</h2><span id="scanPhase" class="scan-tag">Loading scanner status</span><button type="button" id="useCurrentBrowserScanner" hidden>Run approved 1m research scanner in browser</button></div>
  <div id="scanDescription" class="scan-detail">Checking your laptop scanner...</div>
  <progress id="scanBar" max="1" value="0"></progress>
  <div class="scan-metrics" id="scanCounters"></div>
@@ -209,13 +209,18 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
  </details>
 </section>
 
+<section id="suggestionPanel">
+  <h2>Fresh 1-minute Trade Suggestions <small id="suggestionCount"></small></h2>
+  <p class="mut" style="font-size:12.5px">Live-scanner alerts based on the historical EMA pullback setup. Entry is indicative, 2R is a hypothetical target. Signals expire after 2 minutes. They are NOT validated profitable strategies or real Binance orders. Enable browser notifications above to receive alerts while this app is open.</p>
+  <div class="tw" id="liveSuggestions"></div>
+</section>
 
 <div class="two">
   <section><h2>Confirmed LONG <small id="nl"></small></h2><div class="cards" id="cl"></div></section>
   <section><h2>Confirmed SHORT <small id="ns"></small></h2><div class="cards" id="cs"></div></section>
 </div>
 
-<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">V2 scalp watchlist · stronger 1h trend, controlled 5m pullback, RSI and volume confirmation · signal scores show rule completion, not win probability.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
+<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">1-minute research signals: completed 5-minute trend + 1-minute EMA21 pullback, breakout, RSI and volume. Scores measure checks passed, not win probabilities.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 
 <section id="realBinancePanel" class="paper-panel" hidden style="border-color:#d76262;background:linear-gradient(120deg,#321b24,#1d2736)">
  <div class="paper-heading">
@@ -579,13 +584,15 @@ async function scan(){
           firstSeen:previous?.firstSeen||Date.now(),lastScanAt:Date.now()};
       }
       if(!failure&&r.status==='confirm'&&r.plan){
+        recordLiveSuggestion(r);
         const fresh=registerConfirmedTrade(r);
         // Show why a qualified technical setup was not added to portfolio.
         if(!fresh&&r.reason!==R[x.symbol]?.reason){
           R[x.symbol].reason=r.reason;
           if(watchMemory[x.symbol])watchMemory[x.symbol].reason=r.reason;
         }
-        if(fresh)fire(r);
+        // Suggestions already notify once per unique closed 1m candle,
+        // even if paper portfolio limits prevent creating a new simulation.
       }
     });
     if(remoteMode)return;
@@ -773,14 +780,15 @@ function card(r){
  const setup=r.setup||{},regime=r.regime||{};
  const checks=[
   ['Entry',fp(p.en)],['SL ('+f(p.sp,2)+'%)',fp(p.stop)],
-  ['Final TP (3R)',fp(p.tp2)],['Target R:R','1 : 3'],
-  ['1h trend',String(regime.trend||'Unknown').toUpperCase()],
-  ['1h EMA21 / EMA55',fp(regime.hourly21)+' / '+fp(regime.hourly55)],
-  ['5m EMA9 / EMA21',fp(setup.ema9)+' / '+fp(setup.ema21)],
-  ['5m RSI14',f(setup.rsi14,1)],
-  ['5m volume ratio',f(setup.volumeRatio,2)+'×'],
-  ['EMA21 pullback',setup.pullbackReady?'Confirmed':'Pending'],
-  ['Trigger candle','Closed 5m'],
+  ['Final TP (2R)',fp(p.tp2)],['Target R:R','1 : 2'],
+  ['5m trend',String(regime.trend||'Unknown').toUpperCase()],
+  ['5m EMA21 / EMA55',fp(regime.fiveMinute21)+' / '+fp(regime.fiveMinute55)],
+  ['1m EMA9 / EMA21',fp(setup.ema9)+' / '+fp(setup.ema21)],
+  ['1m RSI14',f(setup.rsi14,1)],
+  ['1m volume ratio',f(setup.volumeRatio,2)+'×'],
+  ['1m EMA21 pullback',setup.pullbackReady?'Confirmed':'Pending'],
+  ['Trigger candle','Fresh CLOSED 1m'],
+  ['Entry basis','Indicative quote near next 1m open'],
   ['Execution','Simulated tracking · real orders disabled']
  ];
  return '<div class="card '+r.dir+'" data-a="chart" data-s="'+r.sym+
@@ -893,11 +901,11 @@ function renderScanInspector(){
     const priceCell=Number.isFinite(livePrice)&&livePrice>0?fp(livePrice):
       Number.isFinite(storedPrice)&&storedPrice>0?
         '<span title="Last analyzed price — NOT live">'+fp(storedPrice)+' (saved)</span>':'—';
-    const jha=r.status==='confirm'?'Trend-aligned scalp confirmed on closed 5m':
-      r.setup?.candleConfirmed?'5m trigger detected; additional filters pending':
-      r.setup?.pullbackReady?'5m pullback detected; waiting for confirmation':
-      r.regime?.trend&&r.regime.trend!=='not aligned'?'1h trend aligned, waiting for 5m setup':
-      'Awaiting 1h trend and 5m pullback';
+    const jha=r.status==='confirm'?'Fresh confirmed 1m breakout':
+      r.setup?.candleConfirmed?'1m breakout found; other checks missing':
+      r.setup?.pullbackReady?'1m EMA21 pullback found; confirmation pending':
+      r.regime?.trend&&r.regime.trend!=='not aligned'?'5m trend aligned; waiting for 1m pullback':
+      'Awaiting 5m directional trend';
     return '<tr><td>'+link+'</td><td>'+safe(r.dir||'—')+'</td><td>'+
       priceCell+'</td><td>'+safe(c.name||'—')+
       '</td><td>'+safe(r.regime?.trend||'—')+
@@ -908,14 +916,14 @@ function renderScanInspector(){
   });
   const scroll=$('scanCoinTable').scrollTop;
   $('scanCoinTable').innerHTML=tbl(
-    ['Coin','Side','Price','Final candle','1h trend','5m RSI14','5m scalp stage','Score','Result','Analysis / reason'],rows,
+    ['Coin','Side','Price','Signal candle','5m trend','1m RSI14','1m scalp stage','Score','Result','Analysis / reason'],rows,
     running?'Scan in progress; previous results remain visible until analysis completes.':
     'No stored coin results yet. Check the scanner diagnostics above.');
   $('scanCoinTable').scrollTop=scroll;
   const recent=Array.isArray(meta.scanRecent)?meta.scanRecent.slice(0,4):[];
   $('scanHelp').textContent=(running?'Current scan is processing markets. ':'')+
     'Only fresh, closed-candle signals from the current scalping engine may be confirmed. '+
-    'V2 requires 1h EMA trend and 5m EMA21 pullback, strong closed breakout, RSI and 1.15× volume. New simulated entries: at most 4 open (2 each direction), 24h turnover ≥ $10m, 45m coin cooldown; older simulations remain intact. 3R targets are simulated, not real Binance orders.'+
+    'Research setup: completed 5m EMA21/55 trend, 1m EMA9/21 with EMA21 pullback, closed 1m breakout, RSI14 and volume ≥ 1.03× prior 20 bars. 2R hypothetical TP; 36-minute paper horizon. The full historical strategy lost money after estimated costs; no real Binance orders.'+
     (recent.length?' · Recently scanned: '+recent.map(x=>x.sym).join(', '):'');
 }
 function render(){
@@ -1036,15 +1044,15 @@ function render(){
 const wl=wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).slice(0,watchLimit);
 $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).length+' monitored coins · highest current-strategy score first · scroll for more';
   $('wl').innerHTML=tbl(
- ['','Coin','Side','Price','1h trend','5m scalp progress','Score ↓','Status / Waiting for'],
+ ['','Coin','Side','Price','5m trend','1m scalp progress','Score ↓','Status / Waiting for'],
  wl.map(r=>{
   const missing=r.G?r.G.filter(x=>!x.ok).map(x=>x.t):[];
   const setup=r.setup||{},regime=r.regime||{};
   const trend=regime.trend==='up'?'BULL':regime.trend==='down'?'BEAR':'—';
-  const stage=setup.candleConfirmed?'5m breakout candle detected':
-    setup.pullbackReady?'EMA21 pullback found':
-    regime.trend&&regime.trend!=='not aligned'?'Trend aligned; seeking 5m pullback':
-    'Waiting for trend alignment';
+  const stage=setup.candleConfirmed?'Fresh 1m breakout candle detected':
+    setup.pullbackReady?'1m EMA21 pullback found':
+    regime.trend&&regime.trend!=='not aligned'?'5m trend aligned; seeking 1m pullback':
+    'Waiting for 5m trend alignment';
   return '<tr><td>'+star(r.sym)+'</td><td>'+tv(r.sym)+'</td><td>'+
    (r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'—')+
    '</td><td>'+fp(M[r.sym]?.p||r.price)+
@@ -1416,7 +1424,7 @@ function activateBrowserFallback(){
  render();startBrowserScanner();
 }
 $('useCurrentBrowserScanner').addEventListener('click',()=>{
- if(!window.confirm('Switch to the new 1h/5m trend-pullback scalping scanner? The existing Windows scanner will not be modified. Browser scans run only while this app stays open, and no real Binance orders will be placed.'))return;
+ if(!window.confirm('Switch to the 5m trend + 1m EMA pullback research scanner? The existing Windows scanner will not be modified. Browser scans run only while this app stays open, and no real Binance orders will be placed.'))return;
  try{localStorage.removeItem('cryptoLaptopActivated')}catch(_){}
  activateBrowserFallback();
 });
