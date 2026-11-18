@@ -28,7 +28,12 @@
    $('liveRefreshAccount').addEventListener('click',()=>{
      const setup=$('secureBrokerSetup');
      if(setup){setup.open=true;setup.scrollIntoView({behavior:'smooth',block:'center'});}
-     $('liveStatus').textContent='No authenticated private Binance agent is attached. Follow the secure connection steps below; this website cannot use an API key directly.';
+     $('liveStatus').textContent='Open the private Binance dashboard on your own Windows PC to enter an API key. The public site never receives exchange secrets.';
+   });
+   const localLauncher=$('openPrivateBinance');
+   if(localLauncher)localLauncher.addEventListener('click',()=>{
+     window.open('http://127.0.0.1:8765/','_blank','noopener,noreferrer');
+     $('liveStatus').textContent='Attempted to open the private local dashboard. If the address is unavailable, download and run the private agent on this Windows PC first.';
    });
    const title=$('liveRiskSettings').querySelector('summary');
    title.textContent='Real trading allocation and risk limits';
@@ -67,6 +72,7 @@
    return;
  }
  const $=id=>document.getElementById(id);
+ const launch=$('openPrivateBinance');if(launch)launch.hidden=true;
  const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
  const num=(v,d=2)=>Number.isFinite(Number(v))?Number(v).toLocaleString('en-US',{
    minimumFractionDigits:d,maximumFractionDigits:d}):'—';
