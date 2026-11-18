@@ -1,7 +1,7 @@
 {
-  "name": "Crypto Signal Desk — Trend Pullback Scalper",
+  "name": "Crypto Signal Desk — 1m Research Signals",
   "short_name": "Crypto Signal Desk",
-  "description": "1-hour trend with 5-minute EMA21 pullback and RSI/ATR/volume confirmation. Persistent watchlist, simulation tracking and secure Binance connection workflow.",
+  "description": "Live browser alerts for paper-only 5m trend / 1m EMA pullback confirmations. 2R historical research signals; not validated profitable and never auto-execute real Binance orders.",
   "start_url": "/?browser=1",
   "scope": "/",
   "display": "standalone",
