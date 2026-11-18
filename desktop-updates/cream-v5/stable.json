@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "version": "2026.11.18.5",
+  "url": "https://raw.githubusercontent.com/Imranalisitech/crypto-signal-desk/main/desktop-updates/cream-v5/releases/2026.11.18.5.csdupdate.b64",
+  "sha256": "9aaed2611bd7f066e9be1fe986d16d22a430397623e04c429cd82f832ff73bb0",
+  "encoding": "base64",
+  "notes": "Signature Cream Edition \u2014 verified official content maintenance update. Only UI and strategy assets; no Binance backend changes."
+}
