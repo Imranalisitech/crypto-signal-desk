@@ -1,171 +1,149 @@
 'use strict';
 /*
- Crypto Signal Desk — Adaptive Trend Pullback Scalper V2 — quality-first research configuration.
- This is the ONLY trade-entry strategy. No PDL/PDH, FVG, liquidity-sweep,
- neckline, divergence or prior entry methods contribute to signal selection.
+ Single approved 1-minute research signal strategy.
+ Derived from the Jan-Aug 2025 BTCUSDT/ETHUSDT study in research/
+ on the separate research-1m-1000-setup-study-2026 GitHub branch.
 
- 1h: 21/55 EMA directional trend + upward/downward EMA21 slope.
- 5m: 9/21 EMA alignment; pullback into 21 EMA; fresh directional
-     breakout candle with RSI(14), ATR(14), and relative-volume checks.
- Entry on a fully CLOSED 5m confirmation candle, structure/ATR stop,
- fixed 3R target (existing simulation and profit-lock rules preserved).
- The engine is signals-only: no authenticated real-money Binance orders.
+ Backtest full sample was UNPROFITABLE after estimated costs:
+ 3949 trades, 33.1% net wins, mean -0.646 R.
+ Do NOT describe these as validated profitable signals.
+ The 500 successful LONG and 500 successful SHORT examples were post-selected.
+
+ Trend: fully closed 5m EMA21 / EMA55 alignment and EMA21 slope.
+ Trigger: closed 1m EMA9/21 alignment, recent EMA21 pullback,
+ RSI14, ATR14, volume >=1.03x prior 20 bars and break of prior high/low.
+ Stop: pullback structure +/- 0.12 ATR. TP: 2x initial risk.
+ Signal's close is provisional entry reference; historical study filled
+ at next 1m OPEN. Market slippage/fees can change real outcomes.
+ Signals for research and simulated tracking only. No real exchange orders.
 */
 (function(root){
- const VERSION='TREND_PULLBACK_SCALPER_5M_V2';
+ const VERSION='HISTORICAL_5M_TREND_1M_PULLBACK_2R_V1';
  const N=x=>Number(x);
- const valid=b=>b&&[b.t,b.o,b.h,b.l,b.c].every(x=>Number.isFinite(N(x)))&&
-   N(b.l)>0&&N(b.h)>=Math.max(N(b.o),N(b.c),N(b.l))&&
-   N(b.l)<=Math.min(N(b.o),N(b.c),N(b.h))&&
-   (b.v==null||(Number.isFinite(N(b.v))&&N(b.v)>=0));
- const avg=a=>a.reduce((s,v)=>s+v,0)/a.length;
- function ema(bars,period){
-   const values=bars.map(b=>N(b.c)),out=Array(values.length).fill(null);
-   if(values.length<period)return out;
-   let e=avg(values.slice(0,period));out[period-1]=e;
-   const a=2/(period+1);
-   for(let i=period;i<values.length;i++){e=a*values[i]+(1-a)*e;out[i]=e;}
-   return out;
+ const valid=b=>b&&[b.t,b.o,b.h,b.l,b.c,b.v].every(x=>Number.isFinite(N(x)))&&
+   N(b.t)>0&&N(b.l)>0&&N(b.h)>=Math.max(N(b.o),N(b.c),N(b.l))&&
+   N(b.l)<=Math.min(N(b.o),N(b.c),N(b.h))&&N(b.v)>=0;
+ const ema=(bars,period)=>{
+   const k=2/(period+1),res=[],prices=bars.map(b=>N(b.c));
+   let e=null;
+   for(const p of prices){e=e===null?p:e+k*(p-e);res.push(e);}
+   return res;
+ };
+ function indicators(bars){
+   const e9=ema(bars,9),e21=ema(bars,21),a=[],rs=[];
+   let g=0,l=0,at=null,trs=0;
+   for(let i=0;i<bars.length;i++){
+     const b=bars[i];
+     if(i===0){a.push(null);rs.push(null);continue;}
+     const prev=N(bars[i-1].c),change=N(b.c)-prev,
+       tr=Math.max(N(b.h)-N(b.l),Math.abs(N(b.h)-prev),Math.abs(N(b.l)-prev));
+     if(i<=14){
+       g+=Math.max(0,change);l+=Math.max(0,-change);trs+=tr;
+       if(i===14){g/=14;l/=14;at=trs/14;}
+     }else{
+       g=(g*13+Math.max(0,change))/14;
+       l=(l*13+Math.max(0,-change))/14;
+       at=(at*13+tr)/14;
+     }
+     rs.push(i<14?null:l===0?(g===0?50:100):100-100/(1+g/l));
+     a.push(at);
+   }
+   return {e9,e21,atr:a,rsi:rs};
  }
- function atr(bars,period=14){
-   if(bars.length<period+1)return null;
-   let total=0;
-   for(let i=1;i<=period;i++){
-     const b=bars[i],prev=N(bars[i-1].c);
-     total+=Math.max(N(b.h)-N(b.l),Math.abs(N(b.h)-prev),Math.abs(N(b.l)-prev));
-   }
-   let a=total/period;
-   for(let i=period+1;i<bars.length;i++){
-     const b=bars[i],prev=N(bars[i-1].c);
-     const tr=Math.max(N(b.h)-N(b.l),Math.abs(N(b.h)-prev),Math.abs(N(b.l)-prev));
-     a=(a*(period-1)+tr)/period;
-   }
-   return a;
- }
- function rsi(bars,period=14){
-   if(bars.length<=period)return null;
-   let gains=0,losses=0;
-   for(let i=1;i<=period;i++){
-     const change=N(bars[i].c)-N(bars[i-1].c);
-     gains+=Math.max(0,change);losses+=Math.max(0,-change);
-   }
-   gains/=period;losses/=period;
-   for(let i=period+1;i<bars.length;i++){
-     const change=N(bars[i].c)-N(bars[i-1].c);
-     gains=(gains*(period-1)+Math.max(0,change))/period;
-     losses=(losses*(period-1)+Math.max(0,-change))/period;
-   }
-   if(losses===0)return gains===0?50:100;
-   return 100-100/(1+gains/losses);
- }
- function evaluate({bars5,bars1h,mark,account=2000,risk=.5,now=Date.now()}={}){
-   const base={status:'none',side:null,dir:null,ok:false,executionReady:false,
-     score:0,checks:[],G:[],plan:null,strategyVersion:VERSION,
-     confirmationMode:'1h EMA trend + 5m EMA21 pullback + 5m candle/volume/RSI confirmation'};
+ function evaluate({bars1,bars5,mark,account=2000,risk=.5,now=Date.now()}={}){
+   const base={strategyVersion:VERSION,status:'none',side:null,dir:null,ok:false,
+     executionReady:false,score:0,checks:[],G:[],plan:null,
+     confirmationMode:'CLOSED 5m EMA21/55 trend + CLOSED 1m EMA21 pullback/breakout + RSI/volume'};
    const blank=reason=>({...base,reason});
-   if(!Array.isArray(bars1h)||bars1h.length<65||
-      !Array.isArray(bars5)||bars5.length<65)
-     return blank('Waiting for at least 65 closed 1h and 65 closed 5m candles');
-   if(!bars1h.every(valid)||!bars5.every(valid))
-     return blank('Invalid or unfinished OHLCV candle data');
-   const h=bars1h,f=bars5,i=f.length-1,nowBar=f[i];
-   const h21=ema(h,21),h55=ema(h,55),f9=ema(f,9),f21=ema(f,21);
-   const a5=atr(f),a1h=atr(h),momentum=rsi(f),price=N(nowBar.c);
-   if(!a5||!a1h||!Number.isFinite(price)||price<=0)return blank('ATR unavailable');
-   const end=N(nowBar.t)+300000;
-   const candleClosed=end<=now-1000;
-   const fresh=candleClosed&&now-end<=390000;
-   // Volume uses only the preceding 20 candles, never the trigger candle.
-   const volumes=f.slice(i-20,i).map(b=>Number(b.v));
-   const volAvailable=volumes.every(Number.isFinite)&&volumes.some(v=>v>0)&&Number.isFinite(N(nowBar.v));
-   const volumeRatio=volAvailable?N(nowBar.v)/Math.max(1e-12,avg(volumes)):null;
-   const k1=h.length-1, hClose=N(h[k1].c),hSlope=N(h21[k1])-N(h21[k1-3]);
-   const lastE9=f9[i],lastE21=f21[i],emaSlope=lastE21-f21[i-3];
+   if(!Array.isArray(bars1)||bars1.length<65||!Array.isArray(bars5)||bars5.length<75)
+     return blank('Need at least 65 closed 1-minute and 75 closed 5-minute candles');
+   if(!bars1.every(valid)||!bars5.every(valid))
+     return blank('Invalid OHLCV data: use completely closed 1m/5m candles');
+   const f=bars1,h=bars5,i=f.length-1,k=h.length-1,
+     bar=f[i],price=N(bar.c),end=N(bar.t)+60000;
+   // Never evaluate a 5m candle that is after the latest 1m trigger.
+   if(N(h[k].t)+300000>end)return blank('Incomplete or future 5-minute trend candle');
+   // Ensure the trigger and preceding candles are a contiguous minute series.
+   for(let j=i-10;j<i;j++){
+     if(N(f[j+1].t)-N(f[j].t)!==60000)
+       return blank('Missing recent one-minute candles');
+   }
+   const I=indicators(f),a=I.atr[i],r=I.rsi[i],
+     h21=ema(h,21),h55=ema(h,55);
+   if(!a||r==null||!Number.isFinite(price)||price<=0)
+     return blank('ATR / RSI unavailable');
+   const volMean=f.slice(i-20,i).reduce((sum,x)=>sum+N(x.v),0)/20;
+   const volumeRatio=volMean>0?N(bar.v)/volMean:0;
+   const fresh=end<=now-1000&&now-end<=120000;
+   const trendSlope=h21[k]-h21[k-3],sep=(h21[k]-h55[k])/price;
    const result=side=>{
      const long=side==='long',sg=long?1:-1;
-     const hTrend=long?
-       h21[k1]>h55[k1]&&hClose>h21[k1]&&hSlope>a1h*.04:
-       h21[k1]<h55[k1]&&hClose<h21[k1]&&hSlope<-a1h*.04;
-     const mTrend=long?
-       lastE9>lastE21&&emaSlope>0&&price>lastE21:
-       lastE9<lastE21&&emaSlope<0&&price<lastE21;
-     // Avoid weak, flat EMA stacks where crossovers oscillate in a range.
-     const trendQuality=long?
-       h21[k1]-h55[k1]>=.35*a1h&&lastE9-lastE21>=.10*a5:
-       h55[k1]-h21[k1]>=.35*a1h&&lastE21-lastE9>=.10*a5;
-     const volatile=a5/price>=.0007&&a5/price<=.03;
-     let retest=-1;
-     for(let j=i-4;j<=i-1;j++){
-       const b=f[j],basis=f21[j];
-       if(long?
-          N(b.l)<=basis+.12*a5&&N(b.c)>=basis-.25*a5:
-          N(b.h)>=basis-.12*a5&&N(b.c)<=basis+.25*a5)
-         retest=j;
+     const hTrend=long?sep>.00022&&trendSlope>0&&price>h21[k]:
+                              sep<-.00022&&trendSlope<0&&price<h21[k];
+     const mTrend=long?I.e9[i]>I.e21[i]&&I.e21[i]>I.e21[i-3]:
+                              I.e9[i]<I.e21[i]&&I.e21[i]<I.e21[i-3];
+     let pullback=-1;
+     for(let j=i-5;j<i;j++){
+       const b=f[j],basis=I.e21[j];
+       if(long?(N(b.l)<=basis+.2*a&&N(b.c)>=basis-.7*a):
+               (N(b.h)>=basis-.2*a&&N(b.c)<=basis+.7*a))pullback=j;
      }
-     const hadPullback=retest>=0;
-     const candleBody=sg*(N(nowBar.c)-N(nowBar.o));
-     const candleRange=N(nowBar.h)-N(nowBar.l);
-     const closesStrong=candleRange>0&&(long?
-       (N(nowBar.h)-price)/candleRange<=.30:
-       (price-N(nowBar.l))/candleRange<=.30);
-     const breakout=long?
-       price>N(f[i-1].h)+.03*a5&&price>lastE9:
-       price<N(f[i-1].l)-.03*a5&&price<lastE9;
-     const candleConfirm=fresh&&breakout&&closesStrong&&
-       candleBody>=.4*a5&&candleBody<=1.8*a5;
-     const goodRsi=long?momentum>=53&&momentum<=70:
-                         momentum>=30&&momentum<=47;
-     const goodVolume=volAvailable&&volumeRatio>=1.15;
-     const notExtended=long?(price-lastE21)/a5<=1.25:
-                             (lastE21-price)/a5<=1.25;
+     const candleBody=sg*(N(bar.c)-N(bar.o)),range=N(bar.h)-N(bar.l);
+     const breakout=long?price>N(f[i-1].h)+.015*a:
+                               price<N(f[i-1].l)-.015*a;
+     const strongClose=range>0&&(long?(N(bar.h)-price)/range<=.37:
+                                      (price-N(bar.l))/range<=.37);
+     const trigger=fresh&&breakout&&strongClose&&
+       candleBody>=.27*a&&candleBody<=2.6*a;
+     const goodRsi=long?r>=51&&r<=75:r>=25&&r<=49;
+     const notExtended=long?(price-I.e21[i])/a<=1.6:
+                            (I.e21[i]-price)/a<=1.6;
+     const volatile=a/price>=.00012&&a/price<=.015;
      const checks=[
-       {ok:hTrend,t:'1h EMA21/EMA55 directional trend and slope',weight:20},
-       {ok:mTrend,t:'5m EMA9/EMA21 alignment and positive/negative slope',weight:15},
-       {ok:trendQuality,t:'EMA separation confirms trend, not a flat market',weight:10},
-       {ok:volatile,t:'5m ATR in tradable volatility range',weight:10},
-       {ok:hadPullback,t:'Recent controlled 5m pullback to EMA21',weight:15},
-       {ok:candleConfirm,t:'Fresh closed 5m breakout with strong close',weight:15},
-       {ok:goodRsi&&notExtended,t:'RSI14 momentum without chasing',weight:10},
-       {ok:goodVolume,t:'Relative volume at least 1.15× prior 20 candles',weight:5}
+       {ok:hTrend,t:'5m EMA21/EMA55 trend alignment and slope',weight:20},
+       {ok:mTrend,t:'1m EMA9/EMA21 trend and EMA21 slope',weight:15},
+       {ok:volatile,t:'1m ATR14 in research volatility range',weight:10},
+       {ok:pullback>=0,t:'EMA21 touch during preceding five 1m bars',weight:15},
+       {ok:trigger,t:'Fresh closed 1m strong breakout candle',weight:20},
+       {ok:goodRsi&&notExtended,t:'1m RSI14 directional momentum and no extension',weight:10},
+       {ok:volumeRatio>=1.03,t:'1m volume >=1.03x preceding 20 bars',weight:10}
      ];
      const score=checks.reduce((sum,x)=>sum+(x.ok?x.weight:0),0);
-     const all=checks.every(x=>x.ok);
      let plan=null;
-     if(all){
-       const lows=f.slice(retest,i+1).map(b=>N(b.l)),highs=f.slice(retest,i+1).map(b=>N(b.h));
-       const stop=long?Math.min(...lows)-.18*a5:Math.max(...highs)+.18*a5;
-       const stopDistance=sg*(price-stop),stopFraction=stopDistance/price;
-       // Don't select orders whose stops are excessively tight (fees) or wide.
-       if(stopDistance>0&&stopFraction>=.0025&&stopFraction<=.018){
-         const tp=price+sg*3*stopDistance;
-         plan={en:price,stop,tp1:tp,tp2:tp,rr:3,sp:stopFraction*100,
-           'r$':Math.max(0,N(account)*N(risk)/100),
-           ck:N(nowBar.t),timeframe:'5m',targetMode:'fixed3r',
-           setupType:'1h EMA21/55 trend + 5m EMA21 pullback + 5m candle RSI/volume',
-           pullbackAt:N(f[retest].t),ema9:lastE9,ema21:lastE21,
-           emaHourly21:h21[k1],emaHourly55:h55[k1],
-           rsi14:momentum,atr14:a5,volumeRatio,
-           stopBasis:'Recent 5m pullback structure beyond wick plus ATR buffer',
-           researchOnly:true};
+     if(checks.every(x=>x.ok)){
+       const segment=f.slice(pullback,i+1);
+       const extreme=long?Math.min(...segment.map(x=>N(x.l))):
+                           Math.max(...segment.map(x=>N(x.h)));
+       const stop=extreme-sg*.12*a,dist=sg*(price-stop),fraction=dist/price;
+       if(dist>0&&fraction>=.00045&&fraction<=.008){
+         const target=price+sg*2*dist;
+         plan={en:price,stop,tp1:target,tp2:target,rr:2,
+           sp:fraction*100,'r$':Math.max(0,N(account)*N(risk)/100),
+           ck:N(bar.t),timeframe:'1m',targetMode:'fixed2r',
+           setupType:'5m EMA trend + 1m EMA21 pullback + 1m breakout',
+           entryBasis:'Indicative 1m close. Historical research filled at NEXT minute open.',
+           pullbackAt:N(f[pullback].t),ema9:I.e9[i],ema21:I.e21[i],
+           ema5_21:h21[k],ema5_55:h55[k],
+           rsi14:r,atr14:a,volumeRatio,researchOnly:true};
        }
      }
      const ok=!!plan;
-     let reason=ok?'Trend-aligned EMA21 pullback scalp confirmed on last CLOSED 5m candle':
-       !fresh?'Waiting for a fresh CLOSED 5m candle':
-       checks.find(x=>!x.ok)?.t||'Stop distance not within valid scalping range';
-     return {...base,status:ok?'confirm':score?'watch':'none',side,dir:side,
-       ok,score,checks,G:checks,reason,plan,
+     const reason=ok?'1m EMA pullback + breakout CONFIRMED (paper suggestion, 2R)':
+        !fresh?'Awaiting a fresh completed 1-minute candle':
+        checks.find(x=>!x.ok)?.t||'Stop distance outside 0.045%-0.8% study limits';
+     return {...base,status:ok?'confirm':score?'watch':'none',
+       side,dir:side,ok,score,checks,G:checks,plan,reason,
        regime:{trend:hTrend?(long?'up':'down'):'not aligned',
-         hourly21:h21[k1],hourly55:h55[k1],slope:hSlope},
-       setup:{pullbackAt:retest>=0?N(f[retest].t):null,
-         pullbackReady:hadPullback,candleConfirmed:candleConfirm,
-         ema9:lastE9,ema21:lastE21,rsi14:momentum,atr14:a5,
-         volumeRatio,volatilityPct:a5/price*100},
-       pattern:ok?{name:long?'Bullish EMA pullback scalp':'Bearish EMA pullback scalp',
-         confirmTime:N(nowBar.t),confirmClose:price}:null};
+         fiveMinute21:h21[k],fiveMinute55:h55[k],slope:trendSlope},
+       setup:{pullbackAt:pullback>=0?N(f[pullback].t):null,
+         pullbackReady:pullback>=0,candleConfirmed:trigger,
+         ema9:I.e9[i],ema21:I.e21[i],rsi14:r,atr14:a,
+         volumeRatio,volatilityPct:100*a/price},
+       pattern:ok?{name:long?'1m LONG EMA pullback breakout':'1m SHORT EMA pullback breakout',
+         confirmTime:N(bar.t),confirmClose:price}:null};
    };
    const L=result('long'),S=result('short');
-   if(L.ok&&S.ok)return blank('Opposing confirmations conflict');
+   if(L.ok&&S.ok)return blank('Conflicting LONG and SHORT confirmations');
    if(L.ok)return L;
    if(S.ok)return S;
    return L.score>=S.score?L:S;
