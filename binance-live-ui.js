@@ -25,16 +25,52 @@
    $('liveOrders').textContent='Connect the secure Windows trading agent to retrieve actual Binance Futures positions and orders.';
    $('liveEvents').textContent='No live account audit available without a secure connection.';
    $('liveOrderCount').textContent='Not connected';
-   $('liveRefreshAccount').addEventListener('click',()=>{
-     const setup=$('secureBrokerSetup');
-     if(setup){setup.open=true;setup.scrollIntoView({behavior:'smooth',block:'center'});}
-     $('liveStatus').textContent='Open the private Binance dashboard on your own Windows PC to enter an API key. The public site never receives exchange secrets.';
-   });
+   // Only a read-only status check crosses the public-site -> localhost boundary.
+   // API keys, arm/stop commands, and any order placement never cross it.
+   const localUrl='http://127.0.0.1:8765/';
+   const checkPrivateAgent=async()=>{
+     try{
+       const r=await fetch(localUrl+'api/bridge-status',{
+         method:'GET',cache:'no-store',mode:'cors',
+         signal:AbortSignal.timeout(4000)
+       });
+       if(!r.ok)throw Error('Agent status not available');
+       const a=await r.json();
+       if(a.agentOnline!==true)throw Error('Unrecognized local agent');
+       const linked=a.connected===true;
+       const mode=a.environment==='mainnet'?'BINANCE MAINNET':'BINANCE TESTNET';
+       $('liveStatus').textContent=linked?
+         'PRIVATE BINANCE CONNECTION VERIFIED · '+mode+
+           ' · Automatic orders: '+(a.auto?.armed?'TESTNET ARMED':'PAUSED / LOCKED'):
+         'Private trading agent found on this PC. Open it and enter your Binance API key and secret locally.';
+       $('liveReadinessText').textContent=linked?
+         'Local connection available · account details, order controls and TESTNET auto settings are in the private dashboard':
+         'Local agent running · Binance credentials not connected';
+       $('liveBalance').innerHTML=[
+         ['Private agent','Connected to this PC'],
+         ['Binance environment',linked?mode:'Not connected'],
+         ['Auto entries',a.auto?.armed?'TESTNET ACTIVE':'Not armed'],
+         ['Real MAINNET auto entries','Locked'],
+         ['Strategy',a.strategyVersion||'Unavailable'],
+         ['Account funds & positions','View on private dashboard']
+       ].map(([k,v])=>'<div><small>'+k+'</small><b>'+v+'</b></div>').join('');
+       $('liveOrders').textContent='Binance account connection detected. Use the private dashboard to see verified exchange positions and STOP / CLOSE controls; the public site cannot place orders.';
+       $('liveEvents').textContent=a.auto?.lastError?'Local agent alert: '+a.auto.lastError:
+         'Live trading events are available privately on this computer.';
+       $('liveOrderCount').textContent=linked?'Available on this PC':'Agent not linked';
+       if(linked&&$('secureBrokerSetup'))$('secureBrokerSetup').open=false;
+     }catch(e){
+       $('liveStatus').textContent='Private Binance agent not detected on this PC. Extract and start the Windows private trading package first, then connect your API key in its LOCAL dashboard.';
+       $('liveReadinessText').textContent=
+         'Waiting for local Windows agent. No Binance credentials are accepted by this public website.';
+     }
+   };
+   $('liveRefreshAccount').addEventListener('click',checkPrivateAgent);
    const localLauncher=$('openPrivateBinance');
    if(localLauncher)localLauncher.addEventListener('click',()=>{
-     window.open('http://127.0.0.1:8765/','_blank','noopener,noreferrer');
-     $('liveStatus').textContent='Attempted to open the private local dashboard. If the address is unavailable, download and run the private agent on this Windows PC first.';
+     window.open(localUrl,'_blank','noopener,noreferrer');
    });
+   checkPrivateAgent();setInterval(checkPrivateAgent,15000);
    const title=$('liveRiskSettings').querySelector('summary');
    title.textContent='Real trading allocation and risk limits';
    $('liveRiskSettings').querySelector('p.paper-note').textContent=
