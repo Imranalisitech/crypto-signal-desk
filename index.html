@@ -1103,15 +1103,15 @@ function render(){
 const wl=wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).slice(0,watchLimit);
 $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).length+' monitored coins · highest current-strategy score first · scroll for more';
   $('wl').innerHTML=tbl(
- ['','Coin','Side','Price','5m trend','1m scalp progress','Score ↓','Status / Waiting for'],
+ ['','Coin','Side','Price','1m EMA trend','EMA20 pullback / breakout','Score ↓','Status / Waiting for'],
  wl.map(r=>{
   const missing=r.G?r.G.filter(x=>!x.ok).map(x=>x.t):[];
   const setup=r.setup||{},regime=r.regime||{};
   const trend=regime.trend==='up'?'BULL':regime.trend==='down'?'BEAR':'—';
-  const stage=setup.candleConfirmed?'Fresh 1m breakout candle detected':
-    setup.pullbackReady?'1m EMA21 pullback found':
-    regime.trend&&regime.trend!=='not aligned'?'5m trend aligned; seeking 1m pullback':
-    'Waiting for 5m trend alignment';
+  const stage=setup.candleConfirmed?'Strong closed 1m breakout detected':
+    setup.pullbackReady?'EMA20 pullback detected':
+    regime.trend&&regime.trend!=='not aligned'?'1m EMA20/50 trending; waiting for pullback':
+    'Waiting for EMA20/50 trend';
   return '<tr><td>'+star(r.sym)+'</td><td>'+tv(r.sym)+'</td><td>'+
    (r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'—')+
    '</td><td>'+fp(M[r.sym]?.p||r.price)+
@@ -1128,18 +1128,19 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
   const tr=active.reduce((sum,x)=>sum+x.r,0);
   const gl=Math.abs(loss.reduce((sum,x)=>sum+x.r,0));
   const activeOpen=st.open.filter(x=>x.strategyVersion===UnifiedStrategy.activeStrategy).length;
-  const archived=(H.length-active.length)+(st.open.length-activeOpen);
+  // Earlier strategies have separate untouched browser storage; never merge their metrics.
   $('stats').innerHTML=[
     ['New strategy open',activeOpen],['New strategy closed',active.length],
     ['New strategy win rate',active.length?f(win.length/active.length*100,0)+'%':'–'],
     ['New strategy total R',f(tr)],
     ['New strategy P&L','$'+f(active.reduce((sum,x)=>sum+x.pnl,0))],
     ['Profit factor',gl?f(win.reduce((sum,x)=>sum+x.r,0)/gl):'–'],
-    ['Earlier-strategy records (preserved)',archived]
+    ['Strategy','1m EMA20/50 ONLY']
   ].map(x=>`<span>${x[0]}: <b>${x[1]}</b></span>`).join('');
-  $('allResults').hidden=H.length<=100;
-  $('allResults').textContent=showAllHistory?'Show latest 100':'Show all '+H.length+' results';
-  const openRows=[...st.open].sort((a,b)=>(b.open||0)-(a.open||0)).map(o=>{
+  $('allResults').hidden=active.length<=100;
+  $('allResults').textContent=showAllHistory?'Show latest 100':'Show all '+active.length+' results';
+  const openRows=st.open.filter(o=>o.strategyVersion===UnifiedStrategy.activeStrategy)
+    .sort((a,b)=>(b.open||0)-(a.open||0)).map(o=>{
     const market=M[o.sym],px=quotedTradePrice(o);
     const sg=o.dir==='long'?1:-1,risk=Math.abs(o.en-o.stop0);
     const grossR=px!==null&&risk>0?(px-o.en)*sg/risk:null;
@@ -1161,7 +1162,7 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
       (o.profitLockStage?' · SL lock stage '+o.profitLockStage:'')+'</td><td>'+
       trackedChartButton(o,'open')+'</td><td>'+action+'</td></tr>';
   });
-  const closed=(showAllHistory?[...H].reverse():[...H].reverse().slice(0,100)).map(x=>
+  const closed=(showAllHistory?[...active].reverse():[...active].reverse().slice(0,100)).map(x=>
     '<tr><td>'+(x.strategyVersion===UnifiedStrategy.activeStrategy?'CLOSED':'CLOSED - PRIOR')+'</td><td>'+new Date(x.close).toLocaleString()+'</td><td>'+
       tv(x.sym)+'</td><td>'+pill(x.dir==='long'?'pl':'ps',x.dir.toUpperCase())+
       '</td><td>'+fp(x.en)+'</td><td>'+fp(x.ex)+'</td><td>'+fp(x.stop)+
