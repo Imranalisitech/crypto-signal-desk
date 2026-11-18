@@ -594,7 +594,8 @@ function fire(r){
   if(notif){try{new Notification(r.dir.toUpperCase()+' signal '+nm(r.sym),{body:'Entry '+fp(r.plan.en)+' stop '+fp(r.plan.stop)})}catch(e){}}
 }
 const day=()=>new Date().toISOString().slice(0,10);
-const today=()=>st.hist.filter(x=>new Date(x.close).toISOString().slice(0,10)===day());
+const today=()=>st.hist.filter(x=>x.strategyVersion===UnifiedStrategy.activeStrategy&&
+  new Date(x.close).toISOString().slice(0,10)===day());
 // A confirmed candle is one signal even when it reappears on repeated scans.
 // Keep its identity through reloads and after its TP/SL result was recorded.
 function signalKey(r){
@@ -664,7 +665,8 @@ function closeT(t,why,px,gross){
     volumeDirection:t.volumeDirection||null,
     timeframe:t.timeframe||'1m',researchOnly:!!t.researchOnly,
     finalManagedStop:t.stop,profitLockStage:t.profitLockStage||0,
-    previousDayLevel:t.previousDayLevel||null});
+    previousDayLevel:t.previousDayLevel||null,
+    strategyVersion:t.strategyVersion||null});
   st.open=st.open.filter(x=>x.id!==t.id);save();
 }
 function monitor(){
@@ -918,18 +920,17 @@ function render(){
     [remoteMode&&!remoteMarketFresh?'Saved open trades':'Open trades',st.open.length],
     ['Today',t.length+' trades'],['Today result',f(dr)+' R']].map(x=>`<div><span>${x[0]}</span><b>${x[1]}</b></div>`).join('');
   // Current confirmed 5m setups and open tracked simulations are distinct.
-  // An older Windows trade may be open even when its originating strategy is
-  // not the approved V5; never silently treat that as a NEW confirmation.
-  const trackedLong=st.open.filter(o=>o&&o.dir==='long'&&o.sym&&
-    !cl.some(r=>r.sym===o.sym&&signalKey(r)===o.signalKey));
-  const trackedShort=st.open.filter(o=>o&&o.dir==='short'&&o.sym&&
-    !cs.some(r=>r.sym===o.sym&&signalKey(r)===o.signalKey));
+  // Confirmed panels contain only current-scalper trade records.
+  // Older trades remain unchanged and visible in Automatic Trades & Results.
+  const trackedLong=st.open.filter(o=>o&&o.strategyVersion===UnifiedStrategy.activeStrategy&&
+    o.dir==='long'&&o.sym&&!cl.some(r=>r.sym===o.sym&&signalKey(r)===o.signalKey));
+  const trackedShort=st.open.filter(o=>o&&o.strategyVersion===UnifiedStrategy.activeStrategy&&
+    o.dir==='short'&&o.sym&&!cs.some(r=>r.sym===o.sym&&signalKey(r)===o.signalKey));
   function trackedCard(o){
     const safeText=x=>String(x??'').replace(/[&<>"']/g,c=>({
       '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const q=quotedTradePrice(o);
-    const verified=!!(R[o.sym]?.verifiedStrategy===true&&
-      R[o.sym]?.status==='confirm'&&R[o.sym]?.plan?.ck===o.signalCandle);
+    const verified=o.strategyVersion===UnifiedStrategy.activeStrategy;
     const label=verified?'Open tracked scalping simulation':'Historical simulation · strategy unverified';
     return '<div class="card '+o.dir+'"><div class="ch"><b>'+safeText(o.sym)+'</b>'+
       '<span class="m">'+safeText(label)+'</span></div>'+
@@ -942,8 +943,8 @@ function render(){
       '<div class="auto-track-state">Open SIMULATED trade · exchange order NOT verified</div>'+
       trackedChartButton(o,'open')+'</div>';
   }
-  // Group distinct older trades by coin/side for display only.
-  // Keep every original trade intact in st.open and Automatic Trades & Results.
+  // Group current strategy trades by coin/side for display only.
+  // Keep historical positions and results intact in st.open/st.hist.
   const groupTracked=items=>{
     const groups=new Map();
     for(const o of items){
