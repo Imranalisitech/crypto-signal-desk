@@ -1,7 +1,7 @@
 {
-  "name": "Crypto Signal Desk — 1m Research Signals",
+  "name": "Crypto Signal Desk — 1-Minute EMA20/50 Only",
   "short_name": "Crypto Signal Desk",
-  "description": "Live browser alerts for paper-only 5m trend / 1m EMA pullback confirmations. 2R historical research signals; not validated profitable and never auto-execute real Binance orders.",
+  "description": "Only the new 1-minute EMA20/EMA50 pullback + breakout research scanner. RSI14, ATR14, volume >=1.15x, hypothetical 1.8R target, 45-minute paper horizon. No real exchange orders.",
   "start_url": "/?browser=1",
   "scope": "/",
   "display": "standalone",
