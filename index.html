@@ -230,14 +230,15 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   </div>
   <div class="paper-heading" style="gap:8px;flex-wrap:wrap;margin:8px 0 14px">
     <button type="button" id="liveRefreshAccount">Check secure Binance connection</button>
+    <button type="button" id="openPrivateBinance" style="background:#187464">Open private Binance dashboard (this PC)</button>
     <a href="https://www.binance.com/en/my/settings/api-management" target="_blank" rel="noopener noreferrer" style="color:#a8d5ff">Binance API Management</a>
   </div>
   <details id="secureBrokerSetup" class="paper-details" open>
     <summary><b>1. Connect REAL Binance Futures — secure setup</b></summary>
-    <p class="paper-note">The installed website is a browser app, not the private Windows execution agent. A Binance website link cannot execute software signals. Your private Windows trading agent must be running and authenticated before live account data or automatic orders can be enabled.</p>
+    <p class="paper-note">To enter a Binance API key manually, start the separate private Binance dashboard on your Windows computer, then press <b>Open private Binance dashboard (this PC)</b> above. Local address: <b>http://127.0.0.1:8765/</b>. Never enter a secret on the public website. The private dashboard can read live USD-M Futures balances and positions and offers individually confirmed close-position and emergency close-all actions. Automatic new real trades remain disabled. Your existing Windows scanner is separate.</p>
     <div class="paper-settings">
       <div><b>Step 1 — Create your API key</b><p class="paper-note">Use Binance API Management. Enable necessary Futures access only when ready, disable withdrawals, and restrict the key to your private agent IP when supported.</p></div>
-      <div><b>Step 2 — Connect in the private Windows agent</b><p class="paper-note">Enter API credentials only in a trusted, secured local program, never in this public dashboard or chat. Start the local trading service and verify account ownership.</p></div>
+      <div><b>Step 2 — Enter your API key manually on this PC</b><p class="paper-note">Run the downloaded private Binance dashboard agent. Open http://127.0.0.1:8765/ on your own computer, choose Testnet or Mainnet, and paste the API key and secret into its local form. Credentials are kept in agent memory only, never in this public page.</p></div>
       <div><b>Step 3 — Verify live safeguards</b><p class="paper-note">Confirm real balance and positions, exchange-side stop-loss/take-profit orders, daily-loss enforcement, duplicate prevention and automatic recovery after disconnections.</p></div>
       <div><b>Step 4 — Enable after testing</b><p class="paper-note">Test order placement, fills, stop revisions and emergency pause using Binance test mode before separately authorizing real-money execution.</p></div>
     </div>
@@ -296,6 +297,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   </div>
  </div>
  <h3>Real Binance orders &amp; open positions <small id="liveOrderCount"></small></h3>
+ <p class="paper-note">Position controls, including <b>STOP / CLOSE this trade</b> and <b>STOP ALL — Close all positions</b>, are available only inside the private dashboard after a verified Binance connection. The public page cannot safely issue market orders.</p>
  <div class="tw" id="liveOrders"></div>
  <h3>Real trading safety &amp; execution events</h3><div class="tw" id="liveEvents"></div>
  <p class="paper-note"><b>Important:</b> Emergency Pause blocks future entries; it does not close already-open Binance positions. Existing Binance-side protective orders stay on the exchange. Realized P&L must be verified from Binance account history. This desktop software is not a replacement for monitoring your exchange account.</p>
