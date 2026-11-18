@@ -1038,7 +1038,7 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
       '<button type="button" data-a="close" data-s="'+o.id+'" '+
       (px===null?'disabled title="Fresh exchange quote required"':'')+
       '>Close manually</button>';
-    return '<tr><td><b>OPEN</b></td><td>'+new Date(o.open).toLocaleString()+
+    return '<tr><td><b>'+(o.strategyVersion===UnifiedStrategy.activeStrategy?'OPEN':'OPEN - PRIOR')+'</b></td><td>'+new Date(o.open).toLocaleString()+
       '</td><td>'+tv(o.sym)+'</td><td>'+
       pill(o.dir==='long'?'pl':'ps',o.dir.toUpperCase())+'</td><td>'+fp(o.en)+
       '</td><td>'+(px===null?'— (stale)':fp(px)+' ('+quoteAge+'s)')+'</td><td>'+fp(o.stop)+
@@ -1049,7 +1049,7 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
       trackedChartButton(o,'open')+'</td><td>'+action+'</td></tr>';
   });
   const closed=(showAllHistory?[...H].reverse():[...H].reverse().slice(0,100)).map(x=>
-    '<tr><td>CLOSED</td><td>'+new Date(x.close).toLocaleString()+'</td><td>'+
+    '<tr><td>'+(x.strategyVersion===UnifiedStrategy.activeStrategy?'CLOSED':'CLOSED - PRIOR')+'</td><td>'+new Date(x.close).toLocaleString()+'</td><td>'+
       tv(x.sym)+'</td><td>'+pill(x.dir==='long'?'pl':'ps',x.dir.toUpperCase())+
       '</td><td>'+fp(x.en)+'</td><td>'+fp(x.ex)+'</td><td>'+fp(x.stop)+
       '</td><td>'+fp(x.tp)+'</td><td class="'+(x.r>0?'long-t':'short-t')+'">'+f(x.r)+
