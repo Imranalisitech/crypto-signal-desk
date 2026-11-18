@@ -215,7 +215,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   <section><h2>Confirmed SHORT <small id="ns"></small></h2><div class="cards" id="cs"></div></section>
 </div>
 
-<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist tracks new scalping candidates across scans, ranked by current technical confirmation score.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
+<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">V2 scalp watchlist · stronger 1h trend, controlled 5m pullback, RSI and volume confirmation · signal scores show rule completion, not win probability.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 
 <section id="realBinancePanel" class="paper-panel" hidden style="border-color:#d76262;background:linear-gradient(120deg,#321b24,#1d2736)">
  <div class="paper-heading">
@@ -580,6 +580,11 @@ async function scan(){
       }
       if(!failure&&r.status==='confirm'&&r.plan){
         const fresh=registerConfirmedTrade(r);
+        // Show why a qualified technical setup was not added to portfolio.
+        if(!fresh&&r.reason!==R[x.symbol]?.reason){
+          R[x.symbol].reason=r.reason;
+          if(watchMemory[x.symbol])watchMemory[x.symbol].reason=r.reason;
+        }
         if(fresh)fire(r);
       }
     });
@@ -896,7 +901,7 @@ function renderScanInspector(){
   const recent=Array.isArray(meta.scanRecent)?meta.scanRecent.slice(0,4):[];
   $('scanHelp').textContent=(running?'Current scan is processing markets. ':'')+
     'Only fresh, closed-candle signals from the current scalping engine may be confirmed. '+
-    'The strategy uses 1-hour and 5-minute market data. Entries and 3R stops/targets are simulated; no real Binance orders are placed.'+
+    'V2 requires 1h EMA trend and 5m EMA21 pullback, strong closed breakout, RSI and 1.15× volume. New simulated entries: at most 4 open (2 each direction), 24h turnover ≥ $10m, 45m coin cooldown; older simulations remain intact. 3R targets are simulated, not real Binance orders.'+
     (recent.length?' · Recently scanned: '+recent.map(x=>x.sym).join(', '):'');
 }
 function render(){
