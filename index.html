@@ -477,6 +477,15 @@ if(st.set.v!==4){st.set.v=4;st.set.topn=600;st.set.minvol=0;st.set.ex='bybit';sa
 IDS.forEach(i=>{if(st.set[i]!=null)$(i).value=st.set[i]});
 try{banUntil=+localStorage.getItem('ban_'+EX())||0}catch(e){}
 let R={},M={},audio=null,notif=false,busy=false,lastScan=null,err='',prog='';
+const SUGGEST_STORE='crypto_1m_research_suggestions_v1';
+let liveSuggestions=[];
+try{
+ const old=JSON.parse(localStorage.getItem(SUGGEST_STORE)||'[]');
+ if(Array.isArray(old))liveSuggestions=old.filter(x=>
+   x&&x.strategyVersion===UnifiedStrategy.activeStrategy&&
+   /^[A-Z0-9]{2,24}USDT$/.test(x.sym)&&Number.isFinite(x.ck)&&
+   Number.isFinite(x.at)&&Date.now()-x.at<24*3600000).slice(0,80);
+}catch(_){} 
 for(const item of Object.values(watchMemory))R[item.sym]={...item,
   status:item.status==='unverified'?'unverified':'watch',
   ok:false,plan:null,
@@ -603,9 +612,30 @@ async function scan(){
   }catch(e){if(Date.now()<banUntil){err=banMsg();wait=(banUntil-Date.now())/1000+5}else err='Could not load '+XN()+' data: '+e.message+'. Check your connection or VPN; retrying.'}
   busy=false;clearTimeout(liveRenderTimer);liveRenderTimer=null;render();if(!remoteMode)setTimeout(scan,wait*1000);
 }
+function recordLiveSuggestion(r){
+  // UI alerts are independent of the simulated portfolio's position limit.
+  if(r.status!=='confirm'||!r.plan||r.strategyVersion!==UnifiedStrategy.activeStrategy||
+     !/^[A-Z0-9]{2,24}USDT$/.test(r.sym))return;
+  const key=signalKey(r),ck=Number(r.plan.ck);
+  if(!key||!(ck>0)||Date.now()-(ck+60000)>120000||
+     liveSuggestions.some(x=>x.key===key))return;
+  liveSuggestions.unshift({key,strategyVersion:UnifiedStrategy.activeStrategy,
+    ck,at:Date.now(),sym:r.sym,dir:r.dir,source:EX(),
+    entry:r.plan.en,stop:r.plan.stop,tp:r.plan.tp2,
+    rr:2,volumeRatio:r.setup?.volumeRatio,RSI14:r.setup?.rsi14});
+  liveSuggestions=liveSuggestions.slice(0,80);
+  try{localStorage.setItem(SUGGEST_STORE,JSON.stringify(liveSuggestions))}catch(_){}
+  fire(r);
+  queueLiveRender();
+}
 function fire(r){
   if(audio){try{const o=audio.createOscillator(),g=audio.createGain();o.connect(g);g.connect(audio.destination);o.frequency.value=r.dir==='long'?880:520;g.gain.value=.15;o.start();o.stop(audio.currentTime+.35)}catch(e){}}
-  if(notif){try{new Notification(r.dir.toUpperCase()+' signal '+nm(r.sym),{body:'Entry '+fp(r.plan.en)+' stop '+fp(r.plan.stop)})}catch(e){}}
+  if(notif&&typeof Notification!=='undefined'&&Notification.permission==='granted'){
+    try{new Notification('1m '+r.dir.toUpperCase()+' paper setup: '+r.sym,{
+      body:'Indicative entry '+fp(r.plan.en)+' | SL '+fp(r.plan.stop)+
+        ' | 2R TP '+fp(r.plan.tp2)+' | Research only, no real order'
+    })}catch(e){}
+  }
 }
 const day=()=>new Date().toISOString().slice(0,10);
 const today=()=>st.hist.filter(x=>x.strategyVersion===UnifiedStrategy.activeStrategy&&
@@ -926,7 +956,31 @@ function renderScanInspector(){
     'Research setup: completed 5m EMA21/55 trend, 1m EMA9/21 with EMA21 pullback, closed 1m breakout, RSI14 and volume ≥ 1.03× prior 20 bars. 2R hypothetical TP; 36-minute paper horizon. The full historical strategy lost money after estimated costs; no real Binance orders.'+
     (recent.length?' · Recently scanned: '+recent.map(x=>x.sym).join(', '):'');
 }
+function renderLiveSuggestions(){
+  const now=Date.now();
+  const fresh=liveSuggestions.filter(x=>now-(x.ck+60000)<=120000&&
+    now>=x.ck+60000&&x.strategyVersion===UnifiedStrategy.activeStrategy);
+  $('suggestionCount').textContent=fresh.length+' fresh · '+liveSuggestions.length+' saved in last 24h';
+  const items=liveSuggestions.slice(0,30);
+  $('liveSuggestions').innerHTML=tbl(
+    ['Status','Confirmed UTC','Coin','Direction','Indicative entry','Stop','2R target','Research note'],
+    items.map(x=>{
+      const age=now-(x.ck+60000);
+      const isFresh=age>=0&&age<=120000;
+      const status=isFresh?'<b class="long-t">FRESH · PAPER</b>':
+        '<span class="mut">EXPIRED · NOT CURRENT</span>';
+      return '<tr><td>'+status+'</td><td>'+
+        new Date(x.ck+60000).toISOString().slice(0,19).replace('T',' ')+'</td><td>'+
+        tv(x.sym)+'</td><td>'+pill(x.dir==='long'?'pl':'ps',x.dir.toUpperCase())+
+        '</td><td>'+fp(x.entry)+'</td><td>'+fp(x.stop)+'</td><td>'+fp(x.tp)+
+        '</td><td class="mut">RSI '+f(x.RSI14,1)+' · Vol '+f(x.volumeRatio,2)+
+        '× · Historical setup had negative average net R · no real orders</td></tr>';
+    }),
+    'No new 1-minute LONG or SHORT confirmations yet. Scanner watches 500 coins while this app is open.'
+  );
+}
 function render(){
+  renderLiveSuggestions();
   const watchScroll=$('wl').scrollTop,longScroll=$('cl').scrollTop,shortScroll=$('cs').scrollTop;
   renderScanInspector();
   const L=Object.values(R),cf=L.filter(r=>r.status==='confirm'&&r.verifiedStrategy!==false),cl=cf.filter(r=>r.dir==='long'),cs=cf.filter(r=>r.dir==='short'),t=today(),dr=t.reduce((a,x)=>a+x.r,0);
