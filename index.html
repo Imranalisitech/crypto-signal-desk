@@ -422,8 +422,8 @@ async function refreshBrowserQuotes(){
 }
 // Remote laptop snapshots replace browser-only tracking when available.
 let browserFallbackActive=false, browserScannerStarted=false, installPrompt=null;
-let remoteMode=!!window.CRYPTO_LOCAL_SERVER||localStorage.getItem('cryptoLaptopActivated')==='1',
-    remoteSource=window.CRYPTO_LOCAL_SERVER?'local':remoteMode?'cloud':'browser',
+// The new 1m strategy is the ONLY signal source in this dashboard.
+let remoteMode=false,remoteSource='browser',
     remoteOnline=false,remoteLastSeen=null,remoteHistoryTruncated=false,
     remoteMarketFresh=false,remoteLastPriceAt=null;
 let st={hist:[],open:[],pins:[],trackedKeys:{},set:{}};
@@ -432,9 +432,9 @@ if(!Array.isArray(st.open))st.open=[];
 if(!Array.isArray(st.hist))st.hist=[];
 if(!st.pending||typeof st.pending!=='object'||Array.isArray(st.pending))st.pending={};
 if(!st.trackedKeys||typeof st.trackedKeys!=='object'||Array.isArray(st.trackedKeys))st.trackedKeys={};
-const save=()=>{if(remoteMode)return;try{localStorage.setItem(browserFallbackActive?'crypto_browser_fallback_v1':'scan1',JSON.stringify(st))}catch(e){}};
+const save=()=>{if(remoteMode)return;try{localStorage.setItem('crypto_only_one_minute_ema20_50_sim_v1',JSON.stringify(st))}catch(e){}};
 // Persistent browser candidate history. Store only bounded, serializable scan fields.
-const WATCH_STORE='crypto_signal_desk_persistent_watch_v2';
+const WATCH_STORE='crypto_only_one_minute_ema20_50_watch_v1';
 const watchMemory=Object.create(null);
 let scanCursor=0;
 try{
@@ -482,7 +482,7 @@ try{
    typeof Notification!=='undefined'&&Notification.permission==='granted';
  if(notif)$('alert').textContent='Alerts on';
 }catch(_){} 
-const SUGGEST_STORE='crypto_1m_research_suggestions_v1';
+const SUGGEST_STORE='crypto_only_one_minute_ema20_50_suggestions_v1';
 let liveSuggestions=[];
 try{
  const old=JSON.parse(localStorage.getItem(SUGGEST_STORE)||'[]');
@@ -570,9 +570,9 @@ async function scan(){
     // More workers overlap network latency; request pacing remains centralized.
     await pool(list,async x=>{
  const s=x.symbol,r=res[s];
- const [one,five]=await Promise.all([K(s,'1m',200),K(s,'5m',110)]);
+ const one=await K(s,'1m',200);
  const settings={
-  bars1:onlyClosed(one,'1m'),bars5:onlyClosed(five,'5m'),
+  bars1:onlyClosed(one,'1m'),
   mark:M[s].p,account:n('acct'),risk:n('risk')
  };
  const signal=UnifiedStrategy.evaluate(settings);
@@ -1483,7 +1483,7 @@ function activateBrowserFallback(){
  // Never merge the Windows history into browser-only simulation.
  const localSettings=st.set||{},pins=Array.isArray(st.pins)?st.pins:[];
  try{
-   const old=JSON.parse(localStorage.getItem('crypto_browser_fallback_v1')||'{}');
+   const old=JSON.parse(localStorage.getItem('crypto_only_one_minute_ema20_50_sim_v1')||'{}');
    st={open:Array.isArray(old.open)?old.open:[],
      hist:Array.isArray(old.hist)?old.hist:[],
      pins:Array.isArray(old.pins)?old.pins:pins,
@@ -1515,9 +1515,9 @@ async function fastWatchScan(){
    while(next<candidates.length&&!remoteMode){
     const candidate=candidates[next++],symbol=candidate.sym,started=Date.now();
     try{
-     const [one,five]=await Promise.all([K(symbol,'1m',200),K(symbol,'5m',110)]);
+     const one=await K(symbol,'1m',200);
      const sig=UnifiedStrategy.evaluate({
-       bars1:onlyClosed(one,'1m'),bars5:onlyClosed(five,'5m'),
+       bars1:onlyClosed(one,'1m'),
        mark:M[symbol]?.p,account:n('acct'),risk:n('risk')
      });
      if(remoteMode||Number(R[symbol]?.lastScanAt)>started)continue;
@@ -1582,10 +1582,8 @@ async function remotePoll(){
  }
 }
 async function begin(){
- if(!window.CRYPTO_LOCAL_SERVER && new URLSearchParams(location.search).get('browser')==='1')activateBrowserFallback();
- await remotePoll();
- if(!remoteMode)startBrowserScanner();
- setInterval(remotePoll,8000);
+ // Never ingest legacy Windows/Render snapshots as current 1m confirmations.
+ activateBrowserFallback();
  setInterval(()=>{if(!remoteMode)monitor();render()},5000);
 }
 window.addEventListener('beforeinstallprompt',event=>{
