@@ -600,7 +600,7 @@ const today=()=>st.hist.filter(x=>new Date(x.close).toISOString().slice(0,10)===
 function signalKey(r){
   const ck=Number(r.plan?.ck);
   if(!r.sym||!['long','short'].includes(r.dir)||!(ck>0))return null;
-  return [EX(),r.sym,r.dir,ck].join(':');
+  return [EX(),UnifiedStrategy.activeStrategy,r.sym,r.dir,ck].join(':');
 }
 function registerConfirmedTrade(r){
   if(r.status!=='confirm'||!r.plan)return false;
@@ -635,14 +635,16 @@ function registerConfirmedTrade(r){
     open:now,signalCandle:p.ck,source:EX(),
     tp1h:false,targetMode:'fixed3r',profitLockStage:0,
     timeframe:p.timeframe||'1m',
-    confirmationMode:r.confirmationMode||'PDL/PDH neckline breakout + FVG retest + 5m reclose',
+    confirmationMode:r.confirmationMode||'Trend-aligned 5m EMA pullback scalp',
     fvgZone:p.fvgZone||null,fvgFormedAt:p.fvgFormedAt||null,
     fvgFilledAt:p.fvgFilledAt||null,fvgVolumeRatio:p.fvgVolumeRatio??null,
     volumeDirection:p.volumeDirection||null,
     firstSweepPrice:p.firstSweepPrice??null,secondSweepPrice:p.secondSweepPrice??null,
     breakLevel:p.breakLevel??null,strength:p.bodyMultiple??null,
     researchOnly:p.researchOnly===true,
-    previousDayLevel:p.previousDayLevel||null
+    previousDayLevel:p.previousDayLevel||null,
+    strategyVersion:UnifiedStrategy.activeStrategy,
+    scalpRegime:r.regime||null,scalpSetup:r.setup||null
   };
   st.open.push(track);
   st.trackedKeys[key]=now;
@@ -928,7 +930,7 @@ function render(){
     const q=quotedTradePrice(o);
     const verified=!!(R[o.sym]?.verifiedStrategy===true&&
       R[o.sym]?.status==='confirm'&&R[o.sym]?.plan?.ck===o.signalCandle);
-    const label=verified?'Open tracked V5 simulation':'Open tracked simulation · strategy unverified';
+    const label=verified?'Open tracked scalping simulation':'Historical simulation · strategy unverified';
     return '<div class="card '+o.dir+'"><div class="ch"><b>'+safeText(o.sym)+'</b>'+
       '<span class="m">'+safeText(label)+'</span></div>'+
       '<table class="kv"><tr><td>Entry</td><td>'+fp(o.en)+'</td></tr>'+
@@ -936,7 +938,7 @@ function render(){
       '<tr><td>Final TP</td><td>'+fp(o.tp2)+'</td></tr>'+
       '<tr><td>Live market price</td><td>'+(q===null?'Unavailable / stale':fp(q))+'</td></tr>'+
       '<tr><td>Started</td><td>'+safeText(o.open?new Date(o.open).toLocaleString():'Unknown')+'</td></tr>'+
-      '<tr><td>Signal validation</td><td>'+safeText(verified?'Current V5 verified':'Historical / older scanner; NOT a fresh V5 confirmation')+'</td></tr></table>'+
+      '<tr><td>Signal validation</td><td>'+safeText(verified?'Current scalping signal':'Historical / earlier scanner; NOT a fresh scalp confirmation')+'</td></tr></table>'+
       '<div class="auto-track-state">Open SIMULATED trade · exchange order NOT verified</div>'+
       trackedChartButton(o,'open')+'</div>';
   }
@@ -976,8 +978,7 @@ function render(){
   // Every processed coin belongs to the live monitoring table.
   // A scanned coin is NOT automatically a qualified trade.
   for(const r of L)if(r.sym)watchBySym.set(r.sym,r);
-  // Highest CURRENT V4 strategy progress first; keep the same coins across scans.
-  // Legacy Windows scores must never be ranked as valid V4 technical scores.
+  // Sort current strategy scores first; older Windows scores stay unverified.
   const watchRank=r=>r.verifiedStrategy===false||r.status==='unverified'?-1:
     Number.isFinite(Number(r.score))?Math.max(0,Math.min(100,Number(r.score))):-1;
   const wlAll=[...watchBySym.values()].sort((a,b)=>
@@ -988,18 +989,19 @@ function render(){
 const wl=wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).slice(0,watchLimit);
 $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase().includes(watchQuery)).length+' monitored coins · highest current-strategy score first · scroll for more';
   $('wl').innerHTML=tbl(
- ['','Coin','Side','Price','Neckline','FVG / retest stage','Score ↓','Status / Waiting for'],
+ ['','Coin','Side','Price','1h trend','5m scalp progress','Score ↓','Status / Waiting for'],
  wl.map(r=>{
   const missing=r.G?r.G.filter(x=>!x.ok).map(x=>x.t):[];
-  const g=r.liquidity||{};
-  const boundary=g.neckline!=null?fp(g.neckline):'—';
+  const setup=r.setup||{},regime=r.regime||{};
+  const trend=regime.trend==='up'?'BULL':regime.trend==='down'?'BEAR':'—';
+  const stage=setup.candleConfirmed?'5m breakout candle detected':
+    setup.pullbackReady?'EMA21 pullback found':
+    regime.trend&&regime.trend!=='not aligned'?'Trend aligned; seeking 5m pullback':
+    'Waiting for trend alignment';
   return '<tr><td>'+star(r.sym)+'</td><td>'+tv(r.sym)+'</td><td>'+
    (r.dir?pill(r.dir==='long'?'pl':'ps',r.dir.toUpperCase()):'—')+
    '</td><td>'+fp(M[r.sym]?.p||r.price)+
-   '</td><td>'+boundary+'</td><td>'+
-   (r.fvg?.filled?'Exact neckline retested · close pending':r.fvg?.formed?'FVG not fully filled':
-    g.strongPressure?'Double sweep confirmed · FVG pending':
-    g.secondSweep?'Manipulation sweep seen':g.firstSweep?'Manipulation sweep seen':'Awaiting accumulation / sweep')+'</td><td>'+
+   '</td><td>'+trend+'</td><td>'+stage+'</td><td>'+
    (watchRank(r)<0?'—':f(watchRank(r),0))+'</td><td class="mut">'+((r.status==='none'?'Not currently qualified · ':r.status==='error'?'Data refresh error · ':'')+
      (r.status==='unverified'?'Windows scanner update required · ':
       missing.join('; ')||r.reason||'Monitoring'))+'</td></tr>';
