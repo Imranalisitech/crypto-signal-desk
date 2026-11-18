@@ -334,7 +334,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 const $=i=>document.getElementById(i),n=i=>parseFloat($(i).value);
 const f=(x,d=2)=>x==null||!isFinite(x)?'–':(+x).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
 const fp=x=>x==null?'–':f(x,x>=100?2:x>=1?4:6),nm=s=>s.replace('USDT','');
-const B='https://fapi.binance.com/fapi/v1/',EX=()=>$('ex').value,XN=()=>EX()==='bybit'?'Bybit':'Binance',BIV={'1m':'1','5m':'5','15m':'15','1d':'D','1w':'W','1M':'M'};
+const B='https://fapi.binance.com/fapi/v1/',EX=()=>$('ex').value,XN=()=>EX()==='bybit'?'Bybit':'Binance',BIV={'1m':'1','5m':'5','15m':'15','1h':'60','1d':'D','1w':'W','1M':'M'};
 const HTFCACHE=new Map();
 let nextBrowserRequestAt=0, browserRequestSlot=Promise.resolve();
 const QUOTE_MAX_AGE_MS=45000;
@@ -377,7 +377,7 @@ const J=async(u,w=1)=>{
   if(!r.ok)throw new Error('HTTP '+r.status);return r.json()};
 const K=async(s,iv,l)=>{
   const key=EX()+':'+s+':'+iv+':'+l,old=HTFCACHE.get(key);
-  const ttl=iv==='1M'?43200000:iv==='1w'?10800000:iv==='1d'?1200000:iv==='15m'?120000:iv==='5m'?45000:10000;
+  const ttl=iv==='1M'?43200000:iv==='1w'?10800000:iv==='1d'?1200000:iv==='1h'?90000:iv==='15m'?120000:iv==='5m'?45000:10000;
   // Completed prior-day OHLC cannot change during the same UTC day.
   // Reuse daily candles within that UTC day; fetch again across UTC rollover.
   const sameUtcDay=old&&new Date(old.at).toISOString().slice(0,10)===new Date().toISOString().slice(0,10);
@@ -502,7 +502,7 @@ function onlyClosed(bars,iv){
   const now=Date.now()-1500;
   return bars.filter(k=>{
     const end=iv==='1M'?Date.UTC(new Date(k.t).getUTCFullYear(),new Date(k.t).getUTCMonth()+1,1):
-      k.t+(iv==='1w'?604800000:iv==='1d'?86400000:iv==='15m'?900000:iv==='5m'?300000:60000);
+      k.t+(iv==='1w'?604800000:iv==='1d'?86400000:iv==='1h'?3600000:iv==='15m'?900000:iv==='5m'?300000:60000);
     return Number.isFinite(k.t)&&Number.isFinite(k.c)&&end<=now;
   });
 }
@@ -538,9 +538,9 @@ async function scan(){
     // More workers overlap network latency; request pacing remains centralized.
     await pool(list,async x=>{
  const s=x.symbol,r=res[s];
- const [daily,five]=await Promise.all([K(s,'1d',5),K(s,'5m',190)]);
+ const [hourly,five]=await Promise.all([K(s,'1h',90),K(s,'5m',190)]);
  const settings={
-  barsDaily:onlyClosed(daily,'1d'),bars5:onlyClosed(five,'5m'),
+  bars1h:onlyClosed(hourly,'1h'),bars5:onlyClosed(five,'5m'),
   mark:M[s].p,account:n('acct'),risk:n('risk')
  };
  const signal=UnifiedStrategy.evaluate(settings);
