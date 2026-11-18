@@ -477,6 +477,11 @@ if(st.set.v!==4){st.set.v=4;st.set.topn=600;st.set.minvol=0;st.set.ex='bybit';sa
 IDS.forEach(i=>{if(st.set[i]!=null)$(i).value=st.set[i]});
 try{banUntil=+localStorage.getItem('ban_'+EX())||0}catch(e){}
 let R={},M={},audio=null,notif=false,busy=false,lastScan=null,err='',prog='';
+try{
+ notif=localStorage.getItem('crypto_1m_alerts_enabled')==='1'&&
+   typeof Notification!=='undefined'&&Notification.permission==='granted';
+ if(notif)$('alert').textContent='Alerts on';
+}catch(_){} 
 const SUGGEST_STORE='crypto_1m_research_suggestions_v1';
 let liveSuggestions=[];
 try{
@@ -1381,7 +1386,18 @@ document.addEventListener('input',()=>{
    },900);
  }
 });
-$('alert').onclick=async()=>{audio=audio||new(window.AudioContext||window.webkitAudioContext)();if('Notification'in window)notif=(await Notification.requestPermission())==='granted';$('alert').textContent='Alerts on'};
+$('alert').onclick=async()=>{
+ try{
+  const Audio=window.AudioContext||window.webkitAudioContext;
+  if(Audio&&!audio)audio=new Audio();
+  if(audio&&audio.state==='suspended')await audio.resume();
+ }catch(_){}
+ if('Notification'in window){
+  try{notif=(await Notification.requestPermission())==='granted'}catch(_){notif=false}
+ }
+ try{localStorage.setItem('crypto_1m_alerts_enabled',notif?'1':'0')}catch(_){}
+ $('alert').textContent=notif?'Alerts on (while open)':'Sound on · browser alerts unavailable';
+};
 $('csv').onclick=()=>{const rows=[['closed','coin','side','signal_candle','entry','stop','target_tp','exit','R','pnl_usd','reason'],
     ...st.hist.map(x=>[new Date(x.close).toISOString(),x.sym,x.dir,
     x.signalCandle?new Date(x.signalCandle).toISOString():'',x.en,x.stop??'',x.tp??'',x.ex,
