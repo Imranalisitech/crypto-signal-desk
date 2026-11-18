@@ -663,7 +663,7 @@ function registerConfirmedTrade(r){
   const risk=side*(observed-p.stop);
   if(!(risk>0))return false;
   p.en=observed;p.sp=risk/observed*100;
-  const targetRR=Number(p.rr)===2?2:3;
+  const targetRR=1.8; // sole active 1m EMA20/50 research strategy
   p.tp1=observed+side*targetRR*risk;p.tp2=p.tp1;
   if(!key||st.trackedKeys[key]||
      Number(p.ck)<=simTradesClearEpoch)return false;
@@ -708,10 +708,10 @@ function registerConfirmedTrade(r){
     signalKey:key,sym:r.sym,dir:r.dir,en:p.en,stop:p.stop,
     stop0:p.stop,tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,
     open:now,signalCandle:p.ck,source:EX(),
-    tp1h:false,targetMode:p.targetMode||'fixed2r',profitLockStage:0,
-    maxHoldMinutes:p.targetMode==='fixed2r'?36:null,
-    timeframe:p.timeframe||'1m',
-    confirmationMode:r.confirmationMode||'5m trend and closed 1m EMA21 pullback breakout',
+    tp1h:false,targetMode:'fixed1p8r',profitLockStage:0,
+    maxHoldMinutes:45,
+    timeframe:'1m',
+    confirmationMode:r.confirmationMode||'Closed 1m EMA20/50 pullback breakout',
     fvgZone:p.fvgZone||null,fvgFormedAt:p.fvgFormedAt||null,
     fvgFilledAt:p.fvgFilledAt||null,fvgVolumeRatio:p.fvgVolumeRatio??null,
     volumeDirection:p.volumeDirection||null,
@@ -728,9 +728,9 @@ function registerConfirmedTrade(r){
   return true;
 }
 function closeT(t,why,px,gross){
-  // Estimated 0.02% round-trip slippage for 1m study trades in addition
-  // to the configured simulated round-trip commission. Legacy unaffected.
-  const totalPct=n('fee')+(t.targetMode==='fixed2r'?.02:0);
+  // Hypothetical 3bps round-trip slippage plus configured round-trip fees.
+  // 1.5 bps per side from the historical research model.
+  const totalPct=n('fee')+(t.targetMode==='fixed1p8r'?.03:0);
   const net=gross-totalPct/t.sp;
   st.hist.push({id:t.id,signalKey:t.signalKey||null,sym:t.sym,dir:t.dir,open:t.open,
     signalCandle:t.signalCandle||null,source:t.source||null,close:Date.now(),
@@ -754,13 +754,13 @@ function monitor(){
     const dir=t.dir==='long'?1:-1,unit=Math.abs(t.en-t.stop0);
     if(!(unit>0))continue;
     const currentR=(px-t.en)*dir/unit,extended=t.targetMode==='extended';
-    if(t.targetMode==='fixed2r'){
-      // New 1m historical study: 2R gross target and up-to-36m paper horizon.
-      // Stop checked first; no legacy profit-lock on the research trade.
-      if((px-t.stop)*dir<=0)closeT(t,'1m scalp stop-loss',px,currentR);
-      else if((px-t.tp2)*dir>=0)closeT(t,'1m scalp 2R target',px,currentR);
-      else if(Date.now()-t.open>=36*60000)
-        closeT(t,'1m scalp 36-minute research time exit',px,currentR);
+    if(t.targetMode==='fixed1p8r'){
+      // Same exit logic as the separate historical 1m study: stop-first,
+      // 1.8R TP, maximum 45-minute simulation holding period.
+      if((px-t.stop)*dir<=0)closeT(t,'1m stop-loss (paper)',px,currentR);
+      else if((px-t.tp2)*dir>=0)closeT(t,'1m 1.8R target (paper)',px,currentR);
+      else if(Date.now()-t.open>=45*60000)
+        closeT(t,'1m 45-minute paper time exit',px,currentR);
       continue;
     }
     if(t.targetMode==='fixed3r'){
