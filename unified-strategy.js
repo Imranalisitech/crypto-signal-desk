@@ -1,6 +1,6 @@
 'use strict';
 /*
- ONE approved entry strategy: 1-MINUTE EMA20/EMA50 PULLBACK SCALP.
+ ONE approved entry strategy: 1-MINUTE EMA20/EMA50 PULLBACK SCALP V2 (paper-only quality research).
  Based on the user's separate historical backtest research package.
  No prior PDL/PDH, FVG, neckline, 5m, 1h or V2 strategy is used.
 
@@ -13,7 +13,7 @@
  profitability has not been established.
 */
 (function(root){
- const VERSION='ONLY_1M_EMA20_50_PULLBACK_1P8R_V1';
+ const VERSION='ONLY_1M_EMA20_50_PULLBACK_1P8R_V2';
  const N=x=>Number(x),finite=x=>Number.isFinite(N(x));
  const valid=b=>b&&[b.t,b.o,b.h,b.l,b.c,b.v].every(finite)&&
    N(b.t)>0&&N(b.l)>0&&N(b.v)>=0&&
@@ -77,9 +77,12 @@
    const fresh=now-end<=120000;
    const result=side=>{
      const long=side==='long',sg=long?1:-1;
-     const trend=long?
-       ind.e20[i]>ind.e50[i]&&ind.e20[i]>ind.e20[i-5]&&ind.e50[i]>ind.e50[i-5]:
-       ind.e20[i]<ind.e50[i]&&ind.e20[i]<ind.e20[i-5]&&ind.e50[i]<ind.e50[i-5];
+     const emaGap=sg*(ind.e20[i]-ind.e50[i]);
+     const fastSlope=sg*(ind.e20[i]-ind.e20[i-5]);
+     const slowSlope=sg*(ind.e50[i]-ind.e50[i-5]);
+     // Direction is NOT sufficient: reject flat EMA stacks and weak slopes.
+     const trend=emaGap>=.25*atr&&fastSlope>=.25*atr&&
+       slowSlope>=.08*atr&&sg*(c-ind.e20[i])>0;
      let pullback=-1;
      for(let j=i-4;j<i;j++){
        const p=b[j],basis=ind.e20[j];
@@ -89,22 +92,23 @@
          pullback=j;
      }
      const closeAtEdge=N(last.h)>N(last.l)&&
-       (long?(N(last.h)-c)/(N(last.h)-N(last.l))<=.30:
-               (c-N(last.l))/(N(last.h)-N(last.l))<=.30);
+       (long?(N(last.h)-c)/(N(last.h)-N(last.l))<=.25:
+               (c-N(last.l))/(N(last.h)-N(last.l))<=.25);
      const breakout=long?
        c>N(b[i-1].h)+.02*atr&&c>N(last.o):
        c<N(b[i-1].l)-.02*atr&&c<N(last.o);
-     const confirm=fresh&&breakout&&closeAtEdge&&body>=.35*atr&&body<=1.8*atr;
-     const rsiOk=long?momentum>=52&&momentum<=70:momentum>=30&&momentum<=48;
+     const confirm=fresh&&breakout&&closeAtEdge&&body>=.45*atr&&body<=1.6*atr;
+     const rsiOk=long?momentum>=55&&momentum<=69:momentum>=31&&momentum<=45;
+     const notChasing=sg*(c-ind.e20[i])>0&&sg*(c-ind.e20[i])<=1.35*atr;
      const volatility=atrPct>=.0006&&atrPct<=.013;
-     const volume=vRatio>=1.15;
+     const volume=vRatio>=1.30;
      const checks=[
-       {ok:trend,t:'1m EMA20/EMA50 directional alignment and five-bar slope',weight:25},
+       {ok:trend,t:'1m EMA20/EMA50 separation >=0.25 ATR, positive slope and directional close',weight:25},
        {ok:pullback>=0,t:'Controlled pullback into EMA20 within prior four candles',weight:20},
-       {ok:confirm,t:'Fresh closed 1m breakout candle with strong directional close',weight:20},
-       {ok:rsiOk,t:'RSI14 in directional confirmation band',weight:10},
-       {ok:volume,t:'1m volume at least 1.15x prior 20-candle average',weight:15},
-       {ok:volatility,t:'ATR14 volatility between 0.06% and 1.3%',weight:10}
+       {ok:confirm,t:'Fresh closed 1m breakout with strong body and close',weight:20},
+       {ok:rsiOk&&notChasing,t:'RSI14 and EMA20 distance avoid overextended entries',weight:15},
+       {ok:volume,t:'1m volume at least 1.30x preceding 20-candle average',weight:15},
+       {ok:volatility,t:'ATR14 volatility between 0.06% and 1.3%',weight:5}
      ];
      const score=checks.reduce((sum,x)=>sum+(x.ok?x.weight:0),0);
      let plan=null;
@@ -119,7 +123,7 @@
            sp:100*fraction,'r$':Math.max(0,N(account)*N(risk)/100),
            ck:N(last.t),timeframe:'1m',targetMode:'fixed1p8r',
            maxHoldMinutes:45,entryBasis:'Indicative trigger close; historical model fills at NEXT candle open',
-           setupType:'1m-only EMA20/50 controlled pullback with breakout, RSI, volume',
+           setupType:'1m-only EMA20/50 quality scalp, EMA strength, pullback, breakout, RSI, 1.30x volume',
            pullbackAt:N(b[pullback].t),ema20:ind.e20[i],ema50:ind.e50[i],
            rsi14:momentum,atr14:atr,volumeRatio:vRatio,researchOnly:true};
        }
@@ -127,15 +131,17 @@
      const ok=!!plan;
      return {...base,status:ok?'confirm':score?'watch':'none',side,dir:side,
        ok,score,checks,G:checks,plan,
-       reason:ok?'New 1m EMA20/50 pullback breakout confirmed — PAPER ONLY':
+       reason:ok?'V2 1m EMA20/50 quality-confirmed scalp — PAPER ONLY':
          !fresh?'Waiting for a new completed 1-minute candle':
          checks.find(x=>!x.ok)?.t||'Stop distance not between 0.18% and 2%',
        regime:{trend:trend?(long?'up':'down'):'not aligned',
-         ema20:ind.e20[i],ema50:ind.e50[i]},
+         ema20:ind.e20[i],ema50:ind.e50[i],emaGapATR:emaGap/atr,
+         emaFastSlopeATR:fastSlope/atr},
        setup:{pullbackAt:pullback>=0?N(b[pullback].t):null,
          pullbackReady:pullback>=0,candleConfirmed:confirm,
          ema20:ind.e20[i],ema50:ind.e50[i],rsi14:momentum,atr14:atr,
-         volumeRatio:vRatio,volatilityPct:atrPct*100},
+         volumeRatio:vRatio,volatilityPct:atrPct*100,
+         entryDistanceATR:sg*(c-ind.e20[i])/atr},
        pattern:ok?{name:long?'1m LONG EMA20 pullback':'1m SHORT EMA20 pullback',
          confirmTime:N(last.t),confirmClose:c}:null};
    };
