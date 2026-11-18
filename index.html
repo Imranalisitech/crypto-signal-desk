@@ -625,6 +625,16 @@ function recordLiveSuggestion(r){
   const key=signalKey(r),ck=Number(r.plan.ck);
   if(!key||!(ck>0)||Date.now()-(ck+60000)>45000||
      liveSuggestions.some(x=>x.key===key))return;
+  // Do not alert as a high-quality fresh entry when a quote is already stale
+  // or expected transaction friction is too large for a 1-minute scalp.
+  const indicative=Number(r.plan.en),stop=Number(r.plan.stop);
+  const observed=quotedTradePrice({sym:r.sym,source:EX()});
+  const initialRisk=Math.abs(indicative-stop),side=r.dir==='long'?1:-1;
+  const quoteRisk=side*(observed-stop);
+  const netCostPct=Math.max(.075,Number(n('fee'))||0)+.03;
+  if(!(observed>0&&initialRisk>0&&quoteRisk>0))return;
+  if(Math.abs(observed-indicative)>Math.min(indicative*.001,initialRisk*.15))return;
+  if(netCostPct/(quoteRisk/observed*100)>.25)return;
   liveSuggestions.unshift({key,strategyVersion:UnifiedStrategy.activeStrategy,
     ck,at:Date.now(),sym:r.sym,dir:r.dir,source:EX(),
     entry:r.plan.en,stop:r.plan.stop,tp:r.plan.tp2,
