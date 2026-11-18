@@ -551,9 +551,9 @@ async function scan(){
     // More workers overlap network latency; request pacing remains centralized.
     await pool(list,async x=>{
  const s=x.symbol,r=res[s];
- const [hourly,five]=await Promise.all([K(s,'1h',90),K(s,'5m',190)]);
+ const [one,five]=await Promise.all([K(s,'1m',200),K(s,'5m',110)]);
  const settings={
-  bars1h:onlyClosed(hourly,'1h'),bars5:onlyClosed(five,'5m'),
+  bars1:onlyClosed(one,'1m'),bars5:onlyClosed(five,'5m'),
   mark:M[s].p,account:n('acct'),risk:n('risk')
  };
  const signal=UnifiedStrategy.evaluate(settings);
@@ -620,14 +620,15 @@ function registerConfirmedTrade(r){
   const risk=side*(observed-p.stop);
   if(!(risk>0))return false;
   p.en=observed;p.sp=risk/observed*100;
-  p.tp1=observed+side*3*risk;p.tp2=p.tp1;
+  const targetRR=Number(p.rr)===2?2:3;
+  p.tp1=observed+side*targetRR*risk;p.tp2=p.tp1;
   if(!key||st.trackedKeys[key]||
      Number(p.ck)<=simTradesClearEpoch)return false;
   if(![p.en,p.stop,p.tp2,p.sp].every(v=>Number.isFinite(v)&&v>0))return false;
   const direction=r.dir==='long'?1:-1;
   if(direction*(p.en-p.stop)<=0||direction*(p.tp2-p.en)<=0)return false;
   const rr=Math.abs(p.tp2-p.en)/Math.abs(p.en-p.stop);
-  if(!Number.isFinite(rr)||Math.abs(rr-3)>.01)return false;
+  if(!Number.isFinite(rr)||Math.abs(rr-targetRR)>.01)return false;
   // Do not create the same candle's signal twice, even if old stored data
   // predates this trackedKeys registry.
   if(st.open.some(t=>t.signalKey===key)||st.hist.some(t=>t.signalKey===key)){
@@ -664,9 +665,10 @@ function registerConfirmedTrade(r){
     signalKey:key,sym:r.sym,dir:r.dir,en:p.en,stop:p.stop,
     stop0:p.stop,tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,
     open:now,signalCandle:p.ck,source:EX(),
-    tp1h:false,targetMode:'fixed3r',profitLockStage:0,
+    tp1h:false,targetMode:p.targetMode||'fixed2r',profitLockStage:0,
+    maxHoldMinutes:p.targetMode==='fixed2r'?36:null,
     timeframe:p.timeframe||'1m',
-    confirmationMode:r.confirmationMode||'Trend-aligned 5m EMA pullback scalp',
+    confirmationMode:r.confirmationMode||'5m trend and closed 1m EMA21 pullback breakout',
     fvgZone:p.fvgZone||null,fvgFormedAt:p.fvgFormedAt||null,
     fvgFilledAt:p.fvgFilledAt||null,fvgVolumeRatio:p.fvgVolumeRatio??null,
     volumeDirection:p.volumeDirection||null,
@@ -683,7 +685,10 @@ function registerConfirmedTrade(r){
   return true;
 }
 function closeT(t,why,px,gross){
-  const net=gross-n('fee')/t.sp;
+  // Estimated 0.02% round-trip slippage for 1m study trades in addition
+  // to the configured simulated round-trip commission. Legacy unaffected.
+  const totalPct=n('fee')+(t.targetMode==='fixed2r'?.02:0);
+  const net=gross-totalPct/t.sp;
   st.hist.push({id:t.id,signalKey:t.signalKey||null,sym:t.sym,dir:t.dir,open:t.open,
     signalCandle:t.signalCandle||null,source:t.source||null,close:Date.now(),
     en:t.en,stop:t.stop0,tp:t.tp2,ex:px,r:net,pnl:net*t.r$,why,
@@ -706,6 +711,15 @@ function monitor(){
     const dir=t.dir==='long'?1:-1,unit=Math.abs(t.en-t.stop0);
     if(!(unit>0))continue;
     const currentR=(px-t.en)*dir/unit,extended=t.targetMode==='extended';
+    if(t.targetMode==='fixed2r'){
+      // New 1m historical study: 2R gross target and up-to-36m paper horizon.
+      // Stop checked first; no legacy profit-lock on the research trade.
+      if((px-t.stop)*dir<=0)closeT(t,'1m scalp stop-loss',px,currentR);
+      else if((px-t.tp2)*dir>=0)closeT(t,'1m scalp 2R target',px,currentR);
+      else if(Date.now()-t.open>=36*60000)
+        closeT(t,'1m scalp 36-minute research time exit',px,currentR);
+      continue;
+    }
     if(t.targetMode==='fixed3r'){
       if((px-t.stop)*dir<=0){
         closeT(t,t.profitLockStage>0?'Profit-lock stop reached (stage '+t.profitLockStage+')':'Stop loss hit',px,currentR);
