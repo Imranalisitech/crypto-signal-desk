@@ -609,8 +609,9 @@ function registerConfirmedTrade(r){
   if(r.status!=='confirm'||!r.plan)return false;
   const key=signalKey(r),p={...r.plan};
   const observed=quotedTradePrice({sym:r.sym,source:EX()}),base=p.en,side=r.dir==='long'?1:-1;
-  if(!(observed>0)||Math.abs(observed-base)>Math.max(base*.005,
-    Math.abs((p.fvgZone?.high||base)-(p.fvgZone?.low||base))*1.5))return false;
+  // Do not simulate a scalp at a quote that already moved well past entry.
+  if(!(observed>0)||Math.abs(observed-base)>
+    Math.max(base*.0015,Number(p.atr14||0)*.15))return false;
   const risk=side*(observed-p.stop);
   if(!(risk>0))return false;
   p.en=observed;p.sp=risk/observed*100;
@@ -627,10 +628,32 @@ function registerConfirmedTrade(r){
   if(st.open.some(t=>t.signalKey===key)||st.hist.some(t=>t.signalKey===key)){
     st.trackedKeys[key]=Date.now();save();return false;
   }
-  // Never start a second overlapping simulated position for the same coin and side.
-  // This affects only browser simulations; never touches actual exchange orders.
-  if(st.open.some(t=>t.sym===r.sym&&t.dir===r.dir))return false;
+  // Portfolio-quality gate for NEW browser simulations only. Existing trades
+  // and history remain unchanged; no real Binance orders can be sent here.
+  if(!(Number(r.vol)>=10_000_000)){
+    r.reason='Technical setup confirmed, but 24h turnover below $10m entry-quality floor';
+    return false;
+  }
+  // At most 4 current-strategy simulated positions, 2 per direction;
+  // prevent overlaps across all strategy versions for the same symbol.
+  const currentOpen=st.open.filter(t=>t.strategyVersion===UnifiedStrategy.activeStrategy);
+  if(currentOpen.length>=4){
+    r.reason='Technical setup confirmed; 4-simulation portfolio limit reached';
+    return false;
+  }
+  if(currentOpen.filter(t=>t.dir===r.dir).length>=2){
+    r.reason='Technical setup confirmed; 2 per-direction simulation limit reached';
+    return false;
+  }
+  if(st.open.some(t=>t.sym===r.sym)){
+    r.reason='Technical setup confirmed; coin already tracked in open simulation';
+    return false;
+  }
   const now=Date.now();
+  if(st.hist.some(t=>t.sym===r.sym&&Number(t.close)>now-45*60000)){
+    r.reason='Technical setup confirmed; 45-minute cooldown after prior closing';
+    return false;
+  }
   const track={
     id:now+'-'+Math.random().toString(36).slice(2,8),
     signalKey:key,sym:r.sym,dir:r.dir,en:p.en,stop:p.stop,
@@ -981,9 +1004,11 @@ function render(){
   // Every processed coin belongs to the live monitoring table.
   // A scanned coin is NOT automatically a qualified trade.
   for(const r of L)if(r.sym)watchBySym.set(r.sym,r);
-  // Sort current strategy scores first; older Windows scores stay unverified.
-  const watchRank=r=>r.verifiedStrategy===false||r.status==='unverified'?-1:
-    Number.isFinite(Number(r.score))?Math.max(0,Math.min(100,Number(r.score))):-1;
+  // Sort current V2 scalp scores first; older Windows scores remain unverified.
+  const watchRank=r=>r.verifiedStrategy===false||r.status==='unverified'||
+    (r.strategyVersion&&r.strategyVersion!==UnifiedStrategy.activeStrategy)?-1:
+    r.score!=null&&Number.isFinite(Number(r.score))?
+      Math.max(0,Math.min(100,Number(r.score))):-1;
   const wlAll=[...watchBySym.values()].sort((a,b)=>
     watchRank(b)-watchRank(a)||
     (b.status==='confirm'?1:0)-(a.status==='confirm'?1:0)||
