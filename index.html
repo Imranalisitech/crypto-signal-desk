@@ -434,7 +434,7 @@ if(!st.pending||typeof st.pending!=='object'||Array.isArray(st.pending))st.pendi
 if(!st.trackedKeys||typeof st.trackedKeys!=='object'||Array.isArray(st.trackedKeys))st.trackedKeys={};
 const save=()=>{if(remoteMode)return;try{localStorage.setItem('crypto_only_one_minute_ema20_50_sim_v1',JSON.stringify(st))}catch(e){}};
 // Persistent browser candidate history. Store only bounded, serializable scan fields.
-const WATCH_STORE='crypto_only_one_minute_ema20_50_watch_v1';
+const WATCH_STORE='crypto_only_one_minute_ema20_50_quality_v2_watch';
 const watchMemory=Object.create(null);
 let scanCursor=0;
 try{
@@ -482,7 +482,7 @@ try{
    typeof Notification!=='undefined'&&Notification.permission==='granted';
  if(notif)$('alert').textContent='Alerts on';
 }catch(_){} 
-const SUGGEST_STORE='crypto_only_one_minute_ema20_50_suggestions_v1';
+const SUGGEST_STORE='crypto_only_one_minute_ema20_50_quality_v2_suggestions';
 let liveSuggestions=[];
 try{
  const old=JSON.parse(localStorage.getItem(SUGGEST_STORE)||'[]');
@@ -657,12 +657,35 @@ function registerConfirmedTrade(r){
   if(r.status!=='confirm'||!r.plan)return false;
   const key=signalKey(r),p={...r.plan};
   const observed=quotedTradePrice({sym:r.sym,source:EX()}),base=p.en,side=r.dir==='long'?1:-1;
-  // Do not simulate a scalp at a quote that already moved well past entry.
-  if(!(observed>0)||Math.abs(observed-base)>
-    Math.max(base*.0015,Number(p.atr14||0)*.15))return false;
+  // Never fill a 1-minute breakout using a delayed quote or chase an entry.
+  // 500-market discovery can finish much later than the candle confirmation;
+  // these events stay in watchlist but do NOT become simulated positions.
+  const elapsedSinceClose=Date.now()-(Number(p.ck)+60000);
+  const stopRiskAtSignal=Math.abs(base-p.stop);
+  if(!(observed>0&&stopRiskAtSignal>0))return false;
+  if(!Number.isFinite(elapsedSinceClose)||elapsedSinceClose<0||
+     elapsedSinceClose>45000){
+    r.reason='Confirmed pattern too old for a 1m entry; quote not filled after 45 seconds';
+    return false;
+  }
+  if(Math.abs(observed-base)>Math.min(base*.001,stopRiskAtSignal*.15)){
+    r.reason='Entry skipped: live quote drift exceeds 0.10% of price or 15% of planned risk';
+    return false;
+  }
   const risk=side*(observed-p.stop);
   if(!(risk>0))return false;
   p.en=observed;p.sp=risk/observed*100;
+  // At tight 1m stops, round-trip costs can consume most of the risk budget.
+  // Use a conservative minimum fee assumption even if the UI is set lower;
+  // actual exchange fees, funding, spread and slippage may still be higher.
+  const assumedCostPct=Math.max(.075,Number(n('fee'))||0)+.03;
+  const estimatedCostR=assumedCostPct/p.sp;
+  if(!Number.isFinite(estimatedCostR)||estimatedCostR>.25){
+    r.reason='Entry skipped: estimated round-trip fees + slippage would consume '+
+      (Number.isFinite(estimatedCostR)?estimatedCostR.toFixed(2):'unknown')+
+      'R (>0.25R quality limit)';
+    return false;
+  }
   const targetRR=1.8; // sole active 1m EMA20/50 research strategy
   p.tp1=observed+side*targetRR*risk;p.tp2=p.tp1;
   if(!key||st.trackedKeys[key]||
@@ -708,6 +731,7 @@ function registerConfirmedTrade(r){
     signalKey:key,sym:r.sym,dir:r.dir,en:p.en,stop:p.stop,
     stop0:p.stop,tp1:p.tp2,tp2:p.tp2,sp:p.sp,r$:p.r$,
     open:now,signalCandle:p.ck,source:EX(),
+    estimatedCostR,entryDelayMs:elapsedSinceClose,
     tp1h:false,targetMode:'fixed1p8r',profitLockStage:0,
     maxHoldMinutes:45,
     timeframe:'1m',
@@ -1144,7 +1168,10 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
     const market=M[o.sym],px=quotedTradePrice(o);
     const sg=o.dir==='long'?1:-1,risk=Math.abs(o.en-o.stop0);
     const grossR=px!==null&&risk>0?(px-o.en)*sg/risk:null;
-    const feeRate=n('fee'),feeR=grossR!==null&&Number.isFinite(feeRate)&&o.sp>0?feeRate/o.sp:0;
+    const feeRate=n('fee');
+    const totalCostPct=Math.max(0,Number.isFinite(feeRate)?feeRate:0)+
+      (o.targetMode==='fixed1p8r'?.03:0);
+    const feeR=grossR!==null&&o.sp>0?totalCostPct/o.sp:0;
     const liveR=grossR===null?null:grossR-feeR;
     const budget=Number(o['r$']),estimatedPnl=liveR!==null&&Number.isFinite(budget)?liveR*budget:null;
     const quoteAge=px===null?null:Math.max(0,Math.floor((Date.now()-market.at)/1000));
