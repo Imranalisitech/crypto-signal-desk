@@ -639,7 +639,7 @@ function fire(r){
   if(notif&&typeof Notification!=='undefined'&&Notification.permission==='granted'){
     try{new Notification('1m '+r.dir.toUpperCase()+' paper setup: '+r.sym,{
       body:'Indicative entry '+fp(r.plan.en)+' | SL '+fp(r.plan.stop)+
-        ' | 2R TP '+fp(r.plan.tp2)+' | Research only, no real order'
+        ' | 1.8R TP '+fp(r.plan.tp2)+' | Research only, no real order'
     })}catch(e){}
   }
 }
@@ -981,7 +981,7 @@ function renderLiveSuggestions(){
         '</td><td class="mut">RSI '+f(x.RSI14,1)+' · Vol '+f(x.volumeRatio,2)+
         '× · Research signal only; net profitability not yet established · no real orders</td></tr>';
     }),
-    'No new 1-minute LONG or SHORT confirmations yet. Scanner watches 500 coins while this app is open.'
+    'No new 1-minute LONG or SHORT confirmations yet. The browser checks up to 500 markets per scan, but a full scan can take longer than one minute.'
   );
 }
 function render(){
@@ -1495,7 +1495,7 @@ function activateBrowserFallback(){
  render();startBrowserScanner();
 }
 $('useCurrentBrowserScanner').addEventListener('click',()=>{
- if(!window.confirm('Switch to the 5m trend + 1m EMA pullback research scanner? The existing Windows scanner will not be modified. Browser scans run only while this app stays open, and no real Binance orders will be placed.'))return;
+ if(!window.confirm('Use ONLY the new 1-minute EMA20/EMA50 pullback scanner? Previous scanner signals are excluded. Scanning runs only while this app stays open; no real Binance orders.'))return;
  try{localStorage.removeItem('cryptoLaptopActivated')}catch(_){}
  activateBrowserFallback();
 });
