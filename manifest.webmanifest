@@ -1,7 +1,7 @@
 {
-  "name": "Crypto Signal Desk — PDH/PDL Trading",
+  "name": "Crypto Signal Desk — Trend Pullback Scalper",
   "short_name": "Crypto Signal Desk",
-  "description": "Five-minute PDL long / PDH short sweep-reversal scanner with persistent watchlist, backup and secure real-trading setup.",
+  "description": "1-hour trend with 5-minute EMA21 pullback and RSI/ATR/volume confirmation. Persistent watchlist, simulation tracking and secure Binance connection workflow.",
   "start_url": "/?browser=1",
   "scope": "/",
   "display": "standalone",
