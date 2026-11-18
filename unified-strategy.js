@@ -1,6 +1,6 @@
 'use strict';
 /*
- Crypto Signal Desk — Adaptive Trend Pullback Scalper V1.
+ Crypto Signal Desk — Adaptive Trend Pullback Scalper V2 — quality-first research configuration.
  This is the ONLY trade-entry strategy. No PDL/PDH, FVG, liquidity-sweep,
  neckline, divergence or prior entry methods contribute to signal selection.
 
@@ -12,7 +12,7 @@
  The engine is signals-only: no authenticated real-money Binance orders.
 */
 (function(root){
- const VERSION='TREND_PULLBACK_SCALPER_5M_V1';
+ const VERSION='TREND_PULLBACK_SCALPER_5M_V2';
  const N=x=>Number(x);
  const valid=b=>b&&[b.t,b.o,b.h,b.l,b.c].every(x=>Number.isFinite(N(x)))&&
    N(b.l)>0&&N(b.h)>=Math.max(N(b.o),N(b.c),N(b.l))&&
@@ -84,39 +84,49 @@
    const result=side=>{
      const long=side==='long',sg=long?1:-1;
      const hTrend=long?
-       h21[k1]>h55[k1]&&hClose>h55[k1]&&hSlope>a1h*.015:
-       h21[k1]<h55[k1]&&hClose<h55[k1]&&hSlope<-a1h*.015;
+       h21[k1]>h55[k1]&&hClose>h21[k1]&&hSlope>a1h*.04:
+       h21[k1]<h55[k1]&&hClose<h21[k1]&&hSlope<-a1h*.04;
      const mTrend=long?
-       lastE9>lastE21&&emaSlope>-a5*.035&&price>lastE21:
-       lastE9<lastE21&&emaSlope<a5*.035&&price<lastE21;
+       lastE9>lastE21&&emaSlope>0&&price>lastE21:
+       lastE9<lastE21&&emaSlope<0&&price<lastE21;
+     // Avoid weak, flat EMA stacks where crossovers oscillate in a range.
+     const trendQuality=long?
+       h21[k1]-h55[k1]>=.35*a1h&&lastE9-lastE21>=.10*a5:
+       h55[k1]-h21[k1]>=.35*a1h&&lastE21-lastE9>=.10*a5;
      const volatile=a5/price>=.0007&&a5/price<=.03;
      let retest=-1;
-     for(let j=i-6;j<=i-1;j++){
+     for(let j=i-4;j<=i-1;j++){
        const b=f[j],basis=f21[j];
        if(long?
-          N(b.l)<=basis+.2*a5&&N(b.c)>=basis-.75*a5:
-          N(b.h)>=basis-.2*a5&&N(b.c)<=basis+.75*a5)
+          N(b.l)<=basis+.12*a5&&N(b.c)>=basis-.25*a5:
+          N(b.h)>=basis-.12*a5&&N(b.c)<=basis+.25*a5)
          retest=j;
      }
      const hadPullback=retest>=0;
      const candleBody=sg*(N(nowBar.c)-N(nowBar.o));
+     const candleRange=N(nowBar.h)-N(nowBar.l);
+     const closesStrong=candleRange>0&&(long?
+       (N(nowBar.h)-price)/candleRange<=.30:
+       (price-N(nowBar.l))/candleRange<=.30);
      const breakout=long?
-       price>N(f[i-1].h)&&price>lastE9:
-       price<N(f[i-1].l)&&price<lastE9;
-     const candleConfirm=fresh&&breakout&&candleBody>=.25*a5;
-     const goodRsi=long?momentum>=51&&momentum<=74:
-                         momentum>=26&&momentum<=49;
-     const goodVolume=volAvailable&&volumeRatio>=.9;
-     const notExtended=long?(price-lastE21)/a5<=1.5:
-                             (lastE21-price)/a5<=1.5;
+       price>N(f[i-1].h)+.03*a5&&price>lastE9:
+       price<N(f[i-1].l)-.03*a5&&price<lastE9;
+     const candleConfirm=fresh&&breakout&&closesStrong&&
+       candleBody>=.4*a5&&candleBody<=1.8*a5;
+     const goodRsi=long?momentum>=53&&momentum<=70:
+                         momentum>=30&&momentum<=47;
+     const goodVolume=volAvailable&&volumeRatio>=1.15;
+     const notExtended=long?(price-lastE21)/a5<=1.25:
+                             (lastE21-price)/a5<=1.25;
      const checks=[
-       {ok:hTrend,t:'1h EMA21/EMA55 trend and slope '+(long?'bullish':'bearish'),weight:25},
-       {ok:mTrend,t:'5m EMA9/EMA21 alignment',weight:15},
+       {ok:hTrend,t:'1h EMA21/EMA55 directional trend and slope',weight:20},
+       {ok:mTrend,t:'5m EMA9/EMA21 alignment and positive/negative slope',weight:15},
+       {ok:trendQuality,t:'EMA separation confirms trend, not a flat market',weight:10},
        {ok:volatile,t:'5m ATR in tradable volatility range',weight:10},
-       {ok:hadPullback,t:'Recent 5m pullback to EMA21',weight:20},
-       {ok:candleConfirm,t:'Fresh closed 5m candle breaks prior candle high/low with strong body',weight:15},
-       {ok:goodRsi&&notExtended,t:'RSI14 momentum and not overextended',weight:10},
-       {ok:goodVolume,t:'Confirmation volume at least 90% of prior 20-candle mean',weight:5}
+       {ok:hadPullback,t:'Recent controlled 5m pullback to EMA21',weight:15},
+       {ok:candleConfirm,t:'Fresh closed 5m breakout with strong close',weight:15},
+       {ok:goodRsi&&notExtended,t:'RSI14 momentum without chasing',weight:10},
+       {ok:goodVolume,t:'Relative volume at least 1.15× prior 20 candles',weight:5}
      ];
      const score=checks.reduce((sum,x)=>sum+(x.ok?x.weight:0),0);
      const all=checks.every(x=>x.ok);
@@ -126,7 +136,7 @@
        const stop=long?Math.min(...lows)-.18*a5:Math.max(...highs)+.18*a5;
        const stopDistance=sg*(price-stop),stopFraction=stopDistance/price;
        // Don't select orders whose stops are excessively tight (fees) or wide.
-       if(stopDistance>0&&stopFraction>=.0025&&stopFraction<=.025){
+       if(stopDistance>0&&stopFraction>=.0025&&stopFraction<=.018){
          const tp=price+sg*3*stopDistance;
          plan={en:price,stop,tp1:tp,tp2:tp,rr:3,sp:stopFraction*100,
            'r$':Math.max(0,N(account)*N(risk)/100),
