@@ -215,7 +215,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
   <section><h2>Confirmed SHORT <small id="ns"></small></h2><div class="cards" id="cs"></div></section>
 </div>
 
-<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist updates after each coin scan and ranks setups by 5-minute PDL/PDH sweep, FVG and exact neckline-retest progress.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
+<section><h2>Watchlist <small>Open coin charts in TradingView</small></h2><p class="mut" style="font-size:12.5px;margin:0 0 8px">Watchlist tracks new scalping candidates across scans, ranked by current technical confirmation score.</p><div class="watch-tools"><input id="watchSearch" type="search" placeholder="Search watchlist coin (e.g. BTC, XMR)"><small id="watchCount">50 coins per batch · scroll for more</small></div><div class="tw" id="wl"></div></section>
 
 <section id="realBinancePanel" class="paper-panel" hidden style="border-color:#d76262;background:linear-gradient(120deg,#321b24,#1d2736)">
  <div class="paper-heading">
@@ -722,17 +722,18 @@ function card(r){
  const p=r.plan||{},key=signalKey(r);
  const tracking=st.open.some(x=>x.signalKey===key);
  const recorded=st.hist.some(x=>x.signalKey===key);
- const fv=r.fvg||{};
+ const setup=r.setup||{},regime=r.regime||{};
  const checks=[
   ['Entry',fp(p.en)],['SL ('+f(p.sp,2)+'%)',fp(p.stop)],
   ['Final TP (3R)',fp(p.tp2)],['Target R:R','1 : 3'],
-  ['Previous-day level',fp(p.previousDayLevel)],
-  ['Neckline',fp(p.neckline)],
-  ['Sweep',r.liquidity?.sweepTime?'Confirmed':'Pending'],
-  ['Three-candle FVG',fv.formed?fp(fv.low)+' – '+fp(fv.high):'Pending'],
-  ['Exact neckline retest',fv.filled?'Confirmed':'Pending'],
-  ['Entry confirmation','Second CLOSED 5m candle'],
-  ['Execution','Signal tracking only · real orders disabled']
+  ['1h trend',String(regime.trend||'Unknown').toUpperCase()],
+  ['1h EMA21 / EMA55',fp(regime.hourly21)+' / '+fp(regime.hourly55)],
+  ['5m EMA9 / EMA21',fp(setup.ema9)+' / '+fp(setup.ema21)],
+  ['5m RSI14',f(setup.rsi14,1)],
+  ['5m volume ratio',f(setup.volumeRatio,2)+'×'],
+  ['EMA21 pullback',setup.pullbackReady?'Confirmed':'Pending'],
+  ['Trigger candle','Closed 5m'],
+  ['Execution','Simulated tracking · real orders disabled']
  ];
  return '<div class="card '+r.dir+'" data-a="chart" data-s="'+r.sym+
   '" role="button" tabindex="0"><div class="ch"><button class="coin-chart" type="button" data-a="chart" data-s="'+r.sym+'">'+
@@ -844,30 +845,29 @@ function renderScanInspector(){
     const priceCell=Number.isFinite(livePrice)&&livePrice>0?fp(livePrice):
       Number.isFinite(storedPrice)&&storedPrice>0?
         '<span title="Last analyzed price — NOT live">'+fp(storedPrice)+' (saved)</span>':'—';
-    const jha=r.status==='confirm'?'Exact neckline retest + second close confirmed':
-      r.fvg?.filled?'Retest completed, waiting for confirming close':
-      r.fvg?.formed?'FVG formed, waiting for exact neckline retest':
-      r.liquidity?.ok?'Sweep completed, waiting for neckline breakout':
-      'Waiting for approved price-action setup';
+    const jha=r.status==='confirm'?'Trend-aligned scalp confirmed on closed 5m':
+      r.setup?.candleConfirmed?'5m trigger detected; additional filters pending':
+      r.setup?.pullbackReady?'5m pullback detected; waiting for confirmation':
+      r.regime?.trend&&r.regime.trend!=='not aligned'?'1h trend aligned, waiting for 5m setup':
+      'Awaiting 1h trend and 5m pullback';
     return '<tr><td>'+link+'</td><td>'+safe(r.dir||'—')+'</td><td>'+
       priceCell+'</td><td>'+safe(c.name||'—')+
-      '</td><td>'+safe(r.liquidity?.day?.high!=null?fp(r.liquidity.day.high):'—')+
-      '</td><td>'+safe(r.liquidity?.day?.low!=null?fp(r.liquidity.day.low):'—')+
+      '</td><td>'+safe(r.regime?.trend||'—')+
+      '</td><td>'+safe(r.setup?.rsi14!=null?f(r.setup.rsi14,1):'—')+
       '</td><td>'+safe(jha)+'</td>'+
       '<td>'+(Number.isFinite(r.score)?f(r.score,0):'—')+
       '</td><td>'+status+'</td><td class="mut">'+reason+'</td></tr>';
   });
   const scroll=$('scanCoinTable').scrollTop;
   $('scanCoinTable').innerHTML=tbl(
-    ['Coin','Side','Price','Final candle','Prev day high','Prev day low','FVG + volume stage','Score','Result','Analysis / reason'],rows,
+    ['Coin','Side','Price','Final candle','1h trend','5m RSI14','5m scalp stage','Score','Result','Analysis / reason'],rows,
     running?'Scan in progress; previous results remain visible until analysis completes.':
     'No stored coin results yet. Check the scanner diagnostics above.');
   $('scanCoinTable').scrollTop=scroll;
   const recent=Array.isArray(meta.scanRecent)?meta.scanRecent.slice(0,4):[];
   $('scanHelp').textContent=(running?'Current scan is processing markets. ':'')+
-    'PDL LONG / PDH SHORT sweep and reclaim, 5m accumulation, manipulation, reversal FVG and at least half-gap fill and a CLOSED 5m price return with volume confirm a simulated trade. No 25% TP-distance waiting rule. '+
-    'LONG and SHORT require retest-candle volume > 1.10× preceding 5 one-minute candles. This does not prove institutional buying or selling. '+
-    'Signals remain SIMULATED ONLY; SL beyond manipulation wick and TP fixed at 3R.'+
+    'Only fresh, closed-candle signals from the current scalping engine may be confirmed. '+
+    'The strategy uses 1-hour and 5-minute market data. Entries and 3R stops/targets are simulated; no real Binance orders are placed.'+
     (recent.length?' · Recently scanned: '+recent.map(x=>x.sym).join(', '):'');
 }
 function render(){
