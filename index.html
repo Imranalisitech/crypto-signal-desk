@@ -1010,8 +1010,20 @@ $('watchCount').textContent=wl.length+' of '+wlAll.filter(r=>r.sym.toLowerCase()
  $('wl').scrollTop=watchScroll;
   // Open and closed simulated trades share one table; only closed rows
   // count toward win rate / realized P&L.
-  const H=st.hist,w=H.filter(x=>x.r>0),lo=H.filter(x=>x.r<=0),tr=H.reduce((a,x)=>a+x.r,0),gl=Math.abs(lo.reduce((a,x)=>a+x.r,0));
-  $('stats').innerHTML=[['Total shown',st.open.length+H.length],['Closed results',H.length],['Auto-tracked open',st.open.length],['Win rate',H.length?f(w.length/H.length*100,0)+'%':'–'],['Total R',f(tr)],['Total P&L','$'+f(H.reduce((a,x)=>a+x.pnl,0))],['Avg R',H.length?f(tr/H.length):'–'],['Profit factor',gl?f(w.reduce((a,x)=>a+x.r,0)/gl):'–']].map(x=>`<span>${x[0]}: <b>${x[1]}</b></span>`).join('');
+  const H=st.hist,active=H.filter(x=>x.strategyVersion===UnifiedStrategy.activeStrategy);
+  const win=active.filter(x=>x.r>0),loss=active.filter(x=>x.r<=0);
+  const tr=active.reduce((sum,x)=>sum+x.r,0);
+  const gl=Math.abs(loss.reduce((sum,x)=>sum+x.r,0));
+  const activeOpen=st.open.filter(x=>x.strategyVersion===UnifiedStrategy.activeStrategy).length;
+  const archived=(H.length-active.length)+(st.open.length-activeOpen);
+  $('stats').innerHTML=[
+    ['New strategy open',activeOpen],['New strategy closed',active.length],
+    ['New strategy win rate',active.length?f(win.length/active.length*100,0)+'%':'–'],
+    ['New strategy total R',f(tr)],
+    ['New strategy P&L','$'+f(active.reduce((sum,x)=>sum+x.pnl,0))],
+    ['Profit factor',gl?f(win.reduce((sum,x)=>sum+x.r,0)/gl):'–'],
+    ['Earlier-strategy records (preserved)',archived]
+  ].map(x=>`<span>${x[0]}: <b>${x[1]}</b></span>`).join('');
   $('allResults').hidden=H.length<=100;
   $('allResults').textContent=showAllHistory?'Show latest 100':'Show all '+H.length+' results';
   const openRows=[...st.open].sort((a,b)=>(b.open||0)-(a.open||0)).map(o=>{
