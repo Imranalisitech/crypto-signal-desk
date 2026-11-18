@@ -187,7 +187,7 @@ button.coin-chart{border:0;background:none;padding:0;border-bottom:1px dotted #9
 <div id="ban"></div>
 <div class="kpi" id="kpi"></div>
 <section id="scanInspector" class="scan-health">
- <div class="scan-top"><h2>Live market scanning & data</h2><span id="scanPhase" class="scan-tag">Loading scanner status</span><button type="button" id="useCurrentBrowserScanner" hidden>Run approved 5m neckline strategy in browser</button></div>
+ <div class="scan-top"><h2>Live market scanning & data</h2><span id="scanPhase" class="scan-tag">Loading scanner status</span><button type="button" id="useCurrentBrowserScanner" hidden>Run new scalping scanner in browser</button></div>
  <div id="scanDescription" class="scan-detail">Checking your laptop scanner...</div>
  <progress id="scanBar" max="1" value="0"></progress>
  <div class="scan-metrics" id="scanCounters"></div>
@@ -435,8 +435,16 @@ try{
  if(restored&&typeof restored==='object'&&!Array.isArray(restored)){
   scanCursor=Math.max(0,Number(restored.cursor)||0);
   for(const x of Array.isArray(restored.items)?restored.items:[]){
-   if(x&&/^[A-Z0-9]{2,24}USDT$/.test(x.sym)&&Number.isFinite(x.firstSeen))
-    watchMemory[x.sym]=x;
+   if(x&&/^[A-Z0-9]{2,24}USDT$/.test(x.sym)&&Number.isFinite(x.firstSeen)){
+     const current=x.strategyVersion===UnifiedStrategy.activeStrategy;
+     watchMemory[x.sym]=current?x:{
+       sym:x.sym,firstSeen:x.firstSeen,lastSeen:x.lastSeen,
+       lastScanAt:x.lastScanAt,status:'unverified',score:null,
+       ok:false,plan:null,checks:[],G:[],side:null,dir:null,
+       verifiedStrategy:false,
+       reason:'Earlier strategy watchlist entry; awaiting new scalping scan'
+     };
+   }
   }
  }
 }catch(_){}
@@ -451,8 +459,8 @@ function persistWatch(){
  const entries=Object.values(watchMemory).sort((a,b)=>(b.lastSeen||0)-(a.lastSeen||0)).slice(0,700);
  try{localStorage.setItem(WATCH_STORE,JSON.stringify({cursor:scanCursor,
   items:entries.map(x=>({sym:x.sym,status:x.status,side:x.side,dir:x.dir,
-   score:x.score,reason:x.reason,checks:x.checks,G:x.G,
-   liquidity:x.liquidity,fvg:x.fvg,plan:x.plan,trends:x.trends,
+   strategyVersion:x.strategyVersion,score:x.score,reason:x.reason,checks:x.checks,G:x.G,
+   regime:x.regime,setup:x.setup,plan:x.plan,
    firstSeen:x.firstSeen,lastSeen:x.lastSeen,lastScanAt:x.lastScanAt,
    previousDayLevel:x.previousDayLevel,previousDayHigh:x.previousDayHigh,
    previousDayLow:x.previousDayLow}))}))}catch(_){}
@@ -462,8 +470,11 @@ if(st.set.v!==4){st.set.v=4;st.set.topn=600;st.set.minvol=0;st.set.ex='bybit';sa
 IDS.forEach(i=>{if(st.set[i]!=null)$(i).value=st.set[i]});
 try{banUntil=+localStorage.getItem('ban_'+EX())||0}catch(e){}
 let R={},M={},audio=null,notif=false,busy=false,lastScan=null,err='',prog='';
-for(const item of Object.values(watchMemory))R[item.sym]={...item,status:'watch',
-  reason:'Awaiting fresh scan to verify previous watch candidate'};
+for(const item of Object.values(watchMemory))R[item.sym]={...item,
+  status:item.status==='unverified'?'unverified':'watch',
+  ok:false,plan:null,
+  reason:item.status==='unverified'?'Previous strategy; awaiting new scalp analysis':
+     'Awaiting new scalp analysis of saved candidate'};
 let watchLimit=50,watchQuery='',showAllHistory=false,scanMeta=null,scanQuery='',scanFilter='all',scanLimit=80;
 let historyClearEpoch=0,simTradesClearEpoch=0;
 try{
@@ -1280,7 +1291,7 @@ function adoptLaptop(snapshot,source,online,lastSeen){
  const allCutoff=simTradesClearEpoch;
  const strategyMatches=snapshot.strategyVersion===UnifiedStrategy.activeStrategy;
  // Maintain every processed coin in the dashboard between laptop scans.
- // Only the exact approved trend-filter strategy may yield actionable/confirmed signals.
+ // Only the currently deployed scalping engine may yield confirmed signals.
  for(const item of snapshot.results){
    if(!item||typeof item.sym!=='string'||!/^[A-Z0-9]{2,24}USDT$/.test(item.sym))continue;
    if(allCutoff&&Number(item.analyzedAt)<=allCutoff)continue;
@@ -1291,14 +1302,14 @@ function adoptLaptop(snapshot,source,online,lastSeen){
    }else{
      R[item.sym]={sym:item.sym,price:item.price,chg:item.chg,vol:item.vol,
        status:'unverified',side:null,dir:null,ok:false,score:null,checks:[],G:[],
-       plan:null,reason:'Scanned by older Windows strategy — approved neckline-only setup not evaluated',
+       plan:null,reason:'Scanned by an older Windows strategy — new scalping setup NOT evaluated',
        analyzedAt:item.analyzedAt,firstSeen:old?.firstSeen||Date.now(),
        lastSeen:Date.now(),verifiedStrategy:false};
    }
  }
  if(!strategyMatches){
    scanMeta={...snapshot,scanPhase:'UPDATE_REQUIRED',
-     scanMessage:'Windows scanner uses an older strategy. Coin rows remain visible, but only the approved neckline-only version may confirm trades.'};
+     scanMessage:'Windows scanner uses an older strategy. Coin rows remain visible but are NOT new scalping confirmations; use the current browser scanner.'};
  }
  M=snapshot.markets||{};
  st.open=snapshot.open.filter(item=>
@@ -1326,8 +1337,9 @@ function activateBrowserFallback(){
  browserFallbackActive=true;remoteMode=false;remoteSource='browser';
  remoteOnline=false;remoteMarketFresh=false;scanMeta=null;
  R={};M={};lastScan=null;err='';
- for(const item of Object.values(watchMemory))R[item.sym]={...item,status:'watch',
-   ok:false,plan:null,reason:'Previously watched; checking fresh 5m candles and higher-timeframe trends'};
+ for(const item of Object.values(watchMemory))R[item.sym]={...item,
+   status:item.status==='unverified'?'unverified':'watch',
+   ok:false,plan:null,reason:'Previously watched; checking new scalp setup'};
  // Never merge the Windows history into browser-only simulation.
  const localSettings=st.set||{},pins=Array.isArray(st.pins)?st.pins:[];
  try{
@@ -1343,7 +1355,7 @@ function activateBrowserFallback(){
  render();startBrowserScanner();
 }
 $('useCurrentBrowserScanner').addEventListener('click',()=>{
- if(!window.confirm('Switch to the approved 5-minute neckline-only scanner? The existing Windows scanner will not be modified. Browser scans run only while this app stays open, and no real Binance orders will be placed.'))return;
+ if(!window.confirm('Switch to the new 1h/5m trend-pullback scalping scanner? The existing Windows scanner will not be modified. Browser scans run only while this app stays open, and no real Binance orders will be placed.'))return;
  try{localStorage.removeItem('cryptoLaptopActivated')}catch(_){}
  activateBrowserFallback();
 });
