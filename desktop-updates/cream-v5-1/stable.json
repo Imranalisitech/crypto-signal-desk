@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "version": "2026.11.19.1",
+  "url": "https://raw.githubusercontent.com/Imranalisitech/crypto-signal-desk/main/desktop-updates/cream-v5-1/releases/2026.11.19.1.csdupdate.b64",
+  "sha256": "06bc2fc86e45c3b997779e256d0ce0fa9973cd86293194cc8dc1399fdf4deb9c",
+  "encoding": "base64",
+  "notes": "Cream V5.1: encrypted Windows API credential storage, retrying scanner, clearer confirmed-signal labels, observed and exchange-realized PNL statistics, clear closed records, compact strategy disclosures"
+}
