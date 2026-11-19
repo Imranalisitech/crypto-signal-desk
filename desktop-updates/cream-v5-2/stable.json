@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "version": "2026.11.19.3",
+  "url": "embedded",
+  "sha256": "66a935b9ffd61d68faa8362617258727c343c149a4fec189d1916cd2e07c3d2c",
+  "encoding": "embedded",
+  "notes": "V5.2 verified starter update bundled in the new EXE; VWAP/EMA9/21 1m/3m strategy and flexible candle gateway. Future strategy releases use owner GitHub feed approval."
+}
