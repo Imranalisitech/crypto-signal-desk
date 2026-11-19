@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "version": "2026.11.19.9",
+  "url": "https://raw.githubusercontent.com/Imranalisitech/crypto-signal-desk/main/desktop-updates/cream-v5-4/releases/2026.11.19.9.csdupdate.b64",
+  "sha256": "c3ed84066ce45752fb0b003d2230ebad2c474eea278102f78c0041049331a94d",
+  "encoding": "base64",
+  "notes": "V5.4 fixed Binance exchange-side stop and 3R TP, liquidity sweep RSI<30 long / RSI>80 short, first EMA9/21 pullback and volume confirmation; publisher Imran Ali"
+}
