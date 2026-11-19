@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "version": "2026.11.19.7",
+  "url": "https://raw.githubusercontent.com/Imranalisitech/crypto-signal-desk/main/desktop-updates/cream-v5-3/releases/2026.11.19.7.csdupdate.b64",
+  "sha256": "bf79d55bddf4baf8b525e92e08a8d7169fecf9c88a2ee15bd8da445344729b07",
+  "encoding": "base64",
+  "notes": "Cream V5.3 integrated auto-trading interface, session-only live authorisation, Binance conditional SL/3R TP status, recovery and 1m/3m VWAP/EMA9/21 strategy"
+}
