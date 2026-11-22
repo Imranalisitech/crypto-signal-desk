@@ -102,10 +102,10 @@ async function tickers(){
 }
 async function candles(sym,tf){
  if(ex==='bybit'){
-  const j=await json('https://api.bybit.com/v5/market/kline?category=linear&symbol='+encodeURIComponent(sym)+'&interval='+BYBIT[tf]+'&limit=130');
+  const j=await json('https://api.bybit.com/v5/market/kline?category=linear&symbol='+encodeURIComponent(sym)+'&interval='+BYBIT[tf]+'&limit=500');
   return j.result.list.map(x=>({t:+x[0],o:+x[1],h:+x[2],l:+x[3],c:+x[4],v:+x[5]})).reverse();
  }
- const j=await json(API+'/fapi/v1/klines?symbol='+encodeURIComponent(sym)+'&interval='+tf+'&limit=130');
+ const j=await json(API+'/fapi/v1/klines?symbol='+encodeURIComponent(sym)+'&interval='+tf+'&limit=500');
  return j.map(x=>({t:+x[0],o:+x[1],h:+x[2],l:+x[3],c:+x[4],v:+x[5]}));
 }
 function settle(s,prices){
@@ -130,7 +130,7 @@ function simulate(s,result,mark){
  if(s.keys[identifier]||s.open.some(x=>x.sym===result.sym))return;
  // Do not use a stale close as a hypothetical fill or chase beyond 15% of stop distance.
  const dist=Math.abs(p.entry-p.stop);
- if(Date.now()-(p.confirmedEnd||p.end)>Math.min(MINS[result.tf]*60000,6*3600000)||
+ if(Date.now()-(p.confirmedEnd||p.end)<0||Date.now()-(p.confirmedEnd||p.end)>Math.min(MINS[result.tf]*60000,6*3600000)||
     Math.abs(mark-p.entry)>dist*.15)return;
  const sign=result.side==='long'?1:-1;
  const signedRisk=sign*(mark-p.stop);
