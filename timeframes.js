@@ -9,7 +9,7 @@ const BYBIT={'1m':'1','3m':'3','5m':'5','15m':'15','30m':'30','1h':'60','4h':'24
 const API='https://crypto-signal-desk-market-data.onrender.com';
 const $=id=>document.getElementById(id), fmt=x=>Number.isFinite(+x)?Number(x).toLocaleString('en-US',{maximumFractionDigits:6}):'—';
 const safe=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const C36_VERIFIED=!!(C36&&C36.VERSION==='C36_DOCUMENTED_DOUBLE_CONFIRMATION_V1'); // Documented reconstruction; original binary cannot establish exact source equivalence.
+const C36_VERIFIED=false; // Original C36+ source cannot be verified against the owner's compiled executable. Do not run a substitute strategy.
 const blank=()=>({rows:{},open:[],closed:[],keys:{},lastScan:0,scanned:0,errors:0,status:'Not started',auto:true});
 let selected='15m',busy=false,markets=[],data={},nextAuto=Date.now()+300000,delay=ms=>new Promise(r=>setTimeout(r,ms));
 let ex='bybit';
@@ -143,7 +143,7 @@ function simulate(s,result,mark){
   target:mark+sign*3*signedRisk,riskUsd,mark,openedAt:Date.now(),basis:'next observed quote'});
 }
 function render(){
- const original=data[selected],s=C36_VERIFIED?original:{...original,rows:{},open:[],closed:[],scanned:0,lastScan:0,errors:0,status:'C36 module missing',auto:false},fmtTime=x=>x?new Date(x).toLocaleString():'—';
+ const original=data[selected],s=C36_VERIFIED?original:{...original,rows:{},open:[],closed:[],scanned:0,lastScan:0,errors:0,status:'Original C36+ detector required',auto:false},fmtTime=x=>x?new Date(x).toLocaleString():'—';
  $('tfTitle').textContent=selected;
  $('health').textContent=s.status;
  $('toggle').textContent='Auto scan: '+(s.auto?'on':'off');
@@ -211,18 +211,18 @@ TFS.forEach(tf=>{
    state.scanned=0;state.errors=0;state.lastScan=0;state.dataSchema=2;
    state.status='Ready — rescan with 500 candle history';
  }
- state.auto=C36_VERIFIED;
+ state.auto=false;
 });
 const tabs=$('tabs');
 TFS.forEach(tf=>{const b=document.createElement('button');b.dataset.tf=tf;b.textContent=tf;b.onclick=()=>{selected=tf;render();};tabs.appendChild(b);});
-$('scan').disabled=!C36_VERIFIED;$('scan').textContent='Scan selected timeframe';$('scan').onclick=scan;
+$('scan').disabled=true;$('scan').textContent='Awaiting exact C36+ engine';$('scan').onclick=scan;
 $('toggle').disabled=!C36_VERIFIED;$('toggle').onclick=()=>{data[selected].auto=!data[selected].auto;save();render();};
-$('clearClosed').disabled=!C36_VERIFIED;$('clearClosed').onclick=()=>{if(confirm('Clear only C36 reconstructed paper history for '+selected+'?')){data[selected].closed=[];save();render();}};
+$('clearClosed').disabled=true;$('clearClosed').onclick=()=>{if(confirm('Clear only C36 reconstructed paper history for '+selected+'?')){data[selected].closed=[];save();render();}};
 $('exchange').onchange=()=>{if(busy){$('exchange').value=ex;return;}ex=$('exchange').value;data={};load();save();render();};
 for(const id of ['limit','balance','risk']){$(id).addEventListener('change',()=>{try{localStorage.setItem('tf-setting-'+id,$(id).value);}catch(_){}});try{const saved=localStorage.getItem('tf-setting-'+id);if(saved!==null)$(id).value=saved;}catch(_){}}
 setInterval(()=>{if(C36_VERIFIED&&!busy&&!document.hidden&&data[selected].auto&&Date.now()>=nextAuto)scan();},12000);
-window.addEventListener('online',()=>{$('message').textContent='Connected. C36 research scanner available while page is open.';});
-$('message').textContent=C36_VERIFIED?'C36 documented-rule research ready. First setup → major sweep → same complete setup → simulated entry → 3R. Original Windows source equivalence unverified.':'C36 strategy module failed to load. Scanner remains disabled.';
+window.addEventListener('online',()=>{$('message').textContent='Connection restored. Scanning remains suspended until the original C36+ detector is integrated.';});
+$('message').textContent='Your supplied C36+ executable is the reference, but its compiled strategy cannot be verified against the browser reconstruction. Scanning suspended; saved research data preserved.';
 // Historical EMA research remains in localStorage, but is never shown as C36.
 save();render();
 })();
