@@ -206,7 +206,7 @@ TFS.forEach(tf=>{
  const state=data[tf];
  if(state.dataSchema!==2){
    for(const [sym,row] of Object.entries(state.rows||{})){
-     if(/Not enough completed candles|Only \\d+ completed .* candles available/i.test(row?.reason||''))delete state.rows[sym];
+     if(/Not enough completed candles|Only \d+ completed .* candles available/i.test(row?.reason||''))delete state.rows[sym];
    }
    state.scanned=0;state.errors=0;state.lastScan=0;state.dataSchema=2;
    state.status='Ready — rescan with 500 candle history';
