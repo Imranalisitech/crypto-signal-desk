@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Crypto Signal Desk — Separate Timeframes</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,Segoe UI,sans-serif;background:#0d1725;color:#eaf1fa}
+*{box-sizing:border-box}body{margin:0;padding:18px;background:linear-gradient(150deg,#0d1725,#182c44);min-height:100vh}
+main{max-width:1300px;margin:auto}header{display:flex;gap:15px;justify-content:space-between;flex-wrap:wrap;align-items:center}
+h1{font-size:22px;margin:3px 0}h2{font-size:17px;margin-top:0}p,small{color:#b3c5d7}
+a{color:#a3d2ff}button,input,select{font:inherit;border-radius:8px;padding:9px;background:#14253a;color:white;border:1px solid #4c6686}
+button{cursor:pointer;background:linear-gradient(120deg,#226997,#684fa3)}button:disabled{opacity:.5;cursor:default}
+.tabs{display:flex;gap:7px;flex-wrap:wrap;margin:18px 0}.tabs button{min-width:65px}
+.tabs button.active{outline:2px solid #72e4bd;background:#155c64}
+.panel{background:#182a3e;border:1px solid #37536c;border-radius:13px;padding:15px;margin:12px 0}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px}
+.metrics div{background:#102135;border:1px solid #33516d;border-radius:9px;padding:10px}
+.metrics b{display:block;font-size:20px}.metrics small{display:block}
+.controls{display:flex;gap:9px;flex-wrap:wrap;align-items:end}.controls label{display:flex;flex-direction:column;gap:5px;font-size:12px;color:#b7c8d7}
+.controls input{width:125px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #344b62;white-space:nowrap}
+.scroller{overflow:auto;max-height:530px}.long{color:#5edab9}.short{color:#fa918e}.warn{color:#f0c476}.muted{color:#a9bccc}
+.tag{border:1px solid #50718b;padding:5px 9px;border-radius:7px;font-size:12px}
+.info{background:#132d3b;border-left:3px solid #50bfc1;padding:11px}
+</style></head><body><main>
+<header><div><h1>Crypto Signal Desk — Timeframe Workspaces</h1><small>Separate signals, simulated positions and histories for every candle interval</small></div><a href="/">← Original 1m dashboard</a></header>
+<div class="panel info">Independent research scanner. The existing 1m production dashboard has NOT been replaced. All trades on this page are <b>simulated</b>. Real orders are disabled for every timeframe until separately validated and authorized. Scanning runs only while this page is open.</div>
+<nav class="tabs" id="tabs" aria-label="Timeframe"></nav>
+<div class="panel"><div class="controls"><label>Exchange data<select id="exchange"><option value="binance">Binance Futures (via Render proxy)</option><option value="bybit">Bybit linear futures</option></select></label>
+<label>Markets per scan<input type="number" id="limit" min="1" max="500" value="40"></label>
+<label>Simulation balance (USD)<input id="balance" type="number" min="1" value="2000"></label>
+<label>Risk per trade (%)<input id="risk" type="number" min="0.01" max="100" step="0.1" value="0.5"></label>
+<button id="scan">Scan selected timeframe</button><button id="toggle">Auto scan: on</button><button id="clearClosed">Clear closed history</button></div>
+<p id="message" role="status">Ready. Select a timeframe to view its independent data.</p></div>
+<div class="metrics" id="metrics"></div>
+<div class="panel"><h2>Signal research — <span id="tfTitle"></span> <span class="tag" id="health">Not started</span></h2>
+<p class="muted">EMA20/50 pullback research adapted to closed candles of the chosen timeframe, with RSI14, ATR14, volume and breakout confirmation. Longer intervals use their own candle boundaries, not copied 1-minute timing. The previously requested PDH/PDL + sweep + FVG + neckline model is NOT represented by these EMA signals.</p>
+<div class="scroller"><table><thead><tr><th>Symbol</th><th>Direction</th><th>State</th><th>Score</th><th>Latest close</th><th>Entry</th><th>SL</th><th>TP 1.8R</th><th>Reason</th></tr></thead><tbody id="results"></tbody></table></div></div>
+<div class="panel"><h2>Simulation positions</h2><div class="scroller"><table><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Stop</th><th>Target</th><th>R (mark)</th><th>PnL USD</th></tr></thead><tbody id="positions"></tbody></table></div></div>
+<div class="panel"><h2>Closed simulation history</h2><div class="scroller"><table><thead><tr><th>Closed</th><th>Symbol</th><th>Side</th><th>Exit</th><th>Reason</th><th>R</th><th>PnL USD</th></tr></thead><tbody id="history"></tbody></table></div></div>
+<div class="panel"><h2>Real-trading authorization</h2><p>Disabled across all timeframes. This research page contains no exchange account keys, signing code or order placement endpoints. A separate, explicitly authorized and tested execution service is required before any live entry can be enabled.</p><button disabled>Live orders disabled — not authorized</button></div>
+</main><script src="timeframes.js"></script></body></html>
