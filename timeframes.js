@@ -167,6 +167,7 @@ async function scan(){
  const tf=selected,s=data[tf];
  busy=true;$('scan').disabled=true;s.status='Scanning';s.errors=0;render();
  const count=Math.min(500,Math.max(1,Math.trunc(Number($('limit').value)||40)));
+ s.rows={}; // Do not show prior-run results as if re-evaluated with new candles.
  try{
   const t=await tickers();const list=t.filter(x=>x.price>0&&x.vol>0).sort((a,b)=>b.vol-a.vol).slice(0,count);
   const priceMap=Object.fromEntries(t.map(x=>[x.sym,x.price]));settle(s,priceMap);
@@ -180,13 +181,13 @@ async function scan(){
      const awaitedClosedBars=await candles(item.sym,tf);
      const r=C36.evaluate({bars:awaitedClosedBars,tf,sym:item.sym});s.rows[item.sym]=r;
      if(r.plan)simulate(s,r,item.price);
-    }catch(err){s.errors++;s.rows[item.sym]={sym:item.sym,side:'—',status:'error',score:0,price:item.price,reason:String(err.message||err).slice(0,130)};}
+    }catch(err){s.errors++;s.rows[item.sym]={sym:item.sym,side:'—',status:'error',score:0,price:item.price,reason:'Data request failed: '+String(err.message||err).slice(0,120)};}
     done++;s.scanned=done;
     if(done%5===0){$('message').textContent=tf+': '+done+'/'+list.length+' markets processed; errors '+s.errors;render();}
     if(ex==='binance')await delay(400);
    }
   }));
-  s.status=s.errors===list.length?'Failed':s.errors?'Completed with errors':'Completed';
+  s.status=s.errors===list.length?'Failed':s.errors?'Completed with data errors':'Completed';
   s.lastScan=Date.now();nextAuto=Date.now()+300000;
   $('message').textContent=tf+': '+done+' market(s) evaluated on completed '+tf+' candles; '+s.errors+' error(s).';
  }catch(err){s.status='Failed';s.errors++;$('message').textContent='Scan failed: '+String(err.message||err);}
@@ -197,7 +198,21 @@ async function scan(){
 // Saved results are left intact for forensic/backtest comparison.
 $('exchange').value=ex;
 load();
-TFS.forEach(tf=>{const prior=data[tf];if(prior?.version!==C36?.VERSION){data[tf]=blank();data[tf].version=C36?.VERSION;}data[tf].auto=C36_VERIFIED;data[tf].status=C36_VERIFIED?'Ready — reconstructed research':'C36 module unavailable';});
+TFS.forEach(tf=>{
+ const prior=data[tf];
+ if(prior?.version!==C36?.VERSION){data[tf]=blank();data[tf].version=C36?.VERSION;}
+ // Invalidate only results from the known 130-candle defect; preserve
+ // user simulations, closed history and deduplication keys.
+ const state=data[tf];
+ if(state.dataSchema!==2){
+   for(const [sym,row] of Object.entries(state.rows||{})){
+     if(/Not enough completed candles|Only \\d+ completed .* candles available/i.test(row?.reason||''))delete state.rows[sym];
+   }
+   state.scanned=0;state.errors=0;state.lastScan=0;state.dataSchema=2;
+   state.status='Ready — rescan with 500 candle history';
+ }
+ state.auto=C36_VERIFIED;
+});
 const tabs=$('tabs');
 TFS.forEach(tf=>{const b=document.createElement('button');b.dataset.tf=tf;b.textContent=tf;b.onclick=()=>{selected=tf;render();};tabs.appendChild(b);});
 $('scan').disabled=!C36_VERIFIED;$('scan').textContent='Scan selected timeframe';$('scan').onclick=scan;
@@ -209,5 +224,5 @@ setInterval(()=>{if(C36_VERIFIED&&!busy&&!document.hidden&&data[selected].auto&&
 window.addEventListener('online',()=>{$('message').textContent='Connected. C36 research scanner available while page is open.';});
 $('message').textContent=C36_VERIFIED?'C36 documented-rule research ready. First setup → major sweep → same complete setup → simulated entry → 3R. Original Windows source equivalence unverified.':'C36 strategy module failed to load. Scanner remains disabled.';
 // Historical EMA research remains in localStorage, but is never shown as C36.
-render();
+save();render();
 })();
