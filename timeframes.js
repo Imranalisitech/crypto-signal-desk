@@ -189,15 +189,21 @@ async function scan(){
  }catch(err){s.status='Failed';s.errors++;$('message').textContent='Scan failed: '+String(err.message||err);}
  finally{busy=false;$('scan').disabled=false;save();render();}
 }
+// Until the original C36 complete-confirmation source is available, do not
+// run the unrelated EMA research detector or open misleading paper positions.
+// Saved results are left intact for forensic/backtest comparison.
 load();
+TFS.forEach(tf=>{data[tf].auto=false;data[tf].status='C36 scanner not verified';});
 const tabs=$('tabs');
 TFS.forEach(tf=>{const b=document.createElement('button');b.dataset.tf=tf;b.textContent=tf;b.onclick=()=>{selected=tf;render();};tabs.appendChild(b);});
-$('scan').onclick=scan;
-$('toggle').onclick=()=>{data[selected].auto=!data[selected].auto;save();render();};
+$('scan').disabled=true;$('scan').textContent='C36 scanner awaiting verification';$('scan').onclick=()=>{};
+$('toggle').disabled=true;$('toggle').onclick=()=>{};
 $('clearClosed').onclick=()=>{if(confirm('Delete ONLY the '+selected+' closed SIMULATION history?')){data[selected].closed=[];save();render();}};
 $('exchange').onchange=()=>{if(busy){$('exchange').value=ex;return;}ex=$('exchange').value;data={};load();save();render();};
 for(const id of ['limit','balance','risk']){$(id).addEventListener('change',()=>{try{localStorage.setItem('tf-setting-'+id,$(id).value);}catch(_){}});try{const saved=localStorage.getItem('tf-setting-'+id);if(saved!==null)$(id).value=saved;}catch(_){}}
-setInterval(()=>{if(!busy&&data[selected].auto&&Date.now()>=nextAuto&&!document.hidden)scan();},12000);
+// Automated scan suspended: no C36 engine verified.
 window.addEventListener('online',()=>{$('message').textContent='Connection restored; ready to scan.';});
+$('message').textContent='C36 required: first full confirmation → major structural sweep → same full confirmation → entry → 3R. Existing EMA results are archived, not current C36 signals.';
+TFS.forEach(tf=>{data[tf].rows={};data[tf].open=[];data[tf].closed=[];data[tf].scanned=0;});
 render();
 })();
