@@ -68,7 +68,7 @@
     b=closed(input?.bars||[],tf,now);
   const base={strategyVersion:VERSION,tf,sym,side:'—',status:'none',score:0,price:b.at(-1)?.c||null,
     reason:'Not enough completed candles',stage:0,plan:null,firstAt:null,sweepAt:null,secondAt:null,analyzedAt:now};
-  if(b.length<155)return base;
+  if(b.length<155)return {...base,status:'insufficient_history',reason:'Only '+b.length+' completed '+tf+' candles available; at least 155 required'};
   // Distinct consecutive candles are mandatory: gaps must not create artificial breakouts.
   if(!contiguous(b.slice(-Math.min(170,b.length)),tf))
    return {...base,status:'unverified',reason:'Missing candles in recent history'};
