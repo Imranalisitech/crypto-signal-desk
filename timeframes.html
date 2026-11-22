@@ -21,18 +21,18 @@ button{cursor:pointer;background:linear-gradient(120deg,#226997,#684fa3)}button:
 .info{background:#132d3b;border-left:3px solid #50bfc1;padding:11px}
 </style></head><body><main>
 <header><div><h1>Crypto Signal Desk — Timeframe Workspaces</h1><small>Separate signals, simulated positions and histories for every candle interval</small></div><a href="/">← Original 1m dashboard</a></header>
-<div class="panel info">Independent research scanner. The existing 1m production dashboard has NOT been replaced. All trades on this page are <b>simulated</b>. Real orders are disabled for every timeframe until separately validated and authorized. Scanning runs only while this page is open.</div>
+<div class="panel info"><b>C36 source verification pending:</b> the previously added EMA scanner is not your approved C36 double-confirmation strategy. Signals and simulations on this page are suspended until the original complete confirmation formula can be verified. No real orders are submitted.</div>
 <nav class="tabs" id="tabs" aria-label="Timeframe"></nav>
 <div class="panel"><div class="controls"><label>Exchange data<select id="exchange"><option value="binance">Binance Futures (via Render proxy)</option><option value="bybit">Bybit linear futures</option></select></label>
 <label>Markets per scan<input type="number" id="limit" min="1" max="500" value="40"></label>
 <label>Simulation balance (USD)<input id="balance" type="number" min="1" value="2000"></label>
 <label>Risk per trade (%)<input id="risk" type="number" min="0.01" max="100" step="0.1" value="0.5"></label>
-<button id="scan">Scan selected timeframe</button><button id="toggle">Auto scan: on</button><button id="clearClosed">Clear closed history</button></div>
+<button id="scan">Scan selected timeframe</button><button id="toggle">Auto scan: suspended</button><button id="clearClosed">Clear closed history</button></div>
 <p id="message" role="status">Ready. Select a timeframe to view its independent data.</p></div>
 <div class="metrics" id="metrics"></div>
 <div class="panel"><h2>Signal research — <span id="tfTitle"></span> <span class="tag" id="health">Not started</span></h2>
-<p class="muted">EMA20/50 pullback research adapted to closed candles of the chosen timeframe, with RSI14, ATR14, volume and breakout confirmation. Longer intervals use their own candle boundaries, not copied 1-minute timing. The previously requested PDH/PDL + sweep + FVG + neckline model is NOT represented by these EMA signals.</p>
-<div class="scroller"><table><thead><tr><th>Symbol</th><th>Direction</th><th>State</th><th>Score</th><th>Latest close</th><th>Entry</th><th>SL</th><th>TP 1.8R</th><th>Reason</th></tr></thead><tbody id="results"></tbody></table></div></div>
+<p class="muted">Approved C36 sequence: first complete confirmation (provisional) → major structural liquidity sweep → identical complete confirmation again → entry after the second closed candle → stop beyond the sweep wick → 3R target. The original C36 source is required to verify all confirmation gates and prevent substitute EMA signals.</p>
+<div class="scroller"><table><thead><tr><th>Symbol</th><th>Direction</th><th>State</th><th>Score</th><th>Latest close</th><th>Entry</th><th>SL</th><th>TP 3R</th><th>Reason</th></tr></thead><tbody id="results"></tbody></table></div></div>
 <div class="panel"><h2>Simulation positions</h2><div class="scroller"><table><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Stop</th><th>Target</th><th>R (mark)</th><th>PnL USD</th></tr></thead><tbody id="positions"></tbody></table></div></div>
 <div class="panel"><h2>Closed simulation history</h2><div class="scroller"><table><thead><tr><th>Closed</th><th>Symbol</th><th>Side</th><th>Exit</th><th>Reason</th><th>R</th><th>PnL USD</th></tr></thead><tbody id="history"></tbody></table></div></div>
 <div class="panel"><h2>Real-trading authorization</h2><p>Disabled across all timeframes. This research page contains no exchange account keys, signing code or order placement endpoints. A separate, explicitly authorized and tested execution service is required before any live entry can be enabled.</p><button disabled>Live orders disabled — not authorized</button></div>
