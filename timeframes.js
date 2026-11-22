@@ -12,7 +12,7 @@ const safe=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;
 const C36_VERIFIED=!!(C36&&C36.VERSION==='C36_DOCUMENTED_DOUBLE_CONFIRMATION_V1'); // Documented reconstruction; original binary cannot establish exact source equivalence.
 const blank=()=>({rows:{},open:[],closed:[],keys:{},lastScan:0,scanned:0,errors:0,status:'Not started',auto:true});
 let selected='15m',busy=false,markets=[],data={},nextAuto=Date.now()+300000,delay=ms=>new Promise(r=>setTimeout(r,ms));
-let ex='binance';
+let ex='bybit';
 function load(){
  try{const x=JSON.parse(localStorage.getItem('crypto_c36_multitf_research_v1')||'{}');if(x&&typeof x==='object')data=x;}catch(_){}
  TFS.forEach(tf=>{if(!data[tf]||!data[tf].rows)data[tf]=blank();});
@@ -195,6 +195,7 @@ async function scan(){
 // Until the original C36 complete-confirmation source is available, do not
 // run the unrelated EMA research detector or open misleading paper positions.
 // Saved results are left intact for forensic/backtest comparison.
+$('exchange').value=ex;
 load();
 TFS.forEach(tf=>{const prior=data[tf];if(prior?.version!==C36?.VERSION){data[tf]=blank();data[tf].version=C36?.VERSION;}data[tf].auto=C36_VERIFIED;data[tf].status=C36_VERIFIED?'Ready — reconstructed research':'C36 module unavailable';});
 const tabs=$('tabs');
