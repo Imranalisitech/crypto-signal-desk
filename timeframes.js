@@ -8,7 +8,8 @@ const BYBIT={'1m':'1','3m':'3','5m':'5','15m':'15','30m':'30','1h':'60','4h':'24
 const API='https://crypto-signal-desk-market-data.onrender.com';
 const $=id=>document.getElementById(id), fmt=x=>Number.isFinite(+x)?Number(x).toLocaleString('en-US',{maximumFractionDigits:6}):'—';
 const safe=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const blank=()=>({rows:{},open:[],closed:[],keys:{},lastScan:0,scanned:0,errors:0,status:'Not started',auto:true});
+const C36_VERIFIED=false; // Fail-closed until the original C36 detector is integrated and tested.
+const blank=()=>({rows:{},open:[],closed:[],keys:{},lastScan:0,scanned:0,errors:0,status:'Not started',auto:false});
 let selected='15m',busy=false,markets=[],data={},nextAuto=Date.now()+300000,delay=ms=>new Promise(r=>setTimeout(r,ms));
 let ex='binance';
 function load(){
@@ -141,7 +142,7 @@ function simulate(s,result,mark){
   target:mark+sign*1.8*signedRisk,riskUsd,mark,openedAt:Date.now(),basis:'next observed quote'});
 }
 function render(){
- const s=data[selected],fmtTime=x=>x?new Date(x).toLocaleString():'—';
+ const original=data[selected],s=C36_VERIFIED?original:{...original,rows:{},open:[],closed:[],scanned:0,lastScan:0,errors:0,status:'C36 source not verified',auto:false},fmtTime=x=>x?new Date(x).toLocaleString():'—';
  $('tfTitle').textContent=selected;
  $('health').textContent=s.status;
  $('toggle').textContent='Auto scan: '+(s.auto?'on':'off');
@@ -160,6 +161,7 @@ function render(){
  document.querySelectorAll('[data-tf]').forEach(x=>x.classList.toggle('active',x.dataset.tf===selected));
 }
 async function scan(){
+ if(!C36_VERIFIED){$('message').textContent='C36 scanning unavailable: original complete-confirmation source has not been verified.';return;}
  if(busy)return;
  const tf=selected,s=data[tf];
  busy=true;$('scan').disabled=true;s.status='Scanning';s.errors=0;render();
@@ -198,12 +200,12 @@ const tabs=$('tabs');
 TFS.forEach(tf=>{const b=document.createElement('button');b.dataset.tf=tf;b.textContent=tf;b.onclick=()=>{selected=tf;render();};tabs.appendChild(b);});
 $('scan').disabled=true;$('scan').textContent='C36 scanner awaiting verification';$('scan').onclick=()=>{};
 $('toggle').disabled=true;$('toggle').onclick=()=>{};
-$('clearClosed').onclick=()=>{if(confirm('Delete ONLY the '+selected+' closed SIMULATION history?')){data[selected].closed=[];save();render();}};
+$('clearClosed').disabled=true;$('clearClosed').title='Unavailable: archived EMA results are retained; no C36 simulations exist.';
 $('exchange').onchange=()=>{if(busy){$('exchange').value=ex;return;}ex=$('exchange').value;data={};load();save();render();};
 for(const id of ['limit','balance','risk']){$(id).addEventListener('change',()=>{try{localStorage.setItem('tf-setting-'+id,$(id).value);}catch(_){}});try{const saved=localStorage.getItem('tf-setting-'+id);if(saved!==null)$(id).value=saved;}catch(_){}}
 // Automated scan suspended: no C36 engine verified.
-window.addEventListener('online',()=>{$('message').textContent='Connection restored; ready to scan.';});
+window.addEventListener('online',()=>{$('message').textContent='Connection restored. C36 scan remains suspended pending exact source verification.';});
 $('message').textContent='C36 required: first full confirmation → major structural sweep → same full confirmation → entry → 3R. Existing EMA results are archived, not current C36 signals.';
-TFS.forEach(tf=>{data[tf].rows={};data[tf].open=[];data[tf].closed=[];data[tf].scanned=0;});
+// Historical EMA research remains in localStorage, but is never shown as C36.
 render();
 })();
